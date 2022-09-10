@@ -1,0 +1,4 @@
+# Exclude jupyter notebook checkpoints
+.ipynb_checkpoints
+# Exclude .DS_Store files
+.DS_Store*
