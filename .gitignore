@@ -2,3 +2,4 @@
 .ipynb_checkpoints
 # Exclude .DS_Store files
 .DS_Store*
+__pycache*
