@@ -65,12 +65,13 @@ def compute_phases(time, location, period, num_epochs, phase_tolerance, max_date
         
         if epochs < max_date:
             if ever_observable:
-                print('    OB'+str(i+1)+'   00', epochs, ' UT')         
+                print('   OB'+str(i+1).zfill(2)+'   00', epochs, ' UT')         
             else:
-                print('    OB'+str(i+1)+'   00', epochs, ' UT (not observable)')
-            j=1
+                print('   OB'+str(i+1).zfill(2)+'   00', epochs, ' UT (not observable)')
+            j=0
             next_phase = epochs + (j+1)*period*u.day
             while next_phase < max_date:
+                print(next_phase, max_date)
                 next_phase = epochs + (j+1)*period*u.day
                 next_phase_min = next_phase-tolerance
                 next_phase_max = next_phase+tolerance
@@ -81,4 +82,4 @@ def compute_phases(time, location, period, num_epochs, phase_tolerance, max_date
                 j+=1
             print('\n')           
         else:
-            print('    OB'+str(i+1) + ' beyond maximum date')
+            print('    OB'+str(i+1).zfill(2) + ' beyond maximum date')
