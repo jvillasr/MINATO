@@ -476,10 +476,10 @@ grid_res, result = [], []
 for lr in lrat:
     for heh in he2hrat:
         for T1 in teffA:
-            if T1 < 16:
-                for g1 in loggA:
-            else:
-                for g1 in [20, 22.5, 25, 27.5, 30]
+            # if T1 < 16:
+            #     for g1 in loggA:
+            # else:
+            #     for g1 in [20, 22.5, 25, 27.5, 30]
             for g1 in loggA:
                 for r1 in rotA:
                     for T2 in teffB:
