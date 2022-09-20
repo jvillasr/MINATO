@@ -63,7 +63,7 @@ class atm_fitting:
         #Iterate over all values in pivot table
         t0 = time.time()
         # rownum = 500000
-        rownum = 1460
+        # rownum = 1460
         v = df.values
         last_lr, last_he2h = None, None
         for row in range(df.shape[0]):
@@ -97,12 +97,11 @@ class atm_fitting:
                         print('last He/H: ', last_he2h)
                         spl_fluxA = self.He2H_ratio(dst_A_w_slc, spl_fluxA, 0.075, v[row, 1], usr_dicA)
                         # spl_fluxB = He2H_ratio(dst_B_x, spl_fluxB, 0.1, he2h, dicB)
-                        # print('por la chucha!!!!!!!!!!!!!!!!!!')
                         if last_he2h != None:
                             t2 = time.time()
-                            print('\n He/H ratio completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(v[row-1, 1]) +  '\n')
+                            print('   He/H ratio completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(v[row-1, 1]))
                     last_he2h = v[row, 1]
-                    # print('last He/H (2): ', last_he2h)
+
                     chi2A, chi2B, ndataA, ndataB = 0, 0, 0, 0
                     for i,line in enumerate(usr_dicB):
                         if line == 4102:
@@ -154,9 +153,12 @@ class atm_fitting:
         tf = time.time()
         print('Computation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
         # print(result_dic)
+        tf1 = time.time()
         output = pd.DataFrame.from_dict(result_dic)
         output = pd.concat([df, output], ignore_index=False, axis=1)
         print(output)
+        tf2 = time.time()
+        print('dataframe and created in: ' + str(timedelta(seconds=tf2-tf1)) + ' [s] \n')
         return output
 
 
@@ -308,11 +310,11 @@ class Spectra(atm_fitting):
 
 dsnt_A = '/Users/jaime/Science/KUL_postdoc/BBC/291/tomer/ADIS_lguess_K1K2=0.3_94.0_15.0_renorm.txt'
 dsnt_B = '/Users/jaime/Science/KUL_postdoc/BBC/291/tomer/BDIS_lguess_K1K2=0.3_94.0_15.0.txt'
-grid = '~/Science/github/jvillasr/MINATO/SpecAnalysis/grid.feather'
+grid = '~/Science/github/jvillasr/MINATO/SpecAnalysis/data/grid.feather'
 
 select_linesA = [4026, 4102, 4121, 4144, 4267, 4340, 4388, 4471, 4553]
 select_linesB = [4026, 4102, 4121, 4144, 4267, 4340, 4388, 4553]
 
 res_df = atm_fitting(grid, dsnt_A, dsnt_B).compute_chi2(select_linesA, select_linesB)
 # print(res_dic)
-res_df.to_feather('minchi2_result_'+current_date+'.feather')
+res_df.to_feather('./data/minchi2_result_'+current_date+'.feather')
