@@ -1,0 +1,635 @@
+spectra/BBC_009/data/BBC_009_OB01
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 45
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 46.0553208
+    reduced chi-square = 0.65793315
+    Akaike info crit   = -27.0924128
+    Bayesian info crit = -17.8761524
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99679212 +/- 0.00393195 (0.39%) (init = 1)
+    g1_amp:               0.05901736 +/- 0.01249695 (21.18%) (init = 0.09011188)
+    g1_cen:               4557.45507 +/- 0.20317588 (0.00%) (init = 4556.5)
+    g1_wid:               2.00000000 +/- 0.00470798 (0.24%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              =  0.445
+    C(continuum_intercept, g1_wid) = -0.360
+    C(continuum_intercept, g1_amp) =  0.225
+spectra/BBC_009/data/BBC_009_OB02
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 53
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 76.9339431
+    reduced chi-square = 1.09905633
+    Akaike info crit   = 10.8772738
+    Bayesian info crit = 20.0935342
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99761104 +/- 0.00381807 (0.38%) (init = 1)
+    g1_amp:               0.06563825 +/- 0.01540721 (23.47%) (init = 0.08537825)
+    g1_cen:               4557.74335 +/- 0.15777832 (0.00%) (init = 4556.5)
+    g1_wid:               1.37846945 +/- 0.39060988 (28.34%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.492
+    C(continuum_intercept, g1_wid) =  0.288
+    C(continuum_intercept, g1_amp) =  0.177
+spectra/BBC_009/data/BBC_009_OB03
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 67
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 51.3343111
+    reduced chi-square = 0.73334730
+    Akaike info crit   = -19.0622242
+    Bayesian info crit = -9.84596378
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00160943 +/- 0.00310718 (0.31%) (init = 1)
+    g1_amp:               0.05000000 +/- 0.01001790 (20.04%) (init = 0.07128143)
+    g1_cen:               4557.02206 +/- 0.19245858 (0.00%) (init = 4556.5)
+    g1_wid:               2.00000000 +/- 0.48727953 (24.36%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.447
+    C(continuum_intercept, g1_wid) =  0.359
+    C(continuum_intercept, g1_amp) =  0.220
+spectra/BBC_009/data/BBC_009_OB04
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 87
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 63.9633688
+    reduced chi-square = 0.91376241
+    Akaike info crit   = -2.78583567
+    Bayesian info crit = 6.43042470
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00166841 +/- 0.00376442 (0.38%) (init = 1)
+    g1_amp:               0.05815198 +/- 0.01205040 (20.72%) (init = 0.08525603)
+    g1_cen:               4556.64092 +/- 0.20116196 (0.00%) (init = 4556.5)
+    g1_wid:               1.99999996 +/- 0.50617242 (25.31%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.439
+    C(continuum_intercept, g1_wid) =  0.361
+    C(continuum_intercept, g1_amp) =  0.223
+spectra/BBC_009/data/BBC_009_OB05
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 41
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 58.3375046
+    reduced chi-square = 0.83339292
+    Akaike info crit   = -9.59867280
+    Bayesian info crit = -0.38241243
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00115598 +/- 0.00368507 (0.37%) (init = 1)
+    g1_amp:               0.05435505 +/- 0.01182310 (21.75%) (init = 0.0872631)
+    g1_cen:               4556.11827 +/- 0.20891037 (0.00%) (init = 4556.5)
+    g1_wid:               1.99999928 +/- 5.60433898 (280.22%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              =  0.447
+    C(continuum_intercept, g1_wid) = -0.357
+    C(continuum_intercept, g1_amp) =  0.223
+spectra/BBC_009/data/BBC_009_OB06
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 155
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 54.1615653
+    reduced chi-square = 0.77373665
+    Akaike info crit   = -15.0949236
+    Bayesian info crit = -5.87866327
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00992342 +/- 0.00451556 (0.45%) (init = 1)
+    g1_amp:               0.05000000 +/- 0.01450193 (29.00%) (init = 0.06820641)
+    g1_cen:               4556.40576 +/- 0.28024974 (0.01%) (init = 4556.5)
+    g1_wid:               2.00000000 +/- 0.70196168 (35.10%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.440
+    C(continuum_intercept, g1_wid) =  0.361
+    C(continuum_intercept, g1_amp) =  0.222
+spectra/BBC_009/data/BBC_009_OB07
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 167
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 57.0597418
+    reduced chi-square = 0.81513917
+    Akaike info crit   = -11.2375042
+    Bayesian info crit = -2.02124381
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99350019 +/- 0.00297901 (0.30%) (init = 1)
+    g1_amp:               0.05000001 +/- 0.01145140 (22.90%) (init = 0.09809499)
+    g1_cen:               4557.65256 +/- 0.17002617 (0.00%) (init = 4556.5)
+    g1_wid:               1.53458302 +/- 0.42100883 (27.43%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.483
+    C(continuum_intercept, g1_wid) =  0.306
+    C(continuum_intercept, g1_amp) =  0.185
+spectra/BBC_009/data/BBC_009_OB08
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 62
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 63.6810848
+    reduced chi-square = 0.90972978
+    Akaike info crit   = -3.11313621
+    Bayesian info crit = 6.10312416
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99863891 +/- 0.00344996 (0.35%) (init = 1)
+    g1_amp:               0.07199807 +/- 0.01098422 (15.26%) (init = 0.07874991)
+    g1_cen:               4557.50748 +/- 0.14693587 (0.00%) (init = 4556.5)
+    g1_wid:               1.99999992 +/- 0.37206601 (18.60%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.442
+    C(continuum_intercept, g1_wid) =  0.360
+    C(continuum_intercept, g1_amp) =  0.225
+spectra/BBC_009/data/BBC_009_OB09
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 75
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 60.9110390
+    reduced chi-square = 0.87015770
+    Akaike info crit   = -6.40414960
+    Bayesian info crit = 2.81211077
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00813837 +/- 0.00437737 (0.43%) (init = 1)
+    g1_amp:               0.07291863 +/- 0.01399024 (19.19%) (init = 0.09168145)
+    g1_cen:               4557.95530 +/- 0.18633805 (0.00%) (init = 4556.5)
+    g1_wid:               1.99999989 +/- 0.47715170 (23.86%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.447
+    C(continuum_intercept, g1_wid) =  0.355
+    C(continuum_intercept, g1_amp) =  0.223
+spectra/BBC_009/data/BBC_009_OB10
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 117
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 99.8839941
+    reduced chi-square = 1.42691420
+    Akaike info crit   = 30.1958827
+    Bayesian info crit = 39.4121430
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00787211 +/- 0.00865144 (0.86%) (init = 1)
+    g1_amp:               0.13084956 +/- 0.06605633 (50.48%) (init = 0.1717386)
+    g1_cen:               4557.53122 +/- 0.10845096 (0.00%) (init = 4556.5)
+    g1_wid:               0.43942644 +/- 0.26448121 (60.19%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.559
+    C(continuum_intercept, g1_wid) =  0.154
+spectra/BBC_009/data/BBC_009_OB11
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 86
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 73.3666355
+    reduced chi-square = 1.04809479
+    Akaike info crit   = 7.36390948
+    Bayesian info crit = 16.5801698
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99107440 +/- 0.00338705 (0.34%) (init = 1)
+    g1_amp:               0.05000001 +/- 0.02121255 (42.43%) (init = 0.08607508)
+    g1_cen:               4556.54070 +/- 0.13664364 (0.00%) (init = 4556.5)
+    g1_wid:               0.66114677 +/- 0.33100133 (50.06%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.544
+    C(continuum_intercept, g1_wid) =  0.190
+    C(continuum_intercept, g1_amp) =  0.113
+spectra/BBC_009/data/BBC_009_OB12
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 134
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 105.831899
+    reduced chi-square = 1.51188428
+    Akaike info crit   = 34.4762296
+    Bayesian info crit = 43.6924899
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98765853 +/- 0.00608952 (0.62%) (init = 1)
+    g1_amp:               0.05000000 +/- 0.01971043 (39.42%) (init = 0.1391721)
+    g1_cen:               4555.12167 +/- 0.37533044 (0.01%) (init = 4556.5)
+    g1_wid:               1.99999999 +/- 0.95370803 (47.69%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.451
+    C(continuum_intercept, g1_wid) =  0.357
+    C(continuum_intercept, g1_amp) =  0.220
+spectra/BBC_009/data/BBC_009_OB13
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 67
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 92.4437687
+    reduced chi-square = 1.32062527
+    Akaike info crit   = 24.4676240
+    Bayesian info crit = 33.6838844
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98173785 +/- 0.00545031 (0.56%) (init = 1)
+    g1_amp:               0.15036760 +/- 0.06555646 (43.60%) (init = 0.1636319)
+    g1_cen:               4555.75653 +/- 0.06855608 (0.00%) (init = 4556.5)
+    g1_wid:               0.30000001 +/- 0.15727704 (52.43%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.627
+    C(g1_cen, g1_wid)              =  0.572
+    C(g1_amp, g1_cen)              = -0.296
+    C(continuum_intercept, g1_wid) =  0.110
+spectra/BBC_009/data/BBC_009_OB14
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 50
+    # data points      = 75
+    # variables        = 4
+    chi-square         = 52.7364313
+    reduced chi-square = 0.74276664
+    Akaike info crit   = -18.4136201
+    Bayesian info crit = -9.14366766
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00265885 +/- 0.00323341 (0.32%) (init = 1)
+    g1_amp:               0.05151497 +/- 0.01047569 (20.34%) (init = 0.0705711)
+    g1_cen:               4556.60995 +/- 0.19565969 (0.00%) (init = 4556.5)
+    g1_wid:               1.99999992 +/- 0.49401861 (24.70%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.446
+    C(continuum_intercept, g1_wid) =  0.357
+    C(continuum_intercept, g1_amp) =  0.220
+spectra/BBC_009/data/BBC_009_OB15
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 96
+    # data points      = 75
+    # variables        = 4
+    chi-square         = 40.2919534
+    reduced chi-square = 0.56749230
+    Akaike info crit   = -38.6002250
+    Bayesian info crit = -29.3302725
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00071315 +/- 0.00317520 (0.32%) (init = 1)
+    g1_amp:               0.05000003 +/- 0.01447303 (28.95%) (init = 0.06497417)
+    g1_cen:               4557.56373 +/- 0.19841260 (0.00%) (init = 4556.5)
+    g1_wid:               1.99813972 +/- 0.49385598 (24.72%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              =  0.450
+    C(continuum_intercept, g1_wid) =  0.354
+    C(continuum_intercept, g1_amp) = -0.219
+spectra/BBC_009/data/BBC_009_OB16
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 109
+    # data points      = 75
+    # variables        = 4
+    chi-square         = 60.9790219
+    reduced chi-square = 0.85885946
+    Akaike info crit   = -7.52186582
+    Bayesian info crit = 1.74808663
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99023236 +/- 0.00465395 (0.47%) (init = 1)
+    g1_amp:               0.07529425 +/- 0.02036215 (27.04%) (init = 0.1221373)
+    g1_cen:               4557.68136 +/- 0.16212718 (0.00%) (init = 4556.5)
+    g1_wid:               1.22577914 +/- 0.39825650 (32.49%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.504
+    C(continuum_intercept, g1_wid) =  0.265
+    C(continuum_intercept, g1_amp) =  0.165
+spectra/BBC_009/data/BBC_009_OB17
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 51
+    # data points      = 75
+    # variables        = 4
+    chi-square         = 104.104274
+    reduced chi-square = 1.46625738
+    Akaike info crit   = 32.5928689
+    Bayesian info crit = 41.8628213
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99043248 +/- 0.00524393 (0.53%) (init = 1)
+    g1_amp:               0.09080575 +/- 0.02436794 (26.84%) (init = 0.1050754)
+    g1_cen:               4557.14834 +/- 0.14317104 (0.00%) (init = 4556.5)
+    g1_wid:               1.08127896 +/- 0.35080141 (32.44%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.511
+    C(continuum_intercept, g1_wid) =  0.250
+    C(continuum_intercept, g1_amp) =  0.154
+spectra/BBC_009/data/BBC_009_OB18
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 50
+    # data points      = 75
+    # variables        = 4
+    chi-square         = 63.5805911
+    reduced chi-square = 0.89550128
+    Akaike info crit   = -4.38848960
+    Bayesian info crit = 4.88146285
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00827828 +/- 0.00393420 (0.39%) (init = 1)
+    g1_amp:               0.06137858 +/- 0.01272696 (20.74%) (init = 0.08186739)
+    g1_cen:               4556.66264 +/- 0.19940059 (0.00%) (init = 4556.5)
+    g1_wid:               1.99999997 +/- 0.50561800 (25.28%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.448
+    C(continuum_intercept, g1_wid) =  0.355
+    C(continuum_intercept, g1_amp) =  0.221
+spectra/BBC_009/data/BBC_009_OB19
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 45
+    # data points      = 75
+    # variables        = 4
+    chi-square         = 91.2245917
+    reduced chi-square = 1.28485340
+    Akaike info crit   = 22.6877295
+    Bayesian info crit = 31.9576819
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00732663 +/- 0.00444243 (0.44%) (init = 1)
+    g1_amp:               0.05526314 +/- 0.01418128 (25.66%) (init = 0.06604744)
+    g1_cen:               4557.45110 +/- 0.24775452 (0.01%) (init = 4556.5)
+    g1_wid:               1.99999965 +/- 0.62612329 (31.31%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.442
+    C(continuum_intercept, g1_wid) =  0.359
+    C(continuum_intercept, g1_amp) =  0.225
+spectra/BBC_009/data/BBC_009_OB20
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 50
+    # data points      = 75
+    # variables        = 4
+    chi-square         = 70.6122870
+    reduced chi-square = 0.99453925
+    Akaike info crit   = 3.47870400
+    Bayesian info crit = 12.7486565
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.01035648 +/- 0.00436855 (0.43%) (init = 1)
+    g1_amp:               0.05896920 +/- 0.01426660 (24.19%) (init = 0.07028809)
+    g1_cen:               4557.02250 +/- 0.23137321 (0.01%) (init = 4556.5)
+    g1_wid:               2.00000000 +/- 0.58111062 (29.06%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.455
+    C(continuum_intercept, g1_wid) =  0.341
+    C(continuum_intercept, g1_amp) =  0.226
+spectra/BBC_009/data/BBC_009_OB21
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 67
+    # data points      = 75
+    # variables        = 4
+    chi-square         = 57.4973847
+    reduced chi-square = 0.80982232
+    Akaike info crit   = -11.9311487
+    Bayesian info crit = -2.66119626
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00074689 +/- 0.00392940 (0.39%) (init = 1)
+    g1_amp:               0.05908561 +/- 0.03264895 (55.26%) (init = 0.07853685)
+    g1_cen:               4556.64167 +/- 0.10571131 (0.00%) (init = 4556.5)
+    g1_wid:               0.37622785 +/- 0.24098460 (64.05%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.535
+    C(continuum_intercept, g1_wid) =  0.137
+spectra/BBC_009/data/BBC_009_OB22
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 199
+    # data points      = 75
+    # variables        = 4
+    chi-square         = 65.4274289
+    reduced chi-square = 0.92151308
+    Akaike info crit   = -2.24099061
+    Bayesian info crit = 7.02896185
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00321216 +/- 0.00407336 (0.41%) (init = 1)
+    g1_amp:               0.05000001 +/- 0.03734272 (74.69%) (init = 0.08565466)
+    g1_cen:               4556.06716 +/- 0.14309962 (0.00%) (init = 4556.5)
+    g1_wid:               0.47451590 +/- 0.34318782 (72.32%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              =  0.556
+    C(continuum_intercept, g1_wid) =  0.158
+spectra/BBC_009/data/BBC_009_OB23
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 128
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 82.8044667
+    reduced chi-square = 1.18292095
+    Akaike info crit   = 16.3188515
+    Bayesian info crit = 25.5351119
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98944598 +/- 0.00430159 (0.43%) (init = 1)
+    g1_amp:               0.05167346 +/- 0.01374975 (26.61%) (init = 0.1041952)
+    g1_cen:               4556.54106 +/- 0.25502510 (0.01%) (init = 4556.5)
+    g1_wid:               1.99999996 +/- 0.64392599 (32.20%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.443
+    C(continuum_intercept, g1_wid) =  0.361
+    C(continuum_intercept, g1_amp) =  0.224
+spectra/BBC_009/data/BBC_009_OB24
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 56
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 70.4183682
+    reduced chi-square = 1.00597669
+    Akaike info crit   = 4.32878957
+    Bayesian info crit = 13.5450499
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99124746 +/- 0.00456479 (0.46%) (init = 1)
+    g1_amp:               0.05000000 +/- 0.01872665 (37.45%) (init = 0.09228693)
+    g1_cen:               4556.81316 +/- 0.25041118 (0.01%) (init = 4556.5)
+    g1_wid:               1.37845621 +/- 0.61751232 (44.80%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.495
+    C(continuum_intercept, g1_wid) =  0.285
+    C(continuum_intercept, g1_amp) =  0.174
+spectra/BBC_009/data/BBC_009_OB25
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 8
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 54.8291521
+    reduced chi-square = 0.78327360
+    Akaike info crit   = -14.1883870
+    Bayesian info crit = -4.97212663
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00000000 +/- 0.00271084 (0.27%) (init = 1)
+    g1_amp:               0.05000000 +/- 3.8875e-11 (0.00%) (init = 0.05)
+    g1_cen:               4556.50000 +/- 0.13294751 (0.00%) (init = 4556.5)
+    g1_wid:               1.00000000 +/- 0.30663854 (30.66%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.438
+    C(continuum_intercept, g1_wid) =  0.337
+spectra/BBC_009/data/BBC_009_OB26
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 21
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 81.1988052
+    reduced chi-square = 1.15998293
+    Akaike info crit   = 14.8698225
+    Bayesian info crit = 24.0860829
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00382390 +/- 0.00374944 (0.37%) (init = 1)
+    g1_amp:               0.06883216 +/- 0.01306414 (18.98%) (init = 0.08320358)
+    g1_cen:               4556.27763 +/- 0.15926358 (0.00%) (init = 4556.5)
+    g1_wid:               1.72625094 +/- 0.39953691 (23.14%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.464
+    C(continuum_intercept, g1_wid) =  0.329
+    C(continuum_intercept, g1_amp) =  0.206
+spectra/BBC_009/data/BBC_009_OB27
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 93
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 69.9280163
+    reduced chi-square = 0.99897166
+    Akaike info crit   = 3.81169485
+    Bayesian info crit = 13.0279552
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00138507 +/- 0.00413810 (0.41%) (init = 1)
+    g1_amp:               0.05679579 +/- 0.02044984 (36.01%) (init = 0.09335547)
+    g1_cen:               4557.13879 +/- 0.17587131 (0.00%) (init = 4556.5)
+    g1_wid:               1.00065687 +/- 0.42965031 (42.94%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.521
+    C(continuum_intercept, g1_wid) =  0.237
+    C(continuum_intercept, g1_amp) =  0.145
+spectra/BBC_009/data/BBC_009_OB28
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 55
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 110.793640
+    reduced chi-square = 1.58276629
+    Akaike info crit   = 37.8667169
+    Bayesian info crit = 47.0829772
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99511533 +/- 0.00419830 (0.42%) (init = 1)
+    g1_amp:               0.05000014 +/- 0.01631420 (32.63%) (init = 0.0868498)
+    g1_cen:               4556.23628 +/- 0.23507207 (0.01%) (init = 4556.5)
+    g1_wid:               1.49536677 +/- 0.58939467 (39.41%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.494
+    C(continuum_intercept, g1_wid) =  0.289
+    C(continuum_intercept, g1_amp) =  0.188
+spectra/BBC_009/data/BBC_009_OB29
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 189
+    # data points      = 74
+    # variables        = 4
+    chi-square         = 61.6740151
+    reduced chi-square = 0.88105736
+    Akaike info crit   = -5.48297765
+    Bayesian info crit = 3.73328273
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00470953 +/- 0.00486821 (0.48%) (init = 1)
+    g1_amp:               0.05000000 +/- 0.01208257 (24.17%) (init = 0.07944006)
+    g1_cen:               4556.99407 +/- 0.30007456 (0.01%) (init = 4556.5)
+    g1_wid:               1.99999997 +/- 0.48521468 (24.26%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.445
+    C(continuum_intercept, g1_wid) = -0.362
+    C(continuum_intercept, g1_amp) = -0.220
