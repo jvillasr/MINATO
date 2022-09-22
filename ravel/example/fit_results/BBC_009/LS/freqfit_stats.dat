@@ -1,0 +1,17 @@
+[[Model]]
+    Model(lorentzian, prefix='l_')
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 21
+    # data points      = 2133970
+    # variables        = 3
+    chi-square         = 294923.484
+    reduced chi-square = 0.13820433
+    Akaike info crit   = -4223170.62
+    Bayesian info crit = -4223132.90
+[[Variables]]
+    l_amp: -72.7273409 +/- 0.04026870 (0.06%) (init = -73.07291)
+    l_cen:  0.21222913 +/- 7.0357e-08 (0.00%) (init = 0.2122271)
+    l_wid:  2.5421e-04 +/- 1.9900e-07 (0.08%) (init = 0.001)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(l_amp, l_wid) =  0.707
