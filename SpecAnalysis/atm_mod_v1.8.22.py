@@ -420,7 +420,7 @@ select_linesB = [4026, 4102, 4121, 4144, 4267, 4340, 4388, 4553]
 user_dicA = { line: lines_dic[line] for line in select_linesA }
 user_dicB = { line: lines_dic[line] for line in select_linesB }
 
-test=True
+test=False
 if test==True:
     teffA = [11, 12, 13, 14, 15]
     # teffA = [16]
@@ -436,8 +436,8 @@ if test==True:
     # he2hrat = [0.05]
 
 else:
-    teffA = [11, 12, 13, 14, 15]
-    loggA = [18, 19, 20, 22, 24, 26, 28]
+    teffA = [11, 12, 13, 14, 15, 16, 17, 18]
+    loggA = [18, 20, 22, 24, 26, 28, 30]
     rotA = range(30, 45, 5)
     # teffB = [20, 22, 24, 26, 28, 30, 32.5, 35, 37.5, 40]
     teffB = [16, 20, 24, 26, 28, 30, 32.5, 35, 37.5]
@@ -476,6 +476,10 @@ grid_res, result = [], []
 for lr in lrat:
     for heh in he2hrat:
         for T1 in teffA:
+            # if T1 < 16:
+            #     for g1 in loggA:
+            # else:
+            #     for g1 in [20, 22.5, 25, 27.5, 30]
             for g1 in loggA:
                 for r1 in rotA:
                     for T2 in teffB:
