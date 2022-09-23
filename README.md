@@ -2,7 +2,7 @@
 Python tools for the analysis of massive binary stars
 
 Main scopes:
-- Radial velocity measurements
-- Time series analysis
-- Spectral analysis
-- SED fitting
+- Radial velocity measurements --> Ravel
+- Time series analysis         --> currently under Ravel
+- Spectral analysis            --> Span
+- SED fitting                  --> to be implemented
