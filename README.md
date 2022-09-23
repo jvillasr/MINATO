@@ -5,4 +5,4 @@ Main scopes:
 - Radial velocity measurements --> Ravel
 - Time series analysis &emsp; &emsp; &emsp; &nbsp; --> currently under Ravel
 - Spectral analysis &emsp; &emsp; &emsp; &emsp; &ensp; --> Span
-- SED fitting &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &ensp; &nbsp; --> to be implemented
+- SED fitting &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &nbsp; &nbsp; --> to be implemented
