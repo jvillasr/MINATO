@@ -5,7 +5,7 @@ Main scopes:
 - Radial velocity measurements --> Ravel
 - Time series analysis &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; --> currently under Ravel
 - Spectral analysis &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; --> Span
-- SED fitting &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; --> to be implemented
+- SED fitting &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; --> to be implemented
 
 The action of every agent <br />
   into the world <br />
