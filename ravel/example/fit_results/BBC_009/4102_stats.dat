@@ -1,0 +1,1022 @@
+spectra/BBC_009/data/BBC_009_OB01
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 49
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 143.646586
+    reduced chi-square = 0.97058504
+    Akaike info crit   = 2.20928977
+    Bayesian info crit = 23.5132656
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98435772 +/- 0.00657880 (0.67%) (init = 1)
+    l1_amp:               0.39016866 +/- 0.01551595 (3.98%) (init = 0.6237267)
+    l1_cen:               4105.97174 +/- 0.09223403 (0.00%) (init = 4105)
+    l1_wid:               6.81166788 +/- 0.46031478 (6.76%) (init = 7)
+    neb_amp:              0.45610786 +/- 0.02749283 (6.03%) (init = 0.4997426)
+    neb_cen:              4105.37905 +/- 0.02512340 (0.00%) (init = 4105.5)
+    neb_wid:              0.98587508 +/- 0.07076778 (7.18%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.727
+    C(l1_amp, l1_wid)               = -0.578
+    C(l1_amp, neb_wid)              =  0.571
+    C(l1_wid, neb_wid)              = -0.432
+    C(l1_amp, neb_amp)              =  0.411
+    C(l1_wid, neb_amp)              = -0.359
+    C(l1_amp, l1_cen)               = -0.325
+    C(l1_cen, neb_wid)              = -0.290
+    C(l1_cen, neb_amp)              = -0.242
+    C(l1_cen, l1_wid)               =  0.232
+    C(continuum_intercept, neb_wid) = -0.182
+    C(continuum_intercept, neb_amp) = -0.172
+    C(l1_wid, neb_cen)              = -0.172
+    C(l1_cen, neb_cen)              =  0.158
+    C(neb_amp, neb_wid)             = -0.144
+    C(continuum_intercept, neb_cen) = -0.116
+spectra/BBC_009/data/BBC_009_OB02
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 57
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 174.313901
+    reduced chi-square = 1.17779663
+    Akaike info crit   = 32.2020506
+    Bayesian info crit = 53.5060264
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.97553237 +/- 0.00578884 (0.59%) (init = 1)
+    l1_amp:               0.39094404 +/- 0.01203092 (3.08%) (init = 0.6279624)
+    l1_cen:               4106.25760 +/- 0.08381317 (0.00%) (init = 4105)
+    l1_wid:               7.10627185 +/- 0.38007443 (5.35%) (init = 7)
+    neb_amp:              0.30482137 +/- 0.02232322 (7.32%) (init = 0.4312669)
+    neb_cen:              4105.43206 +/- 0.03135861 (0.00%) (init = 4105.5)
+    neb_wid:              0.98167564 +/- 0.08659754 (8.82%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.728
+    C(l1_amp, neb_wid)              =  0.524
+    C(l1_amp, l1_wid)               = -0.464
+    C(l1_amp, neb_amp)              =  0.364
+    C(l1_wid, neb_wid)              = -0.359
+    C(l1_amp, l1_cen)               = -0.353
+    C(l1_cen, neb_wid)              = -0.331
+    C(l1_wid, neb_amp)              = -0.285
+    C(l1_cen, neb_amp)              = -0.270
+    C(l1_cen, l1_wid)               =  0.226
+    C(neb_amp, neb_wid)             = -0.198
+    C(l1_wid, neb_cen)              = -0.196
+    C(continuum_intercept, neb_wid) = -0.129
+    C(continuum_intercept, neb_cen) = -0.129
+    C(l1_cen, neb_cen)              =  0.120
+    C(continuum_intercept, neb_amp) = -0.117
+    C(continuum_intercept, l1_amp)  =  0.113
+spectra/BBC_009/data/BBC_009_OB03
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 81
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 177.863706
+    reduced chi-square = 1.20178180
+    Akaike info crit   = 35.3268287
+    Bayesian info crit = 56.6308045
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.97708409 +/- 0.00512026 (0.52%) (init = 1)
+    l1_amp:               0.38413150 +/- 0.01324043 (3.45%) (init = 0.5899562)
+    l1_cen:               4105.50564 +/- 0.06455088 (0.00%) (init = 4105)
+    l1_wid:               6.57991863 +/- 0.39010667 (5.93%) (init = 7)
+    neb_amp:              0.25382607 +/- 0.02102479 (8.28%) (init = 0.3940316)
+    neb_cen:              4105.41978 +/- 0.03235103 (0.00%) (init = 4105.5)
+    neb_wid:              0.96806142 +/- 0.09638250 (9.96%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.740
+    C(l1_amp, l1_wid)               = -0.677
+    C(l1_amp, neb_wid)              =  0.627
+    C(l1_wid, neb_wid)              = -0.519
+    C(l1_amp, neb_amp)              =  0.512
+    C(l1_wid, neb_amp)              = -0.487
+    C(continuum_intercept, neb_amp) = -0.273
+    C(continuum_intercept, neb_wid) = -0.261
+    C(l1_cen, neb_cen)              =  0.249
+    C(continuum_intercept, l1_amp)  = -0.138
+spectra/BBC_009/data/BBC_009_OB04
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 41
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 157.154935
+    reduced chi-square = 1.06185767
+    Akaike info crit   = 16.1400923
+    Bayesian info crit = 37.4440681
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.97927708 +/- 0.00636263 (0.65%) (init = 1)
+    l1_amp:               0.38600047 +/- 0.01327269 (3.44%) (init = 0.640518)
+    l1_cen:               4104.84320 +/- 0.08580449 (0.00%) (init = 4105)
+    l1_wid:               7.02309320 +/- 0.43804776 (6.24%) (init = 7)
+    neb_amp:              0.40624915 +/- 0.02585822 (6.37%) (init = 0.4705995)
+    neb_cen:              4105.40498 +/- 0.02479841 (0.00%) (init = 4105.5)
+    neb_wid:              0.89316288 +/- 0.06776554 (7.59%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.742
+    C(l1_amp, neb_wid)              =  0.530
+    C(l1_amp, l1_wid)               = -0.520
+    C(l1_wid, neb_wid)              = -0.410
+    C(l1_amp, neb_amp)              =  0.359
+    C(l1_wid, neb_amp)              = -0.319
+    C(l1_amp, l1_cen)               =  0.258
+    C(l1_cen, neb_wid)              =  0.247
+    C(l1_cen, l1_wid)               = -0.202
+    C(neb_amp, neb_wid)             = -0.201
+    C(l1_cen, neb_amp)              =  0.193
+    C(continuum_intercept, neb_wid) = -0.183
+    C(continuum_intercept, neb_amp) = -0.159
+    C(l1_cen, neb_cen)              =  0.146
+    C(l1_wid, neb_cen)              =  0.138
+spectra/BBC_009/data/BBC_009_OB05
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 41
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 166.796166
+    reduced chi-square = 1.12700112
+    Akaike info crit   = 25.3688448
+    Bayesian info crit = 46.6728206
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99603036 +/- 0.00628292 (0.63%) (init = 1)
+    l1_amp:               0.38796235 +/- 0.01196127 (3.08%) (init = 0.6261696)
+    l1_cen:               4105.03559 +/- 0.08043599 (0.00%) (init = 4105)
+    l1_wid:               7.38626154 +/- 0.43209441 (5.85%) (init = 7)
+    neb_amp:              0.33785039 +/- 0.02409356 (7.13%) (init = 0.4811929)
+    neb_cen:              4105.50483 +/- 0.02708496 (0.00%) (init = 4105.5)
+    neb_wid:              0.87004459 +/- 0.07427436 (8.54%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.756
+    C(l1_amp, neb_wid)              =  0.509
+    C(l1_amp, l1_wid)               = -0.485
+    C(l1_wid, neb_wid)              = -0.410
+    C(l1_amp, neb_amp)              =  0.344
+    C(l1_wid, neb_amp)              = -0.319
+    C(neb_amp, neb_wid)             = -0.220
+    C(l1_amp, l1_cen)               =  0.205
+    C(l1_cen, neb_wid)              =  0.200
+    C(continuum_intercept, neb_wid) = -0.196
+    C(l1_cen, l1_wid)               = -0.168
+    C(continuum_intercept, neb_amp) = -0.167
+    C(l1_cen, neb_amp)              =  0.153
+    C(l1_cen, neb_cen)              =  0.150
+    C(l1_wid, neb_cen)              =  0.103
+spectra/BBC_009/data/BBC_009_OB06
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 49
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 145.810288
+    reduced chi-square = 0.98520465
+    Akaike info crit   = 4.52659543
+    Bayesian info crit = 25.8305712
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98684260 +/- 0.00633010 (0.64%) (init = 1)
+    l1_amp:               0.40238820 +/- 0.01430390 (3.55%) (init = 0.6203338)
+    l1_cen:               4105.54529 +/- 0.07796591 (0.00%) (init = 4105)
+    l1_wid:               6.67609036 +/- 0.43032429 (6.45%) (init = 7)
+    neb_amp:              0.44325370 +/- 0.02780946 (6.27%) (init = 0.4948985)
+    neb_cen:              4105.39782 +/- 0.02194851 (0.00%) (init = 4105.5)
+    neb_wid:              0.81237246 +/- 0.06076182 (7.48%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.739
+    C(l1_amp, l1_wid)               = -0.585
+    C(l1_amp, neb_wid)              =  0.554
+    C(l1_wid, neb_wid)              = -0.453
+    C(l1_amp, neb_amp)              =  0.380
+    C(l1_wid, neb_amp)              = -0.356
+    C(continuum_intercept, neb_wid) = -0.220
+    C(l1_cen, neb_cen)              =  0.192
+    C(continuum_intercept, neb_amp) = -0.191
+    C(neb_amp, neb_wid)             = -0.180
+spectra/BBC_009/data/BBC_009_OB07
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 105
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 188.714142
+    reduced chi-square = 1.27509555
+    Akaike info crit   = 44.5052827
+    Bayesian info crit = 65.8092585
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.01843513 +/- 0.00769561 (0.76%) (init = 1)
+    l1_amp:               0.37218387 +/- 0.01221982 (3.28%) (init = 0.5694276)
+    l1_cen:               4105.79114 +/- 0.09556855 (0.00%) (init = 4105)
+    l1_wid:               8.59723865 +/- 0.57969310 (6.74%) (init = 7)
+    neb_amp:              0.30959550 +/- 0.02331217 (7.53%) (init = 0.3974822)
+    neb_cen:              4105.35520 +/- 0.03397840 (0.00%) (init = 4105.5)
+    neb_wid:              1.05598015 +/- 0.09553272 (9.05%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.798
+    C(l1_amp, neb_wid)              =  0.511
+    C(l1_wid, neb_wid)              = -0.440
+    C(l1_amp, l1_wid)               = -0.416
+    C(l1_wid, neb_amp)              = -0.364
+    C(l1_amp, neb_amp)              =  0.359
+    C(continuum_intercept, neb_wid) = -0.234
+    C(continuum_intercept, neb_amp) = -0.212
+    C(l1_amp, l1_cen)               = -0.187
+    C(l1_cen, neb_wid)              = -0.179
+    C(l1_cen, l1_wid)               =  0.170
+    C(neb_amp, neb_wid)             = -0.168
+    C(l1_cen, neb_cen)              =  0.166
+    C(l1_cen, neb_amp)              = -0.150
+    C(continuum_intercept, l1_amp)  =  0.101
+spectra/BBC_009/data/BBC_009_OB08
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 41
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 158.838380
+    reduced chi-square = 1.07323230
+    Akaike info crit   = 17.7916239
+    Bayesian info crit = 39.0955998
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99074490 +/- 0.00486497 (0.49%) (init = 1)
+    l1_amp:               0.40139743 +/- 0.00909430 (2.27%) (init = 0.6070892)
+    l1_cen:               4105.73564 +/- 0.05921815 (0.00%) (init = 4105)
+    l1_wid:               7.06619977 +/- 0.31000521 (4.39%) (init = 7)
+    neb_amp:              0.29465991 +/- 0.02068265 (7.02%) (init = 0.4484008)
+    neb_cen:              4105.41572 +/- 0.02182447 (0.00%) (init = 4105.5)
+    neb_wid:              0.69995259 +/- 0.05821428 (8.32%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.745
+    C(l1_amp, neb_wid)              =  0.463
+    C(l1_amp, l1_wid)               = -0.456
+    C(l1_wid, neb_wid)              = -0.380
+    C(l1_amp, neb_amp)              =  0.294
+    C(neb_amp, neb_wid)             = -0.292
+    C(l1_wid, neb_amp)              = -0.272
+    C(continuum_intercept, neb_wid) = -0.180
+    C(continuum_intercept, neb_amp) = -0.139
+    C(l1_cen, neb_cen)              =  0.134
+    C(l1_amp, l1_cen)               = -0.130
+    C(l1_cen, neb_wid)              = -0.127
+    C(continuum_intercept, l1_amp)  =  0.102
+spectra/BBC_009/data/BBC_009_OB09
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 49
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 205.883870
+    reduced chi-square = 1.39110723
+    Akaike info crit   = 58.0025087
+    Bayesian info crit = 79.3064845
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98156402 +/- 0.00663776 (0.68%) (init = 1)
+    l1_amp:               0.39067896 +/- 0.01462693 (3.74%) (init = 0.6254519)
+    l1_cen:               4105.94379 +/- 0.09110131 (0.00%) (init = 4105)
+    l1_wid:               6.81067678 +/- 0.44941755 (6.60%) (init = 7)
+    neb_amp:              0.40775783 +/- 0.02819058 (6.91%) (init = 0.491532)
+    neb_cen:              4105.36762 +/- 0.02646603 (0.00%) (init = 4105.5)
+    neb_wid:              0.88290162 +/- 0.07248805 (8.21%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.729
+    C(l1_amp, l1_wid)               = -0.536
+    C(l1_amp, neb_wid)              =  0.535
+    C(l1_wid, neb_wid)              = -0.405
+    C(l1_amp, neb_amp)              =  0.367
+    C(l1_wid, neb_amp)              = -0.318
+    C(l1_amp, l1_cen)               = -0.285
+    C(l1_cen, neb_wid)              = -0.263
+    C(l1_cen, neb_amp)              = -0.206
+    C(l1_cen, l1_wid)               =  0.206
+    C(neb_amp, neb_wid)             = -0.199
+    C(continuum_intercept, neb_wid) = -0.172
+    C(continuum_intercept, neb_amp) = -0.152
+    C(l1_cen, neb_cen)              =  0.147
+    C(l1_wid, neb_cen)              = -0.144
+spectra/BBC_009/data/BBC_009_OB10
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 41
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 249.666015
+    reduced chi-square = 1.68693254
+    Akaike info crit   = 87.8883403
+    Bayesian info crit = 109.192316
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.00024863 +/- 0.01733500 (1.73%) (init = 1)
+    l1_amp:               0.39095666 +/- 0.02597965 (6.65%) (init = 0.7122647)
+    l1_cen:               4105.07958 +/- 0.20427627 (0.00%) (init = 4105)
+    l1_wid:               8.62398119 +/- 1.19984313 (13.91%) (init = 7)
+    neb_amp:              0.75726704 +/- 0.06280628 (8.29%) (init = 0.896471)
+    neb_cen:              4105.43977 +/- 0.03065269 (0.00%) (init = 4105.5)
+    neb_wid:              0.85370129 +/- 0.08167670 (9.57%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.799
+    C(l1_amp, neb_wid)              =  0.434
+    C(l1_wid, neb_wid)              = -0.387
+    C(l1_amp, l1_wid)               = -0.342
+    C(neb_amp, neb_wid)             = -0.317
+    C(l1_wid, neb_amp)              = -0.254
+    C(l1_amp, neb_amp)              =  0.246
+    C(continuum_intercept, neb_wid) = -0.206
+    C(continuum_intercept, l1_amp)  =  0.173
+    C(continuum_intercept, neb_amp) = -0.146
+    C(l1_cen, neb_cen)              =  0.129
+    C(l1_cen, neb_wid)              =  0.119
+    C(l1_amp, l1_cen)               =  0.108
+    C(l1_cen, l1_wid)               = -0.107
+spectra/BBC_009/data/BBC_009_OB11
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 41
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 144.260818
+    reduced chi-square = 0.97473526
+    Akaike info crit   = 2.87065591
+    Bayesian info crit = 24.1746317
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.97549412 +/- 0.00518746 (0.53%) (init = 1)
+    l1_amp:               0.41068606 +/- 0.01302822 (3.17%) (init = 0.6322169)
+    l1_cen:               4106.16684 +/- 0.07471566 (0.00%) (init = 4105)
+    l1_wid:               6.39097508 +/- 0.32755873 (5.13%) (init = 7)
+    neb_amp:              0.39216602 +/- 0.02244847 (5.72%) (init = 0.4716624)
+    neb_cen:              4105.40251 +/- 0.02429761 (0.00%) (init = 4105.5)
+    neb_wid:              0.98642003 +/- 0.06767318 (6.86%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.700
+    C(l1_amp, neb_wid)              =  0.574
+    C(l1_amp, l1_wid)               = -0.559
+    C(l1_amp, neb_amp)              =  0.412
+    C(l1_amp, l1_cen)               = -0.397
+    C(l1_wid, neb_wid)              = -0.395
+    C(l1_cen, neb_wid)              = -0.362
+    C(l1_wid, neb_amp)              = -0.323
+    C(l1_cen, neb_amp)              = -0.307
+    C(l1_cen, l1_wid)               =  0.258
+    C(l1_wid, neb_cen)              = -0.228
+    C(continuum_intercept, neb_cen) = -0.145
+    C(continuum_intercept, neb_wid) = -0.136
+    C(neb_amp, neb_wid)             = -0.135
+    C(l1_amp, neb_cen)              =  0.131
+    C(continuum_intercept, neb_amp) = -0.128
+    C(l1_cen, neb_cen)              =  0.127
+spectra/BBC_009/data/BBC_009_OB12
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 73
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 274.549477
+    reduced chi-square = 1.85506404
+    Akaike info crit   = 102.614488
+    Bayesian info crit = 123.918464
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.02263412 +/- 0.01208748 (1.18%) (init = 1)
+    l1_amp:               0.30542385 +/- 0.01608655 (5.27%) (init = 0.5637112)
+    l1_cen:               4103.64386 +/- 0.20769039 (0.01%) (init = 4105)
+    l1_wid:               9.00600875 +/- 0.94055188 (10.44%) (init = 7)
+    neb_amp:              0.53342752 +/- 0.04457875 (8.36%) (init = 0.6399099)
+    neb_cen:              4105.41979 +/- 0.02936928 (0.00%) (init = 4105.5)
+    neb_wid:              0.77267413 +/- 0.07272057 (9.41%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid) =  0.796
+    C(continuum_intercept, l1_amp) =  0.482
+    C(neb_amp, neb_wid)            = -0.440
+    C(l1_cen, neb_wid)             =  0.293
+    C(l1_amp, neb_wid)             =  0.288
+    C(l1_amp, l1_cen)              =  0.217
+    C(l1_cen, neb_amp)             =  0.164
+    C(l1_amp, neb_amp)             =  0.148
+    C(l1_wid, neb_cen)             =  0.121
+spectra/BBC_009/data/BBC_009_OB13
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 69
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 329.685306
+    reduced chi-square = 2.22760342
+    Akaike info crit   = 130.980587
+    Bayesian info crit = 152.284563
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.04714640 +/- 0.01817405 (1.74%) (init = 1)
+    l1_amp:               0.28474113 +/- 0.02001393 (7.03%) (init = 0.5287351)
+    l1_cen:               4103.76469 +/- 0.28807839 (0.01%) (init = 4105)
+    l1_wid:               10.9999999 +/- 1.58485942 (14.41%) (init = 7)
+    neb_amp:              0.64310079 +/- 0.05168359 (8.04%) (init = 0.7307662)
+    neb_cen:              4105.42716 +/- 0.03110364 (0.00%) (init = 4105.5)
+    neb_wid:              0.84862008 +/- 0.07568943 (8.92%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid) =  0.843
+    C(continuum_intercept, l1_amp) =  0.606
+    C(neb_amp, neb_wid)            = -0.438
+    C(l1_amp, neb_wid)             =  0.254
+    C(l1_cen, neb_wid)             =  0.252
+    C(l1_amp, l1_wid)              =  0.197
+    C(l1_amp, l1_cen)              =  0.183
+    C(l1_wid, neb_wid)             = -0.144
+    C(l1_cen, neb_amp)             =  0.138
+    C(l1_amp, neb_amp)             =  0.127
+    C(l1_wid, neb_cen)             =  0.112
+spectra/BBC_009/data/BBC_009_OB14
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 57
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 181.337466
+    reduced chi-square = 1.22525315
+    Akaike info crit   = 38.3248680
+    Bayesian info crit = 59.6288438
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98588274 +/- 0.00620351 (0.63%) (init = 1)
+    l1_amp:               0.38273615 +/- 0.01065652 (2.78%) (init = 0.6273841)
+    l1_cen:               4105.09779 +/- 0.07706244 (0.00%) (init = 4105)
+    l1_wid:               7.57392922 +/- 0.42239963 (5.58%) (init = 7)
+    neb_amp:              0.28678921 +/- 0.02416199 (8.42%) (init = 0.4465577)
+    neb_cen:              4105.39819 +/- 0.02794345 (0.00%) (init = 4105.5)
+    neb_wid:              0.74305630 +/- 0.07490746 (10.08%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.766
+    C(l1_amp, neb_wid)              =  0.457
+    C(l1_amp, l1_wid)               = -0.419
+    C(l1_wid, neb_wid)              = -0.387
+    C(l1_amp, neb_amp)              =  0.288
+    C(neb_amp, neb_wid)             = -0.286
+    C(l1_wid, neb_amp)              = -0.277
+    C(continuum_intercept, neb_wid) = -0.194
+    C(continuum_intercept, neb_amp) = -0.150
+    C(l1_cen, neb_cen)              =  0.135
+    C(continuum_intercept, l1_amp)  =  0.124
+    C(l1_cen, neb_wid)              =  0.115
+    C(l1_amp, l1_cen)               =  0.106
+spectra/BBC_009/data/BBC_009_OB15
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 49
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 125.443898
+    reduced chi-square = 0.84759390
+    Akaike info crit   = -18.7928059
+    Bayesian info crit = 2.51116996
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98213890 +/- 0.00504683 (0.51%) (init = 1)
+    l1_amp:               0.40428596 +/- 0.01034268 (2.56%) (init = 0.6387444)
+    l1_cen:               4105.90962 +/- 0.06518252 (0.00%) (init = 4105)
+    l1_wid:               6.86377539 +/- 0.32047359 (4.67%) (init = 7)
+    neb_amp:              0.37246664 +/- 0.02172037 (5.83%) (init = 0.4502394)
+    neb_cen:              4105.35877 +/- 0.02038807 (0.00%) (init = 4105.5)
+    neb_wid:              0.79516611 +/- 0.05516091 (6.94%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.731
+    C(l1_amp, neb_wid)              =  0.499
+    C(l1_amp, l1_wid)               = -0.491
+    C(l1_wid, neb_wid)              = -0.381
+    C(l1_amp, neb_amp)              =  0.320
+    C(l1_wid, neb_amp)              = -0.277
+    C(neb_amp, neb_wid)             = -0.258
+    C(l1_amp, l1_cen)               = -0.246
+    C(l1_cen, neb_wid)              = -0.232
+    C(l1_cen, l1_wid)               =  0.176
+    C(l1_cen, neb_amp)              = -0.172
+    C(continuum_intercept, neb_wid) = -0.164
+    C(l1_cen, neb_cen)              =  0.132
+    C(continuum_intercept, neb_amp) = -0.131
+    C(l1_wid, neb_cen)              = -0.123
+spectra/BBC_009/data/BBC_009_OB16
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 49
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 155.100037
+    reduced chi-square = 1.04797322
+    Akaike info crit   = 14.1000047
+    Bayesian info crit = 35.4039805
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98051784 +/- 0.00554957 (0.57%) (init = 1)
+    l1_amp:               0.38829035 +/- 0.01204654 (3.10%) (init = 0.6268597)
+    l1_cen:               4106.08139 +/- 0.07924402 (0.00%) (init = 4105)
+    l1_wid:               6.85950770 +/- 0.37031851 (5.40%) (init = 7)
+    neb_amp:              0.36526176 +/- 0.02299054 (6.29%) (init = 0.4516009)
+    neb_cen:              4105.37734 +/- 0.02512854 (0.00%) (init = 4105.5)
+    neb_wid:              0.91136213 +/- 0.06876803 (7.55%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.723
+    C(l1_amp, neb_wid)              =  0.529
+    C(l1_amp, l1_wid)               = -0.505
+    C(l1_wid, neb_wid)              = -0.382
+    C(l1_amp, neb_amp)              =  0.359
+    C(l1_amp, l1_cen)               = -0.322
+    C(l1_cen, neb_wid)              = -0.299
+    C(l1_wid, neb_amp)              = -0.294
+    C(l1_cen, neb_amp)              = -0.239
+    C(l1_cen, l1_wid)               =  0.218
+    C(neb_amp, neb_wid)             = -0.205
+    C(l1_wid, neb_cen)              = -0.174
+    C(continuum_intercept, neb_wid) = -0.148
+    C(continuum_intercept, neb_amp) = -0.128
+    C(l1_cen, neb_cen)              =  0.128
+    C(continuum_intercept, neb_cen) = -0.114
+spectra/BBC_009/data/BBC_009_OB17
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 49
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 133.357610
+    reduced chi-square = 0.90106493
+    Akaike info crit   = -9.31057383
+    Bayesian info crit = 11.9934020
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98722530 +/- 0.00584855 (0.59%) (init = 1)
+    l1_amp:               0.38592355 +/- 0.01103344 (2.86%) (init = 0.605175)
+    l1_cen:               4105.44787 +/- 0.07212997 (0.00%) (init = 4105)
+    l1_wid:               7.22650431 +/- 0.40310474 (5.58%) (init = 7)
+    neb_amp:              0.38975781 +/- 0.02440303 (6.26%) (init = 0.4315572)
+    neb_cen:              4105.45301 +/- 0.02065783 (0.00%) (init = 4105.5)
+    neb_wid:              0.74940809 +/- 0.05537478 (7.39%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.757
+    C(l1_amp, l1_wid)               = -0.491
+    C(l1_amp, neb_wid)              =  0.490
+    C(l1_wid, neb_wid)              = -0.415
+    C(l1_amp, neb_amp)              =  0.314
+    C(l1_wid, neb_amp)              = -0.302
+    C(neb_amp, neb_wid)             = -0.258
+    C(continuum_intercept, neb_wid) = -0.210
+    C(continuum_intercept, neb_amp) = -0.165
+    C(l1_cen, neb_cen)              =  0.156
+spectra/BBC_009/data/BBC_009_OB18
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 57
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 189.494193
+    reduced chi-square = 1.28036617
+    Akaike info crit   = 45.1446555
+    Bayesian info crit = 66.4486313
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98905118 +/- 0.00638885 (0.65%) (init = 1)
+    l1_amp:               0.37767863 +/- 0.01212886 (3.21%) (init = 0.5959601)
+    l1_cen:               4105.48114 +/- 0.08020606 (0.00%) (init = 4105)
+    l1_wid:               7.32391293 +/- 0.45625895 (6.23%) (init = 7)
+    neb_amp:              0.28270193 +/- 0.02492144 (8.82%) (init = 0.4192742)
+    neb_cen:              4105.38521 +/- 0.03109227 (0.00%) (init = 4105.5)
+    neb_wid:              0.80510721 +/- 0.08583193 (10.66%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.760
+    C(l1_amp, neb_wid)              =  0.509
+    C(l1_amp, l1_wid)               = -0.504
+    C(l1_wid, neb_wid)              = -0.430
+    C(l1_amp, neb_amp)              =  0.345
+    C(l1_wid, neb_amp)              = -0.333
+    C(neb_amp, neb_wid)             = -0.220
+    C(continuum_intercept, neb_wid) = -0.218
+    C(continuum_intercept, neb_amp) = -0.184
+    C(l1_cen, neb_cen)              =  0.168
+spectra/BBC_009/data/BBC_009_OB19
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 49
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 161.746411
+    reduced chi-square = 1.09288115
+    Akaike info crit   = 20.6037168
+    Bayesian info crit = 41.9076927
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98137169 +/- 0.00539876 (0.55%) (init = 1)
+    l1_amp:               0.40058149 +/- 0.01044125 (2.61%) (init = 0.6595356)
+    l1_cen:               4106.19654 +/- 0.07318423 (0.00%) (init = 4105)
+    l1_wid:               6.95095341 +/- 0.32953353 (4.74%) (init = 7)
+    neb_amp:              0.34186727 +/- 0.02298993 (6.72%) (init = 0.4999847)
+    neb_cen:              4105.42389 +/- 0.02354693 (0.00%) (init = 4105.5)
+    neb_wid:              0.77953449 +/- 0.06186146 (7.94%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.725
+    C(l1_amp, neb_wid)              =  0.458
+    C(l1_amp, l1_wid)               = -0.409
+    C(l1_wid, neb_wid)              = -0.316
+    C(neb_amp, neb_wid)             = -0.294
+    C(l1_amp, neb_amp)              =  0.287
+    C(l1_cen, neb_wid)              = -0.280
+    C(l1_amp, l1_cen)               = -0.280
+    C(l1_wid, neb_amp)              = -0.221
+    C(l1_cen, neb_amp)              = -0.200
+    C(l1_cen, l1_wid)               =  0.177
+    C(continuum_intercept, l1_amp)  =  0.167
+    C(l1_wid, neb_cen)              = -0.144
+    C(continuum_intercept, neb_wid) = -0.115
+    C(l1_cen, neb_cen)              =  0.104
+spectra/BBC_009/data/BBC_009_OB20
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 33
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 142.052769
+    reduced chi-square = 0.95981601
+    Akaike info crit   = 0.47989034
+    Bayesian info crit = 21.7838662
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.97706138 +/- 0.00639003 (0.65%) (init = 1)
+    l1_amp:               0.39409767 +/- 0.01341767 (3.40%) (init = 0.6443589)
+    l1_cen:               4105.15909 +/- 0.07949125 (0.00%) (init = 4105)
+    l1_wid:               6.81917746 +/- 0.43225127 (6.34%) (init = 7)
+    neb_amp:              0.49684698 +/- 0.02840559 (5.72%) (init = 0.5046269)
+    neb_cen:              4105.41151 +/- 0.01920246 (0.00%) (init = 4105.5)
+    neb_wid:              0.77960593 +/- 0.05238588 (6.72%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.743
+    C(l1_amp, l1_wid)               = -0.546
+    C(l1_amp, neb_wid)              =  0.517
+    C(l1_wid, neb_wid)              = -0.424
+    C(l1_amp, neb_amp)              =  0.333
+    C(l1_wid, neb_amp)              = -0.313
+    C(neb_amp, neb_wid)             = -0.244
+    C(continuum_intercept, neb_wid) = -0.206
+    C(continuum_intercept, neb_amp) = -0.166
+    C(l1_cen, neb_cen)              =  0.163
+    C(l1_amp, l1_cen)               =  0.130
+    C(l1_cen, neb_wid)              =  0.122
+    C(l1_cen, l1_wid)               = -0.116
+spectra/BBC_009/data/BBC_009_OB21
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 49
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 149.610277
+    reduced chi-square = 1.01088025
+    Akaike info crit   = 8.51433917
+    Bayesian info crit = 29.8183150
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98919847 +/- 0.00696839 (0.70%) (init = 1)
+    l1_amp:               0.39722202 +/- 0.01421892 (3.58%) (init = 0.6454334)
+    l1_cen:               4105.77999 +/- 0.08748558 (0.00%) (init = 4105)
+    l1_wid:               7.14869237 +/- 0.47463951 (6.64%) (init = 7)
+    neb_amp:              0.50666388 +/- 0.02919707 (5.76%) (init = 0.5595303)
+    neb_cen:              4105.42303 +/- 0.02111726 (0.00%) (init = 4105.5)
+    neb_wid:              0.84852667 +/- 0.05777898 (6.81%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.748
+    C(l1_amp, l1_wid)               = -0.529
+    C(l1_amp, neb_wid)              =  0.524
+    C(l1_wid, neb_wid)              = -0.425
+    C(l1_amp, neb_amp)              =  0.341
+    C(l1_wid, neb_amp)              = -0.318
+    C(neb_amp, neb_wid)             = -0.225
+    C(continuum_intercept, neb_wid) = -0.203
+    C(l1_amp, l1_cen)               = -0.178
+    C(continuum_intercept, neb_amp) = -0.168
+    C(l1_cen, neb_wid)              = -0.165
+    C(l1_cen, neb_cen)              =  0.164
+    C(l1_cen, l1_wid)               =  0.132
+    C(l1_cen, neb_amp)              = -0.121
+spectra/BBC_009/data/BBC_009_OB22
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 41
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 121.536894
+    reduced chi-square = 0.82119523
+    Akaike info crit   = -23.6971234
+    Bayesian info crit = -2.39314762
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99019047 +/- 0.00645095 (0.65%) (init = 1)
+    l1_amp:               0.38027619 +/- 0.01134354 (2.98%) (init = 0.6103521)
+    l1_cen:               4105.56714 +/- 0.07853950 (0.00%) (init = 4105)
+    l1_wid:               7.85155615 +/- 0.46718229 (5.95%) (init = 7)
+    neb_amp:              0.41678686 +/- 0.02358662 (5.66%) (init = 0.4469575)
+    neb_cen:              4105.45013 +/- 0.02166655 (0.00%) (init = 4105.5)
+    neb_wid:              0.88285915 +/- 0.05951525 (6.74%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.778
+    C(l1_amp, neb_wid)              =  0.507
+    C(l1_amp, l1_wid)               = -0.475
+    C(l1_wid, neb_wid)              = -0.437
+    C(l1_amp, neb_amp)              =  0.334
+    C(l1_wid, neb_amp)              = -0.332
+    C(continuum_intercept, neb_wid) = -0.230
+    C(neb_amp, neb_wid)             = -0.218
+    C(continuum_intercept, neb_amp) = -0.190
+    C(l1_cen, neb_cen)              =  0.171
+spectra/BBC_009/data/BBC_009_OB23
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 41
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 195.373121
+    reduced chi-square = 1.32008866
+    Akaike info crit   = 49.8803387
+    Bayesian info crit = 71.1843145
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.01580980 +/- 0.00919032 (0.90%) (init = 1)
+    l1_amp:               0.35395543 +/- 0.01425375 (4.03%) (init = 0.5636807)
+    l1_cen:               4105.10480 +/- 0.12047202 (0.00%) (init = 4105)
+    l1_wid:               8.38321250 +/- 0.69913062 (8.34%) (init = 7)
+    neb_amp:              0.46266087 +/- 0.03288315 (7.11%) (init = 0.4914855)
+    neb_cen:              4105.44607 +/- 0.02603530 (0.00%) (init = 4105.5)
+    neb_wid:              0.83689125 +/- 0.06998755 (8.36%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.791
+    C(l1_amp, neb_wid)              =  0.442
+    C(l1_wid, neb_wid)              = -0.389
+    C(l1_amp, l1_wid)               = -0.366
+    C(neb_amp, neb_wid)             = -0.296
+    C(l1_wid, neb_amp)              = -0.273
+    C(l1_amp, neb_amp)              =  0.271
+    C(continuum_intercept, neb_wid) = -0.204
+    C(continuum_intercept, l1_amp)  =  0.156
+    C(continuum_intercept, neb_amp) = -0.155
+    C(l1_cen, neb_cen)              =  0.133
+    C(l1_cen, neb_wid)              =  0.116
+    C(l1_amp, l1_cen)               =  0.105
+spectra/BBC_009/data/BBC_009_OB24
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 49
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 160.522120
+    reduced chi-square = 1.08460892
+    Akaike info crit   = 19.4260283
+    Bayesian info crit = 40.7300041
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.03625022 +/- 0.01252988 (1.21%) (init = 1)
+    l1_amp:               0.33086447 +/- 0.01507149 (4.56%) (init = 0.5442305)
+    l1_cen:               4105.44804 +/- 0.15988699 (0.00%) (init = 4105)
+    l1_wid:               9.81855426 +/- 1.00809659 (10.27%) (init = 7)
+    neb_amp:              0.53586463 +/- 0.03926435 (7.33%) (init = 0.5780878)
+    neb_cen:              4105.38166 +/- 0.02558642 (0.00%) (init = 4105.5)
+    neb_wid:              0.78764231 +/- 0.06659766 (8.46%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.830
+    C(neb_amp, neb_wid)             = -0.363
+    C(l1_wid, neb_wid)              = -0.353
+    C(continuum_intercept, l1_amp)  =  0.345
+    C(l1_amp, neb_wid)              =  0.334
+    C(l1_wid, neb_amp)              = -0.225
+    C(continuum_intercept, neb_wid) = -0.202
+    C(l1_amp, neb_amp)              =  0.186
+    C(continuum_intercept, neb_amp) = -0.136
+    C(l1_amp, l1_wid)               = -0.130
+    C(l1_cen, neb_cen)              =  0.105
+spectra/BBC_009/data/BBC_009_OB25
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 57
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 152.090887
+    reduced chi-square = 1.02764113
+    Akaike info crit   = 11.0632409
+    Bayesian info crit = 32.3672167
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99465938 +/- 0.00637578 (0.64%) (init = 1)
+    l1_amp:               0.38729808 +/- 0.01346275 (3.48%) (init = 0.5820902)
+    l1_cen:               4105.81082 +/- 0.08238316 (0.00%) (init = 4105)
+    l1_wid:               7.16492230 +/- 0.45300344 (6.32%) (init = 7)
+    neb_amp:              0.32274381 +/- 0.02440486 (7.56%) (init = 0.4428612)
+    neb_cen:              4105.40013 +/- 0.03058136 (0.00%) (init = 4105.5)
+    neb_wid:              0.94187715 +/- 0.08602385 (9.13%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.749
+    C(l1_amp, neb_wid)              =  0.560
+    C(l1_amp, l1_wid)               = -0.556
+    C(l1_wid, neb_wid)              = -0.450
+    C(l1_amp, neb_amp)              =  0.408
+    C(l1_wid, neb_amp)              = -0.378
+    C(l1_amp, l1_cen)               = -0.222
+    C(continuum_intercept, neb_wid) = -0.215
+    C(l1_cen, neb_wid)              = -0.202
+    C(continuum_intercept, neb_amp) = -0.200
+    C(l1_cen, neb_cen)              =  0.179
+    C(l1_cen, neb_amp)              = -0.169
+    C(l1_cen, l1_wid)               =  0.166
+    C(neb_amp, neb_wid)             = -0.138
+    C(l1_wid, neb_cen)              = -0.114
+spectra/BBC_009/data/BBC_009_OB26
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 57
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 200.150049
+    reduced chi-square = 1.35236519
+    Akaike info crit   = 53.6245429
+    Bayesian info crit = 74.9285187
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.98735339 +/- 0.00645762 (0.65%) (init = 1)
+    l1_amp:               0.38315825 +/- 0.01259409 (3.29%) (init = 0.5888527)
+    l1_cen:               4104.95687 +/- 0.08571097 (0.00%) (init = 4105)
+    l1_wid:               7.05656797 +/- 0.43663063 (6.19%) (init = 7)
+    neb_amp:              0.34860435 +/- 0.02696133 (7.73%) (init = 0.4283831)
+    neb_cen:              4105.45852 +/- 0.02689137 (0.00%) (init = 4105.5)
+    neb_wid:              0.77965142 +/- 0.07185521 (9.22%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.745
+    C(l1_amp, neb_wid)              =  0.488
+    C(l1_amp, l1_wid)               = -0.475
+    C(l1_wid, neb_wid)              = -0.384
+    C(l1_amp, neb_amp)              =  0.316
+    C(l1_wid, neb_amp)              = -0.283
+    C(neb_amp, neb_wid)             = -0.257
+    C(l1_cen, neb_wid)              =  0.207
+    C(l1_amp, l1_cen)               =  0.204
+    C(continuum_intercept, neb_wid) = -0.175
+    C(l1_cen, l1_wid)               = -0.165
+    C(l1_cen, neb_amp)              =  0.149
+    C(continuum_intercept, neb_amp) = -0.142
+    C(l1_cen, neb_cen)              =  0.135
+    C(l1_wid, neb_cen)              =  0.101
+spectra/BBC_009/data/BBC_009_OB27
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 49
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 157.962629
+    reduced chi-square = 1.06731506
+    Akaike info crit   = 16.9346711
+    Bayesian info crit = 38.2386469
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.97636562 +/- 0.00658185 (0.67%) (init = 1)
+    l1_amp:               0.41058338 +/- 0.02380874 (5.80%) (init = 0.606398)
+    l1_cen:               4105.57460 +/- 0.08246405 (0.00%) (init = 4105)
+    l1_wid:               5.77266463 +/- 0.50089816 (8.68%) (init = 7)
+    neb_amp:              0.43049187 +/- 0.03279426 (7.62%) (init = 0.455263)
+    neb_cen:              4105.40173 +/- 0.02930533 (0.00%) (init = 4105.5)
+    neb_wid:              1.02652568 +/- 0.09016678 (8.78%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(l1_amp, l1_wid)               = -0.778
+    C(continuum_intercept, l1_wid)  =  0.710
+    C(l1_amp, neb_wid)              =  0.693
+    C(l1_amp, neb_amp)              =  0.618
+    C(l1_wid, neb_amp)              = -0.583
+    C(l1_wid, neb_wid)              = -0.571
+    C(continuum_intercept, neb_amp) = -0.318
+    C(l1_cen, neb_cen)              =  0.295
+    C(continuum_intercept, neb_wid) = -0.274
+    C(continuum_intercept, l1_amp)  = -0.240
+    C(l1_amp, l1_cen)               = -0.177
+    C(l1_cen, neb_amp)              = -0.151
+    C(l1_cen, neb_wid)              = -0.150
+    C(l1_cen, l1_wid)               =  0.144
+    C(neb_amp, neb_wid)             =  0.128
+spectra/BBC_009/data/BBC_009_OB28
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 57
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 138.987536
+    reduced chi-square = 0.93910498
+    Akaike info crit   = -2.90133229
+    Bayesian info crit = 18.4026435
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99480678 +/- 0.00677908 (0.68%) (init = 1)
+    l1_amp:               0.37104943 +/- 0.01136771 (3.06%) (init = 0.5987506)
+    l1_cen:               4105.51417 +/- 0.08503255 (0.00%) (init = 4105)
+    l1_wid:               7.79480051 +/- 0.48550628 (6.23%) (init = 7)
+    neb_amp:              0.26218436 +/- 0.02529816 (9.65%) (init = 0.4455693)
+    neb_cen:              4105.39554 +/- 0.03266493 (0.00%) (init = 4105.5)
+    neb_wid:              0.76324651 +/- 0.08896341 (11.66%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.775
+    C(l1_amp, neb_wid)              =  0.460
+    C(l1_amp, l1_wid)               = -0.420
+    C(l1_wid, neb_wid)              = -0.401
+    C(l1_amp, neb_amp)              =  0.297
+    C(l1_wid, neb_amp)              = -0.294
+    C(neb_amp, neb_wid)             = -0.275
+    C(continuum_intercept, neb_wid) = -0.208
+    C(continuum_intercept, neb_amp) = -0.164
+    C(l1_cen, neb_cen)              =  0.142
+    C(continuum_intercept, l1_amp)  =  0.116
+spectra/BBC_009/data/BBC_009_OB29
+[[Model]]
+    ((Model(lorentzian, prefix='l1_') + Model(nebu, prefix='neb_')) + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 41
+    # data points      = 155
+    # variables        = 7
+    chi-square         = 138.968683
+    reduced chi-square = 0.93897759
+    Akaike info crit   = -2.92235944
+    Bayesian info crit = 18.3816164
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99746672 +/- 0.00828534 (0.83%) (init = 1)
+    l1_amp:               0.36359224 +/- 0.01391417 (3.83%) (init = 0.6027562)
+    l1_cen:               4105.36520 +/- 0.10611790 (0.00%) (init = 4105)
+    l1_wid:               7.90702567 +/- 0.61520208 (7.78%) (init = 7)
+    neb_amp:              0.48713826 +/- 0.03213778 (6.60%) (init = 0.5451376)
+    neb_cen:              4105.43943 +/- 0.02276349 (0.00%) (init = 4105.5)
+    neb_wid:              0.78740912 +/- 0.06123339 (7.78%) (init = 1)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(continuum_intercept, l1_wid)  =  0.779
+    C(l1_amp, neb_wid)              =  0.463
+    C(l1_amp, l1_wid)               = -0.429
+    C(l1_wid, neb_wid)              = -0.405
+    C(neb_amp, neb_wid)             = -0.286
+    C(l1_amp, neb_amp)              =  0.285
+    C(l1_wid, neb_amp)              = -0.284
+    C(continuum_intercept, neb_wid) = -0.213
+    C(continuum_intercept, neb_amp) = -0.161
+    C(l1_cen, neb_cen)              =  0.144
+    C(continuum_intercept, l1_amp)  =  0.102

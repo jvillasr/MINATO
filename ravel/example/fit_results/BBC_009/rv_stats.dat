@@ -1,0 +1,76 @@
+ ********************
+       BBC 9
+ ********************
+
+ Mean of percentual errors
+   Lines   amp1    wid1   cen1   |    amp2    wid2   cen2 
+   -------------------------------------------------------
+   4026:   7.763   9.604  0.004  |      nan     nan    nan
+   4102:   3.693   7.004  0.002  |      nan     nan    nan
+   4144:   8.846  10.953  0.003  |      nan     nan    nan
+   4340:   3.377   6.878  0.002  |      nan     nan    nan
+   4388:  11.199  13.391  0.002  |      nan     nan    nan
+   4471:  11.848  14.418  0.003  |      nan     nan    nan
+   4553:  29.275  43.021  0.004  |      nan     nan    nan
+
+ Median of percentual errors
+   Lines   amp1    wid1   cen1   |    amp2    wid2   cen2 
+   -------------------------------------------------------
+   4026:   6.401   8.021  0.003  |      nan     nan    nan
+   4102:   3.405   6.237  0.002  |      nan     nan    nan
+   4144:   7.285   8.941  0.002  |      nan     nan    nan
+   4340:   2.842   5.528  0.002  |      nan     nan    nan
+   4388:   5.555   6.914  0.002  |      nan     nan    nan
+   4471:   5.840   7.452  0.003  |      nan     nan    nan
+   4553:  25.661  31.306  0.004  |      nan     nan    nan
+
+ Lines with the best fitted profile according to the median wid1 criterion:
+ --------------------------------------------------------------------------
+   0: 4026,    2: 4144,    4: 4388
+
+ Removing epochs with large errors:
+     epoch 1 mean(cen1_%er) =0.0029 mean(wid1_%er) = 8.8 mean(amp1_%er) = 7.1 mean(rvs1_%er) = 2.6
+     epoch 2 mean(cen1_%er) =0.0021 mean(wid1_%er) = 7.3 mean(amp1_%er) = 5.9 mean(rvs1_%er) = 1.9
+     epoch 3 mean(cen1_%er) =0.0018 mean(wid1_%er) = 5.9 mean(amp1_%er) = 4.8 mean(rvs1_%er) = 2.0
+     epoch 4 mean(cen1_%er) =0.0023 mean(wid1_%er) = 7.6 mean(amp1_%er) = 6.1 mean(rvs1_%er) = 3.0
+     epoch 5 mean(cen1_%er) =0.0019 mean(wid1_%er) = 6.8 mean(amp1_%er) = 5.5 mean(rvs1_%er) = 2.5
+     epoch 6 mean(cen1_%er) =0.0025 mean(wid1_%er) = 8.7 mean(amp1_%er) = 7.0 mean(rvs1_%er) = 2.7
+     epoch 7 mean(cen1_%er) =0.0026 mean(wid1_%er) = 9.5 mean(amp1_%er) = 7.7 mean(rvs1_%er) = 2.3
+     epoch 8 mean(cen1_%er) =0.0017 mean(wid1_%er) = 6.1 mean(amp1_%er) = 4.8 mean(rvs1_%er) = 1.8
+     epoch 9 mean(cen1_%er) =0.0026 mean(wid1_%er) = 8.9 mean(amp1_%er) = 7.2 mean(rvs1_%er) = 2.4
+     epoch10 mean(cen1_%er) =0.0108 mean(wid1_%er) =25.2 mean(amp1_%er) =21.5 mean(rvs1_%er) =14.8
+     epoch11 mean(cen1_%er) =0.0022 mean(wid1_%er) = 7.2 mean(amp1_%er) = 5.7 mean(rvs1_%er) = 2.0
+     epoch12 mean(cen1_%er) =0.0081 mean(wid1_%er) =23.6 mean(amp1_%er) =18.9 mean(rvs1_%er) =11.4
+     epoch13 mean(cen1_%er) =0.0053 mean(wid1_%er) =56.3 mean(amp1_%er) =49.1 mean(rvs1_%er) =23.3
+     epoch14 mean(cen1_%er) =0.0018 mean(wid1_%er) = 6.9 mean(amp1_%er) = 5.5 mean(rvs1_%er) = 2.2
+     epoch15 mean(cen1_%er) =0.0018 mean(wid1_%er) = 7.4 mean(amp1_%er) = 5.9 mean(rvs1_%er) = 1.7
+     epoch16 mean(cen1_%er) =0.0023 mean(wid1_%er) = 8.2 mean(amp1_%er) = 6.6 mean(rvs1_%er) = 2.1
+     epoch17 mean(cen1_%er) =0.0023 mean(wid1_%er) = 7.5 mean(amp1_%er) = 6.0 mean(rvs1_%er) = 2.6
+     epoch18 mean(cen1_%er) =0.0021 mean(wid1_%er) = 7.6 mean(amp1_%er) = 6.1 mean(rvs1_%er) = 2.3
+     epoch19 mean(cen1_%er) =0.0019 mean(wid1_%er) = 6.5 mean(amp1_%er) = 5.2 mean(rvs1_%er) = 1.7
+     epoch20 mean(cen1_%er) =0.0028 mean(wid1_%er) = 9.3 mean(amp1_%er) = 7.5 mean(rvs1_%er) = 3.5
+     epoch21 mean(cen1_%er) =0.0025 mean(wid1_%er) = 8.4 mean(amp1_%er) = 6.8 mean(rvs1_%er) = 2.6
+     epoch22 mean(cen1_%er) =0.0023 mean(wid1_%er) = 7.7 mean(amp1_%er) = 6.2 mean(rvs1_%er) = 2.6
+     epoch23 mean(cen1_%er) =0.0047 mean(wid1_%er) =13.5 mean(amp1_%er) =10.8 mean(rvs1_%er) = 5.5
+     epoch24 mean(cen1_%er) =0.0047 mean(wid1_%er) =17.1 mean(amp1_%er) =14.0 mean(rvs1_%er) = 4.6
+     epoch25 mean(cen1_%er) =0.0047 mean(wid1_%er) =12.8 mean(amp1_%er) =10.2 mean(rvs1_%er) = 4.5
+     epoch26 mean(cen1_%er) =0.0023 mean(wid1_%er) = 7.4 mean(amp1_%er) = 6.0 mean(rvs1_%er) = 3.0
+     epoch27 mean(cen1_%er) =0.0031 mean(wid1_%er) = 8.6 mean(amp1_%er) = 6.8 mean(rvs1_%er) = 3.3
+     epoch28 mean(cen1_%er) =0.0021 mean(wid1_%er) = 7.5 mean(amp1_%er) = 6.0 mean(rvs1_%er) = 2.3
+     epoch29 mean(cen1_%er) =0.0026 mean(wid1_%er) = 9.6 mean(amp1_%er) = 7.7 mean(rvs1_%er) = 3.2
+
+   epochs removed: [10, 12, 13, 23, 24, 25]
+
+ Final best epochs: [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22, 26, 27, 28, 29]
+ Number of epochs: 23
+
+ RV mean of the 23 epochs for each line: 
+ ---------------------------------------
+   - 4026: 279.565 +/- 1.662
+   - 4144: 292.040 +/- 1.538
+   - 4388: 283.758 +/- 1.157
+
+ Weighted mean RV of the 23 epochs:
+------------------------------------------
+   284.805 +/- 0.752, std dev = 3.527
+
