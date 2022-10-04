@@ -33,7 +33,7 @@ class atm_fitting:
         self.dic_lines_B = dic_lines_B
         df = pd.read_feather(self.grid)
         nparams = len(df.columns)
-        print(df[:5])
+        # print(df[:5])
 
         spectra = Spectra(self.grid, self.spectrumA, self.spectrumB)
         wavA, wavB = spectra.get_wave()
@@ -75,7 +75,8 @@ class atm_fitting:
                 dst_B_w_slc, dst_B_f_slc = self.slicedata(wavB, fluB, usr_dicB)
                 if last_lr != None:
                     t1 = time.time()
-                    print('\n Light ratio completed in : ' + str(timedelta(seconds=t1-t0)) + ' [s] \n')
+                    print(' Light ratio = ' + str(v[row, 0]) + ' completed in : ' + str(timedelta(seconds=t1-t0)) + ' [s] \n')
+                    print('\n')
             try:
                 if v[row, 2] < 16:
                     modA_w, modA_f, modelA = self.get_model(*v[row, 2:5], source='atlas')
@@ -94,12 +95,12 @@ class atm_fitting:
                     spl_fluxB = [splB(x) for x in dst_B_w_slc]
 
                     if v[row, 1] != last_he2h:
-                        print('last He/H: ', last_he2h)
+                        # print('last He/H: ', last_he2h)
                         spl_fluxA = self.He2H_ratio(dst_A_w_slc, spl_fluxA, 0.075, v[row, 1], usr_dicA)
                         # spl_fluxB = He2H_ratio(dst_B_x, spl_fluxB, 0.1, he2h, dicB)
                         if last_he2h != None:
                             t2 = time.time()
-                            print('   He/H ratio completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(v[row-1, 1]))
+                            print('   He/H ratio = ' + str(v[row-1, 1]) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(v[row, 0]))
                     last_he2h = v[row, 1]
 
                     chi2A, chi2B, ndataA, ndataB = 0, 0, 0, 0
@@ -119,7 +120,7 @@ class atm_fitting:
                     for i,line in enumerate(usr_dicA):
                         ndataA += len(spl_fluxA[i])
                         chi2A += self.chi2(dst_A_f_slc[i], spl_fluxA[i])
-                        # print(chi2A, chi2B)
+                        # print('chi2A =', chi2A, 'chi2B =', chi2B)
                         # chisqr = chi2A + chi2B
                         # print(line, chisqr)
                         # print(line, chisqr/len(dst_B_y_crop), len(dst_B_y_crop))
@@ -136,8 +137,7 @@ class atm_fitting:
                     result_dic['chi2redA'].append(chi2redA)
                     result_dic['chi2redB'].append(chi2redB)
                     # print('total number of data point', ndata)
-                    # print('chi2 =', chi2_tot)
-                    # print('\n')
+                    print('\n   chi2 =', chi2_tot)
                     # gridB.append([modelB, lr, T2, g2, rv, chi2_tot])
                     # return chi2_tot, chi2A, chi2B, chi2r_tot, chi2redA, chi2redB
             except TypeError:
@@ -308,13 +308,13 @@ class Spectra(atm_fitting):
         return fluxA, fluxB
 
 
-dsnt_A = '/Users/jaime/Science/KUL_postdoc/BBC/291/tomer/ADIS_lguess_K1K2=0.3_94.0_15.0_renorm.txt'
-dsnt_B = '/Users/jaime/Science/KUL_postdoc/BBC/291/tomer/BDIS_lguess_K1K2=0.3_94.0_15.0.txt'
-grid = '~/Science/github/jvillasr/MINATO/SpecAnalysis/data/grid.feather'
+# dsnt_A = '/Users/jaime/Science/KUL_postdoc/BBC/291/tomer/ADIS_lguess_K1K2=0.3_94.0_15.0_renorm.txt'
+# dsnt_B = '/Users/jaime/Science/KUL_postdoc/BBC/291/tomer/BDIS_lguess_K1K2=0.3_94.0_15.0.txt'
+# grid = '~/Science/github/jvillasr/MINATO/SpecAnalysis/data/grid.feather'
 
-select_linesA = [4026, 4102, 4121, 4144, 4267, 4340, 4388, 4471, 4553]
-select_linesB = [4026, 4102, 4121, 4144, 4267, 4340, 4388, 4553]
+# select_linesA = [4026, 4102, 4121, 4144, 4267, 4340, 4388, 4471, 4553]
+# select_linesB = [4026, 4102, 4121, 4144, 4267, 4340, 4388, 4553]
 
-res_df = atm_fitting(grid, dsnt_A, dsnt_B).compute_chi2(select_linesA, select_linesB)
-# print(res_dic)
-res_df.to_feather('./data/minchi2_result_'+current_date+'.feather')
+# res_df = atm_fitting(grid, dsnt_A, dsnt_B).compute_chi2(select_linesA, select_linesB)
+# # print(res_dic)
+# res_df.to_feather('./data/minchi2_result_'+current_date+'.feather')
