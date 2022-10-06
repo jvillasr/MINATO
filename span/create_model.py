@@ -1,4 +1,4 @@
-from SpecAnalysis import rotin_inp as ri
+from span import rotin_inp as ri
 import numpy as np
 
 starA=True
