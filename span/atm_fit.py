@@ -67,7 +67,7 @@ class atm_fitting:
         v = df.values
         last_lr, last_he2h = None, None
         for row in range(df.shape[0]):
-            
+            print('last_lr =', last_lr)
             if v[row, 0] != last_lr:
                 # print(row, *v[row, 2:5])
                 fluA, fluB = spectra.rescale_flux(v[row, 0])
@@ -120,7 +120,7 @@ class atm_fitting:
                     for i,line in enumerate(usr_dicA):
                         ndataA += len(spl_fluxA[i])
                         chi2A += self.chi2(dst_A_f_slc[i], spl_fluxA[i])
-                        # print('chi2A =', chi2A, 'chi2B =', chi2B)
+                        print('chi2A =', chi2A, 'chi2B =', chi2B)
                         # chisqr = chi2A + chi2B
                         # print(line, chisqr)
                         # print(line, chisqr/len(dst_B_y_crop), len(dst_B_y_crop))
