@@ -33,7 +33,7 @@ class atm_fitting:
         self.dic_lines_B = dic_lines_B
         df = pd.read_feather(self.grid)
         nparams = len(df.columns)
-        # print(df[:5])
+        print(df[:5])
 
         spectra = Spectra(self.grid, self.spectrumA, self.spectrumB)
         wavA, wavB = spectra.get_wave()
@@ -67,7 +67,7 @@ class atm_fitting:
         v = df.values
         last_lr, last_he2h = None, None
         for row in range(df.shape[0]):
-            print('last_lr =', last_lr)
+            # print(v[row])
             if v[row, 0] != last_lr:
                 # print(row, *v[row, 2:5])
                 fluA, fluB = spectra.rescale_flux(v[row, 0])
@@ -83,7 +83,7 @@ class atm_fitting:
                 else:
                     modA_w, modA_f, modelA = self.get_model(*v[row, 2:5], source='tlusty')
                 modB_w, modB_f, modelB = self.get_model(*v[row, 5:], source='tlusty')
-                # print(modelA, modelB)
+                # print('models: ', modelA, modelB)
 
                 if modA_f and modB_f:
                     splA = inter.UnivariateSpline(modA_w, modA_f)
@@ -137,7 +137,7 @@ class atm_fitting:
                     result_dic['chi2redA'].append(chi2redA)
                     result_dic['chi2redB'].append(chi2redB)
                     # print('total number of data point', ndata)
-                    print('\n   chi2 =', chi2_tot)
+                    # print('\n   chi2 =', chi2_tot)
                     # gridB.append([modelB, lr, T2, g2, rv, chi2_tot])
                     # return chi2_tot, chi2A, chi2B, chi2r_tot, chi2redA, chi2redB
             except TypeError:
@@ -189,9 +189,9 @@ class atm_fitting:
         source : Source of the models. Options are 'tlusty' and 'atlas'.
         '''
         T, g, rot = pars
-        lowT_models_path = '~/Science/github/jvillasr/MINATO/SpecAnalysis/models/ATLAS9/'
-        tlustyB_path =     '~/Science/github/jvillasr/MINATO/SpecAnalysis/models/TLUSTY/BLMC_v2/'
-        tlustyO_path =     '~/Science/github/jvillasr/MINATO/SpecAnalysis/models/TLUSTY/OLMC_v10/'
+        lowT_models_path = '~/Science/github/jvillasr/MINATO/span/models/ATLAS9/'
+        tlustyB_path =     '~/Science/github/jvillasr/MINATO/span/models/TLUSTY/BLMC_v2/'
+        tlustyO_path =     '~/Science/github/jvillasr/MINATO/span/models/TLUSTY/OLMC_v10/'
 
         lowT_models_list = sorted(glob(lowT_models_path+'*fw05'))
         lowT_models_list = [x.replace(lowT_models_path, '') for x in lowT_models_list]
