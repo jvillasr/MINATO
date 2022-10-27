@@ -31,9 +31,12 @@ class atm_fitting:
     def compute_chi2(self, dic_lines_A, dic_lines_B):
         self.dic_lines_A = dic_lines_A
         self.dic_lines_B = dic_lines_B
-        df = pd.read_feather(self.grid)
+        try:
+            df = pd.read_feather(self.grid)
+        except:
+            df = pd.read_csv(self.grid)
         nparams = len(df.columns)
-        print(df[:5])
+        # print(df[:5])
 
         spectra = Spectra(self.grid, self.spectrumA, self.spectrumB)
         wavA, wavB = spectra.get_wave()
@@ -120,7 +123,7 @@ class atm_fitting:
                     for i,line in enumerate(usr_dicA):
                         ndataA += len(spl_fluxA[i])
                         chi2A += self.chi2(dst_A_f_slc[i], spl_fluxA[i])
-                        print('chi2A =', chi2A, 'chi2B =', chi2B)
+                        # print('chi2A =', chi2A, 'chi2B =', chi2B)
                         # chisqr = chi2A + chi2B
                         # print(line, chisqr)
                         # print(line, chisqr/len(dst_B_y_crop), len(dst_B_y_crop))
