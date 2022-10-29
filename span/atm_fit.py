@@ -87,13 +87,15 @@ class atm_fitting:
                 # print('models: ', modelA, modelB)
 
                 if modA_f and modB_f:
-                    splA = inter.UnivariateSpline(modA_w, modA_f)
-                    splA.set_smoothing_factor(0.)
-                    spl_fluxA = [splA(x) for x in dst_A_w_slc]
+                    # splA = inter.UnivariateSpline(modA_w, modA_f)
+                    # splA.set_smoothing_factor(0.)
+                    # spl_fluxA = [splA(x) for x in dst_A_w_slc]
+                    spl_fluxA = np.interp(dst_A_w_slc, modA_w, modA_f)
                     #
-                    splB = inter.UnivariateSpline(modB_w, modB_f)
-                    splB.set_smoothing_factor(0.)
-                    spl_fluxB = [splB(x) for x in dst_B_w_slc]
+                    # splB = inter.UnivariateSpline(modB_w, modB_f)
+                    # splB.set_smoothing_factor(0.)
+                    # spl_fluxB = [splB(x) for x in dst_B_w_slc]
+                    spl_fluxB = np.interp(dst_B_w_slc, modB_w, modB_f)
 
                     if v[row, 1] != last_he2h:
                         # print('last He/H: ', last_he2h)
