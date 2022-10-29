@@ -40,7 +40,6 @@ class atm_fitting:
 
         spectra = Spectra(self.grid, self.spectrumA, self.spectrumB)
         wavA, wavB = spectra.get_wave()
-        
         usr_dicA = self.user_dic(dic_lines_A)
         usr_dicB = self.user_dic(dic_lines_B)
 
@@ -69,17 +68,16 @@ class atm_fitting:
         # rownum = 1460
         v = df.values
         last_lr, last_he2h = None, None
+        # print(last_lr)
         for row in range(df.shape[0]):
             # print(v[row])
+            # print(v[row, 0])
             if v[row, 0] != last_lr:
                 # print(row, *v[row, 2:5])
                 fluA, fluB = spectra.rescale_flux(v[row, 0])
                 dst_A_w_slc, dst_A_f_slc = self.slicedata(wavA, fluA, usr_dicA)
                 dst_B_w_slc, dst_B_f_slc = self.slicedata(wavB, fluB, usr_dicB)
-                if last_lr != None:
-                    t1 = time.time()
-                    print(' Light ratio = ' + str(v[row, 0]) + ' completed in : ' + str(timedelta(seconds=t1-t0)) + ' [s] \n')
-                    print('\n')
+
             try:
                 if v[row, 2] < 16:
                     modA_w, modA_f, modelA = self.get_model(*v[row, 2:5], source='atlas')
@@ -101,10 +99,8 @@ class atm_fitting:
                         # print('last He/H: ', last_he2h)
                         spl_fluxA = self.He2H_ratio(dst_A_w_slc, spl_fluxA, 0.075, v[row, 1], usr_dicA)
                         # spl_fluxB = He2H_ratio(dst_B_x, spl_fluxB, 0.1, he2h, dicB)
-                        if last_he2h != None:
-                            t2 = time.time()
-                            print('   He/H ratio = ' + str(v[row-1, 1]) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(v[row, 0]))
-                    last_he2h = v[row, 1]
+
+
 
                     chi2A, chi2B, ndataA, ndataB = 0, 0, 0, 0
                     for i,line in enumerate(usr_dicB):
@@ -152,9 +148,17 @@ class atm_fitting:
                 result_dic['chi2r_tot'].append(None)
                 result_dic['chi2redA'].append(None)
                 result_dic['chi2redB'].append(None)
+            if v[row, 0] != last_lr and last_lr != None:
+                t1 = time.time()
+                print('\n Light ratio = ' + str(v[row, 0]) + ' completed in : ' + str(timedelta(seconds=t1-t0)) + ' [s] \n')
+                print('\n')            
+            if v[row, 1] != last_he2h:
+                t2 = time.time()
+                print('   He/H ratio = ' + str(v[row, 1]) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(v[row, 0]))
             last_lr = v[row, 0]
+            last_he2h = v[row, 1]
         tf = time.time()
-        print('Computation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
+        print('\nComputation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
         # print(result_dic)
         tf1 = time.time()
         output = pd.DataFrame.from_dict(result_dic)
