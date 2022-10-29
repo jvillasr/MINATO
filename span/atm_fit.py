@@ -84,23 +84,23 @@ class atm_fitting:
                 else:
                     modA_w, modA_f, modelA = self.get_model(*v[row, 2:5], source='tlusty')
                 modB_w, modB_f, modelB = self.get_model(*v[row, 5:], source='tlusty')
-                # print('models: ', modelA, modelB)
+
 
                 if modA_f and modB_f:
                     # splA = inter.UnivariateSpline(modA_w, modA_f)
                     # splA.set_smoothing_factor(0.)
-                    # spl_fluxA = [splA(x) for x in dst_A_w_slc]
-                    spl_fluxA = np.interp(dst_A_w_slc, modA_w, modA_f)
+                    # modA_f_interp = [splA(x) for x in dst_A_w_slc]
+                    modA_f_interp = [np.interp(x, modA_w, modA_f) for x in wavA]
                     #
                     # splB = inter.UnivariateSpline(modB_w, modB_f)
                     # splB.set_smoothing_factor(0.)
-                    # spl_fluxB = [splB(x) for x in dst_B_w_slc]
-                    spl_fluxB = np.interp(dst_B_w_slc, modB_w, modB_f)
+                    # modB_f_interp = [splB(x) for x in dst_B_w_slc]
+                    modB_f_interp = [np.interp(x, modB_w, modB_f) for x in wavB]
 
                     if v[row, 1] != last_he2h:
                         # print('last He/H: ', last_he2h)
-                        spl_fluxA = self.He2H_ratio(dst_A_w_slc, spl_fluxA, 0.075, v[row, 1], usr_dicA)
-                        # spl_fluxB = He2H_ratio(dst_B_x, spl_fluxB, 0.1, he2h, dicB)
+                        modA_f_interp = self.He2H_ratio(wavA, modA_f_interp, 0.075, v[row, 1], usr_dicA)
+                        # modB_f_interp = He2H_ratio(dst_B_x, modB_f_interp, 0.1, he2h, dicB)
 
 
 
@@ -108,19 +108,19 @@ class atm_fitting:
                     for i,line in enumerate(usr_dicB):
                         if line == 4102:
                             dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4098, 4105)
-                            spl_wavB_crop, spl_fluxB_crop = self.crop_data(dst_B_w_slc[i], spl_fluxB[i], 4098, 4105)
+                            spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc[i], modB_f_interp[i], 4098, 4105)
                         elif line == 4340:
                             dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4334, 4347)
-                            spl_wavB_crop, spl_fluxB_crop = self.crop_data(dst_B_w_slc[i], spl_fluxB[i], 4334, 4347)
+                            spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc[i], modB_f_interp[i], 4334, 4347)
                         else:
                             dst_B_x_crop, dst_B_y_crop    = dst_B_w_slc[i], dst_B_f_slc[i]
-                            spl_wavB_crop, spl_fluxB_crop = dst_B_w_slc[i], spl_fluxB[i]
-                        ndataB += len(spl_fluxB_crop)
-                        chi2B += self.chi2(dst_B_y_crop, spl_fluxB_crop)
+                            spl_wavB_crop, modB_f_interp_crop = dst_B_w_slc[i], modB_f_interp[i]
+                        ndataB += len(modB_f_interp_crop)
+                        chi2B += self.chi2(dst_B_y_crop, modB_f_interp_crop)
                     # print('number of data point of spectrum B', ndataB)
                     for i,line in enumerate(usr_dicA):
-                        ndataA += len(spl_fluxA[i])
-                        chi2A += self.chi2(dst_A_f_slc[i], spl_fluxA[i])
+                        ndataA += len(modA_f_interp[i])
+                        chi2A += self.chi2(dst_A_f_slc[i], modA_f_interp[i])
                         # print('chi2A =', chi2A, 'chi2B =', chi2B)
                         # chisqr = chi2A + chi2B
                         # print(line, chisqr)
@@ -154,7 +154,7 @@ class atm_fitting:
                 t1 = time.time()
                 print('\n Light ratio = ' + str(v[row, 0]) + ' completed in : ' + str(timedelta(seconds=t1-t0)) + ' [s] \n')
                 print('\n')            
-            if v[row, 1] != last_he2h:
+            if v[row, 1] != last_he2h and last_lr != None:
                 t2 = time.time()
                 print('   He/H ratio = ' + str(v[row, 1]) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(v[row, 0]))
             last_lr = v[row, 0]
