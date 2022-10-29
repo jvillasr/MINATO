@@ -1,4 +1,5 @@
 import time
+import sys
 import itertools
 import pandas as pd
 import numpy as np
@@ -77,32 +78,33 @@ class atm_fitting:
                 fluA, fluB = spectra.rescale_flux(v[row, 0])
                 dst_A_w_slc, dst_A_f_slc = self.slicedata(wavA, fluA, usr_dicA)
                 dst_B_w_slc, dst_B_f_slc = self.slicedata(wavB, fluB, usr_dicB)
-
             try:
                 if v[row, 2] < 16:
                     modA_w, modA_f, modelA = self.get_model(*v[row, 2:5], source='atlas')
                 else:
                     modA_w, modA_f, modelA = self.get_model(*v[row, 2:5], source='tlusty')
                 modB_w, modB_f, modelB = self.get_model(*v[row, 5:], source='tlusty')
-
-
                 if modA_f and modB_f:
                     # splA = inter.UnivariateSpline(modA_w, modA_f)
                     # splA.set_smoothing_factor(0.)
                     # modA_f_interp = [splA(x) for x in dst_A_w_slc]
-                    modA_f_interp = [np.interp(x, modA_w, modA_f) for x in wavA]
+                    modA_f_interp = [np.interp(x, modA_w, modA_f) for x in dst_A_w_slc]
                     #
                     # splB = inter.UnivariateSpline(modB_w, modB_f)
                     # splB.set_smoothing_factor(0.)
                     # modB_f_interp = [splB(x) for x in dst_B_w_slc]
-                    modB_f_interp = [np.interp(x, modB_w, modB_f) for x in wavB]
-
+                    modB_f_interp = [np.interp(x, modB_w, modB_f) for x in dst_B_w_slc]
+                    
                     if v[row, 1] != last_he2h:
                         # print('last He/H: ', last_he2h)
-                        modA_f_interp = self.He2H_ratio(wavA, modA_f_interp, 0.075, v[row, 1], usr_dicA)
+                        modA_f_interp = self.He2H_ratio(dst_A_w_slc, modA_f_interp, 0.075, v[row, 1], usr_dicA)
                         # modB_f_interp = He2H_ratio(dst_B_x, modB_f_interp, 0.1, he2h, dicB)
-
-
+                    # print(len(modA_f_interp))
+                    # for i in range(len(dst_A_w_slc)):
+                    #     print(i, len(modA_f_interp[i]))
+                    #     plt.plot(dst_A_w_slc[i],modA_f_interp[i])
+                    # plt.show()
+                    # sys.exit()
 
                     chi2A, chi2B, ndataA, ndataB = 0, 0, 0, 0
                     for i,line in enumerate(usr_dicB):
@@ -159,6 +161,8 @@ class atm_fitting:
                 print('   He/H ratio = ' + str(v[row, 1]) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(v[row, 0]))
             last_lr = v[row, 0]
             last_he2h = v[row, 1]
+            if int(100*row/len(df)) in range(10, 110, 10):
+                print(int(100*row/len(df)), r'% completed')
         tf = time.time()
         print('\nComputation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
         # print(result_dic)
