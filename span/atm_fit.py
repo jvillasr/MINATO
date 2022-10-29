@@ -161,7 +161,7 @@ class atm_fitting:
                 print('   He/H ratio = ' + str(v[row, 1]) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(v[row, 0]))
             last_lr = v[row, 0]
             last_he2h = v[row, 1]
-            if int(100*row/len(df)) in range(10, 110, 10):
+            if int(100*row/len(df)) in range(10, 110, 10) and int(100*row/len(df)) != int(100*(row-1)/len(df)):
                 print(int(100*row/len(df)), r'% completed')
         tf = time.time()
         print('\nComputation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
