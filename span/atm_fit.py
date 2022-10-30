@@ -16,7 +16,6 @@ class atm_fitting:
         self.grid = grid
         self.spectrumA = spectrumA
         self.spectrumB = spectrumB
-        # self.lrat = lrat
     lines_dic = {
                     4026: { 'region':[4005, 4033], 'title':'He I $\lambda$4009/26'},
                     4102: { 'region':[4084-20, 4117], 'title':'H$\delta$'},
@@ -29,58 +28,32 @@ class atm_fitting:
                     4553: { 'region':[4536, 4560], 'title':'Fe II, Si III'} }
     def user_dic(self, lines):
         self.lines = lines
-        usr_dic = { line: self.lines_dic[line] for line in self.lines }
-        return usr_dic
+        dic = { line: self.lines_dic[line] for line in self.lines }
+        return dic
     def compute_chi2(self, dic_lines_A, dic_lines_B):
+        '''
+        It iterates over the grid of parameters to compare models of synthetic spectra 
+        to observations and computes the chi^2 test.
+        '''
         self.dic_lines_A = dic_lines_A
         self.dic_lines_B = dic_lines_B
-        # try:
-        #     df = pd.read_feather(self.grid)
-        # except:
-        #     df = pd.read_csv(self.grid)
         nparams = len(self.grid)
-        # print(df[:5])
+        # compute length of the grid
         gridlen = prod([len(x) for x in self.grid])
-
+        # create spectra object to retrieve wavelength and flux
         spectra = Spectra(self.grid, self.spectrumA, self.spectrumB)
         wavA, wavB = spectra.get_wave()
+        # setting the dictionaries with the spectral lines selected for the fit
         usr_dicA = self.user_dic(dic_lines_A)
         usr_dicB = self.user_dic(dic_lines_B)
-
-        # result_dic = dict()
+        # creating dictionary to store results
         result_dic = {'lrat': [], 'teffA': [], 'loggA': [], 'rotA': [], 'He2H': [], 'teffB': [], 'loggB': [], 'rotB': [], 
                         'chi2_tot': [], 'chi2A': [], 'chi2B': [], 'chi2r_tot': [], 'chi2redA': [], 'chi2redB': []}
         col = list(result_dic.keys())
- 
-        # #Iterate over all values in pivot table
-        # t0 = time.time()
-        # rownum = 50000
-        # v = df[:rownum].values
-        # last_lr = None
-        # for row in range(df[:rownum].shape[0]):
-            
-        #     if df['lrat'].loc[row] != last_lr:
-        #         print(row, df['lrat'].loc[row])
-        #         fluA, fluB = spectra.rescale_flux(df['lrat'].loc[row])
-        #     for column in range(df[:rownum].shape[1]):
-        #         test = v[row, column]
-        #     # print(v[row])
-        #     last_lr = df['lrat'].loc[row]
-        # t1 = time.time()
-        # print('Iteration over values takes: ' + str(t1-t0))
-
-        #Iterate over all values in pivot table
         t0 = time.time()
-        # rownum = 500000
-        # rownum = 1460
-        prog = 0
-        # v = df.values
-        # last_lr, last_he2h = None, None
-        # print(last_lr)
+        prog = 0 # progress counter
+        nomodel = 0 # number of models not found to compute progress
         t3 = time.time()
-        # with open("parse_data.csv", "w") as f:
-        #     writer = csv.writer(f, delimiter="\t")
-        #     writer.writerow(result_dic.keys())
         print('\n ##### Computing chi^2 for grid #####\n')
         for lr in self.grid[0]:
             # rescale flux to new light ratio and slice data to regions for chi^2 computation
@@ -112,7 +85,6 @@ class atm_fitting:
                                                         #  interpolate models to the wavelength of the sliced disentangled spectrum
                                                         modB_f_interp = [np.interp(x, modB_w, modB_f) for x in dst_B_w_slc]
 
-
                                                         chi2A, chi2B, ndataA, ndataB = 0, 0, 0, 0
                                                         # crop nebular emission from Balmer lines and compute chi^2
                                                         for i,line in enumerate(usr_dicB):
@@ -126,107 +98,52 @@ class atm_fitting:
                                                                 dst_B_x_crop, dst_B_y_crop    = dst_B_w_slc[i], dst_B_f_slc[i]
                                                                 spl_wavB_crop, modB_f_interp_crop = dst_B_w_slc[i], modB_f_interp[i]
                                                             ndataB += len(modB_f_interp_crop)
-                                                            chi2B += self.chi2(dst_B_y_crop, modB_f_interp_crop)
-                                                        
+                                                            chi2B += self.chi2(dst_B_y_crop, modB_f_interp_crop)                  
                                                         for i,line in enumerate(usr_dicA):
                                                             ndataA += len(modA_f_interp[i])
                                                             chi2A += self.chi2(dst_A_f_slc[i], modA_f_interp[i])
-                                                            # print('chi2A =', chi2A, 'chi2B =', chi2B)
-                                                            # chisqr = chi2A + chi2B
-                                                            # print(line, chisqr)
-                                                            # print(line, chisqr/len(dst_B_y_crop), len(dst_B_y_crop))
                                                         chi2_tot = chi2A + chi2B
-                                                        # result_dic['chi2_tot'].append(chi2_tot)
-                                                        # result_dic['chi2A'].append(chi2A)
-                                                        # result_dic['chi2B'].append(chi2B)
-                                                        # result_dic['chi2_tot'] = chi2_tot
-                                                        # result_dic['chi2A'] = chi2A
-                                                        # result_dic['chi2B'] = chi2B
-                                                        # print('number of data point of spectrum A', ndataA)
                                                         ndata = ndataA + ndataB
                                                         chi2redA = chi2A/(ndataA-nparams)
                                                         chi2redB = chi2B/(ndataB-nparams)
                                                         chi2r_tot = chi2redA + chi2redB
-                                                        # result_dic['chi2r_tot'].append(chi2r_tot)
-                                                        # result_dic['chi2redA'].append(chi2redA)
-                                                        # result_dic['chi2redB'].append(chi2redB)
-                                                        # result_dic['chi2redA'] = chi2A/(ndataA-nparams)
-                                                        # result_dic['chi2redB'] = chi2B/(ndataB-nparams)
-                                                        # result_dic['chi2r_tot'] = result_dic['chi2redA'] + result_dic['chi2redB']
+                                                        # appending to dictionary
                                                         row = [lr, TA, gA, rA, he, TB, gB, rB, chi2_tot, chi2A, chi2B, chi2r_tot, chi2redA, chi2redB]
-                                                        # print(row)
-                                                        
-                                                        # print(col[:7])
-                                                        # sys.exit()
                                                         for key, val in zip(col, row):
                                                             result_dic[key].append(val)
-
-
                                                 except TypeError:
-                                                    # pass
-                                                    for key in col:
-                                                        result_dic[key].append(None)                                                    
-                                                    # result_dic['chi2_tot'].append(None)
-                                                    # result_dic['chi2A'].append(None)
-                                                    # result_dic['chi2B'].append(None)
-                                                    # result_dic['chi2r_tot'].append(None)
-                                                    # result_dic['chi2redA'].append(None)
-                                                    # result_dic['chi2redB'].append(None)
+                                                    nomodel += 1
+                                                    pass
                                         progold = prog
-                                        prog = int(100*len(result_dic['chi2_tot'])/gridlen)
+                                        prog = int(100*len(result_dic['chi2_tot'])/(gridlen-nomodel))
                                         if prog in range(10, 110, 10) and prog != progold:
                                             t4 = time.time()
                                             print(str(prog)+r'% completed in', str(timedelta(seconds=t4-t3)))
                                             t3 = time.time()
-
                         except TypeError:
-                            # pass
-                            for key in col:
-                                result_dic[key].append(None)                      
-                            # result_dic['chi2_tot'].append(None)
-                            # result_dic['chi2A'].append(None)
-                            # result_dic['chi2B'].append(None)
-                            # result_dic['chi2r_tot'].append(None)
-                            # result_dic['chi2redA'].append(None)
-                            # result_dic['chi2redB'].append(None)
-
-
-
-
+                            nomodel += 1
+                            pass
                 t2 = time.time()
                 print('   Teff_A = ' + str(TA) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(lr))
-            # if v[row, 0] != last_lr and last_lr != None:
             t1 = time.time()
             print('\n Light ratio = ' + str(lr) + ' completed in : ' + str(timedelta(seconds=t1-t0)) + ' [s] \n')
             print('\n')            
-            # if v[row, 1] != last_he2h and last_lr != None:
-
-            # last_lr = v[row, 0]
-            # last_he2h = v[row, 1]
-            # writer.writerow(result_dic.values())
-        # print(len(result_dic))
         tf = time.time()
         print('Computation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
 
         tf1 = time.time()
         output = pd.DataFrame.from_dict(result_dic)
-        # output = pd.concat([df, output], ignore_index=False, axis=1)
         print(output)
         tf2 = time.time()
         print('dataframe from dict and created in: ' + str(timedelta(seconds=tf2-tf1)) + ' [s] \n')
-        # tf3 = time.time()
-        # d = np.tile(result_dic, gridlen)
-        # output2 = pd.DataFrame.from_dict(d)
-        # # output2 = pd.concat([df, output], ignore_index=False, axis=1)
-        # print(output2)
-        # tf4 = time.time()
-        # print('dataframe from np.tile and created in: ' + str(timedelta(seconds=tf4-tf3)) + ' [s] \n')
-
-        # print('dataframe and created in: ' + str(timedelta(seconds=tf2-tf1)) + ' [s] \n')
         return output
 
 
     def rescale_flux(self, lrat):
+        '''
+        Rescales flux given a light ratio
+        Returns: rescaled flux of both stars
+        '''
         self.lrat = lrat
         ratio0 = 0.3
         ratio1 = lrat
@@ -235,6 +152,7 @@ class atm_fitting:
         flux_new_B = (fluxB -1)*(ratio0/ratio1) + 1
         return flux_new_A, flux_new_B
     def slicedata(self, x_data, y_data, dictionary):
+        '''Slices data given a dictionary of spectral lines and wavelength ranges'''
         self.x_data = x_data
         self.y_data = y_data
         self.dictionary = dictionary
@@ -250,7 +168,9 @@ class atm_fitting:
         return x_data_sliced, y_data_sliced
     def get_model(self, *pars, source='tlusty'):
         '''
+        Obtains the precomputed TLUSTY or ATLAS9 model from the parameters T, logg and vrot
         source : Source of the models. Options are 'tlusty' and 'atlas'.
+        Returns: wavelength, flux and name of the model
         '''
         T, g, rot = pars
         lowT_models_path = '~/Science/github/jvillasr/MINATO/span/models/ATLAS9/'
@@ -274,7 +194,6 @@ class atm_fitting:
                 if T>30:
                     model = 'T'+str(int(T*10))+'g'+str(int(g*10))+'v10r'+str(int(rot))+'fw05'
                     df = pd.read_csv(tlustyO_path+model,header=None, sep='\s+')
-
                 else:
                     df = pd.read_csv(tlustyB_path+model,header=None, sep='\s+')
                 return df[0].array, df[1].array, model
@@ -282,7 +201,6 @@ class atm_fitting:
                 # print('WARNING: No model named '+model+' was found')
                 # raise ValueError('   WARNING: No model available for '+model)
                 pass
-
         elif source=='atlas':
             model = 'T'+str(int(T))+'g'+str(int(g))+'v2r'+str(int(rot))+'fw05'
             try:
@@ -341,10 +259,12 @@ class atm_fitting:
         else:
             return new_spetrum
     def chi2(self, obs, exp):
+        '''Computes chi^2 statistics'''
         self.obs = obs
         self.exp = exp
         return np.sum(((obs-exp)**2)/exp)
     def crop_data(self, x_data, y_data, range1, range2):
+        '''Crops a range of wavelength'''
         self.x_data = x_data
         self.y_data = y_data
         self.range1 = range1
@@ -352,10 +272,7 @@ class atm_fitting:
         cond = (x_data < range1) | (x_data > range2)
         return x_data[cond], y_data[cond]
 
-
 class Spectra(atm_fitting):
-    # def __init__(atm_fitting):
-
     def read_spec(self):
         dsnt_A = pd.read_csv(self.spectrumA, header=None, sep='\s+')        
         dsnt_B = pd.read_csv(self.spectrumB, header=None, sep='\s+')
@@ -370,15 +287,3 @@ class Spectra(atm_fitting):
         fluxA = specA[1]
         fluxB = specB[1]
         return fluxA, fluxB
-
-
-# dsnt_A = '/Users/jaime/Science/KUL_postdoc/BBC/291/tomer/ADIS_lguess_K1K2=0.3_94.0_15.0_renorm.txt'
-# dsnt_B = '/Users/jaime/Science/KUL_postdoc/BBC/291/tomer/BDIS_lguess_K1K2=0.3_94.0_15.0.txt'
-# grid = '~/Science/github/jvillasr/MINATO/SpecAnalysis/data/grid.feather'
-
-# select_linesA = [4026, 4102, 4121, 4144, 4267, 4340, 4388, 4471, 4553]
-# select_linesB = [4026, 4102, 4121, 4144, 4267, 4340, 4388, 4553]
-
-# res_df = atm_fitting(grid, dsnt_A, dsnt_B).compute_chi2(select_linesA, select_linesB)
-# # print(res_dic)
-# res_df.to_feather('./data/minchi2_result_'+current_date+'.feather')
