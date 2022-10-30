@@ -1,5 +1,6 @@
 import time
 import sys
+import csv
 import itertools
 import pandas as pd
 import numpy as np
@@ -70,109 +71,128 @@ class atm_fitting:
         v = df.values
         last_lr, last_he2h = None, None
         # print(last_lr)
-        for row in range(df.shape[0]):
-            # print(v[row])
-            # print(v[row, 0])
-            if v[row, 0] != last_lr:
-                # print(row, *v[row, 2:5])
-                fluA, fluB = spectra.rescale_flux(v[row, 0])
-                dst_A_w_slc, dst_A_f_slc = self.slicedata(wavA, fluA, usr_dicA)
-                dst_B_w_slc, dst_B_f_slc = self.slicedata(wavB, fluB, usr_dicB)
-            try:
-                if v[row, 2] < 16:
-                    modA_w, modA_f, modelA = self.get_model(*v[row, 2:5], source='atlas')
-                else:
-                    modA_w, modA_f, modelA = self.get_model(*v[row, 2:5], source='tlusty')
-                modB_w, modB_f, modelB = self.get_model(*v[row, 5:], source='tlusty')
-                if modA_f and modB_f:
-                    # splA = inter.UnivariateSpline(modA_w, modA_f)
-                    # splA.set_smoothing_factor(0.)
-                    # modA_f_interp = [splA(x) for x in dst_A_w_slc]
-                    modA_f_interp = [np.interp(x, modA_w, modA_f) for x in dst_A_w_slc]
-                    #
-                    # splB = inter.UnivariateSpline(modB_w, modB_f)
-                    # splB.set_smoothing_factor(0.)
-                    # modB_f_interp = [splB(x) for x in dst_B_w_slc]
-                    modB_f_interp = [np.interp(x, modB_w, modB_f) for x in dst_B_w_slc]
-                    
-                    if v[row, 1] != last_he2h:
-                        # print('last He/H: ', last_he2h)
-                        modA_f_interp = self.He2H_ratio(dst_A_w_slc, modA_f_interp, 0.075, v[row, 1], usr_dicA)
-                        # modB_f_interp = He2H_ratio(dst_B_x, modB_f_interp, 0.1, he2h, dicB)
-                    # print(len(modA_f_interp))
-                    # for i in range(len(dst_A_w_slc)):
-                    #     print(i, len(modA_f_interp[i]))
-                    #     plt.plot(dst_A_w_slc[i],modA_f_interp[i])
-                    # plt.show()
-                    # sys.exit()
+        t3 = time.time()
+        with open("parse_data.csv", "w") as f:
+            writer = csv.writer(f, delimiter="\t")
+            writer.writerow(result_dic.keys())
+            for row in range(df.shape[0]):
+                # print(v[row])
+                # print(v[row, 0])
+                if v[row, 0] != last_lr:
+                    # print(row, *v[row, 2:5])
+                    fluA, fluB = spectra.rescale_flux(v[row, 0])
+                    dst_A_w_slc, dst_A_f_slc = self.slicedata(wavA, fluA, usr_dicA)
+                    dst_B_w_slc, dst_B_f_slc = self.slicedata(wavB, fluB, usr_dicB)
+                try:
+                    if v[row, 2] < 16:
+                        modA_w, modA_f, modelA = self.get_model(*v[row, 2:5], source='atlas')
+                    else:
+                        modA_w, modA_f, modelA = self.get_model(*v[row, 2:5], source='tlusty')
+                    modB_w, modB_f, modelB = self.get_model(*v[row, 5:], source='tlusty')
+                    if modA_f and modB_f:
+                        # splA = inter.UnivariateSpline(modA_w, modA_f)
+                        # splA.set_smoothing_factor(0.)
+                        # modA_f_interp = [splA(x) for x in dst_A_w_slc]
+                        modA_f_interp = [np.interp(x, modA_w, modA_f) for x in dst_A_w_slc]
+                        #
+                        # splB = inter.UnivariateSpline(modB_w, modB_f)
+                        # splB.set_smoothing_factor(0.)
+                        # modB_f_interp = [splB(x) for x in dst_B_w_slc]
+                        modB_f_interp = [np.interp(x, modB_w, modB_f) for x in dst_B_w_slc]
+                        
+                        if v[row, 1] != last_he2h:
+                            # print('last He/H: ', last_he2h)
+                            modA_f_interp = self.He2H_ratio(dst_A_w_slc, modA_f_interp, 0.075, v[row, 1], usr_dicA)
+                            # modB_f_interp = He2H_ratio(dst_B_x, modB_f_interp, 0.1, he2h, dicB)
+                        # print(len(modA_f_interp))
+                        # for i in range(len(dst_A_w_slc)):
+                        #     print(i, len(modA_f_interp[i]))
+                        #     plt.plot(dst_A_w_slc[i],modA_f_interp[i])
+                        # plt.show()
+                        # sys.exit()
 
-                    chi2A, chi2B, ndataA, ndataB = 0, 0, 0, 0
-                    for i,line in enumerate(usr_dicB):
-                        if line == 4102:
-                            dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4098, 4105)
-                            spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc[i], modB_f_interp[i], 4098, 4105)
-                        elif line == 4340:
-                            dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4334, 4347)
-                            spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc[i], modB_f_interp[i], 4334, 4347)
-                        else:
-                            dst_B_x_crop, dst_B_y_crop    = dst_B_w_slc[i], dst_B_f_slc[i]
-                            spl_wavB_crop, modB_f_interp_crop = dst_B_w_slc[i], modB_f_interp[i]
-                        ndataB += len(modB_f_interp_crop)
-                        chi2B += self.chi2(dst_B_y_crop, modB_f_interp_crop)
-                    # print('number of data point of spectrum B', ndataB)
-                    for i,line in enumerate(usr_dicA):
-                        ndataA += len(modA_f_interp[i])
-                        chi2A += self.chi2(dst_A_f_slc[i], modA_f_interp[i])
-                        # print('chi2A =', chi2A, 'chi2B =', chi2B)
-                        # chisqr = chi2A + chi2B
-                        # print(line, chisqr)
-                        # print(line, chisqr/len(dst_B_y_crop), len(dst_B_y_crop))
-                    chi2_tot = chi2A + chi2B
-                    result_dic['chi2_tot'].append(chi2_tot)
-                    result_dic['chi2A'].append(chi2A)
-                    result_dic['chi2B'].append(chi2B)
-                    # print('number of data point of spectrum A', ndataA)
-                    ndata = ndataA + ndataB
-                    chi2redA = chi2A/(ndataA-nparams)
-                    chi2redB = chi2B/(ndataB-nparams)
-                    chi2r_tot = chi2redA + chi2redB
-                    result_dic['chi2r_tot'].append(chi2r_tot)
-                    result_dic['chi2redA'].append(chi2redA)
-                    result_dic['chi2redB'].append(chi2redB)
-                    # print('total number of data point', ndata)
-                    # print('\n   chi2 =', chi2_tot)
-                    # gridB.append([modelB, lr, T2, g2, rv, chi2_tot])
-                    # return chi2_tot, chi2A, chi2B, chi2r_tot, chi2redA, chi2redB
-            except TypeError:
-                # pass
-                # raise TypeError()
-                result_dic['chi2_tot'].append(None)
-                result_dic['chi2A'].append(None)
-                result_dic['chi2B'].append(None)
-                result_dic['chi2r_tot'].append(None)
-                result_dic['chi2redA'].append(None)
-                result_dic['chi2redB'].append(None)
-            if v[row, 0] != last_lr and last_lr != None:
-                t1 = time.time()
-                print('\n Light ratio = ' + str(v[row, 0]) + ' completed in : ' + str(timedelta(seconds=t1-t0)) + ' [s] \n')
-                print('\n')            
-            if v[row, 1] != last_he2h and last_lr != None:
-                t2 = time.time()
-                print('   He/H ratio = ' + str(v[row, 1]) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(v[row, 0]))
-            last_lr = v[row, 0]
-            last_he2h = v[row, 1]
-            if int(100*row/len(df)) in range(10, 110, 10) and int(100*row/len(df)) != int(100*(row-1)/len(df)):
-                print(int(100*row/len(df)), r'% completed')
+                        chi2A, chi2B, ndataA, ndataB = 0, 0, 0, 0
+                        for i,line in enumerate(usr_dicB):
+                            if line == 4102:
+                                dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4098, 4105)
+                                spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc[i], modB_f_interp[i], 4098, 4105)
+                            elif line == 4340:
+                                dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4334, 4347)
+                                spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc[i], modB_f_interp[i], 4334, 4347)
+                            else:
+                                dst_B_x_crop, dst_B_y_crop    = dst_B_w_slc[i], dst_B_f_slc[i]
+                                spl_wavB_crop, modB_f_interp_crop = dst_B_w_slc[i], modB_f_interp[i]
+                            ndataB += len(modB_f_interp_crop)
+                            chi2B += self.chi2(dst_B_y_crop, modB_f_interp_crop)
+                        # print('number of data point of spectrum B', ndataB)
+                        for i,line in enumerate(usr_dicA):
+                            ndataA += len(modA_f_interp[i])
+                            chi2A += self.chi2(dst_A_f_slc[i], modA_f_interp[i])
+                            # print('chi2A =', chi2A, 'chi2B =', chi2B)
+                            # chisqr = chi2A + chi2B
+                            # print(line, chisqr)
+                            # print(line, chisqr/len(dst_B_y_crop), len(dst_B_y_crop))
+                        chi2_tot = chi2A + chi2B
+                        # result_dic['chi2_tot'].append(chi2_tot)
+                        # result_dic['chi2A'].append(chi2A)
+                        # result_dic['chi2B'].append(chi2B)
+                        result_dic['chi2_tot'] = chi2_tot
+                        result_dic['chi2A'] = chi2A
+                        result_dic['chi2B'] = chi2B
+                        # print('number of data point of spectrum A', ndataA)
+                        ndata = ndataA + ndataB
+                        # chi2redA = chi2A/(ndataA-nparams)
+                        # chi2redB = chi2B/(ndataB-nparams)
+                        # chi2r_tot = chi2redA + chi2redB
+                        # result_dic['chi2r_tot'].append(chi2r_tot)
+                        # result_dic['chi2redA'].append(chi2redA)
+                        # result_dic['chi2redB'].append(chi2redB)
+                        result_dic['chi2redA'] = chi2A/(ndataA-nparams)
+                        result_dic['chi2redB'] = chi2B/(ndataB-nparams)
+                        result_dic['chi2r_tot'] = result_dic['chi2redA'] + result_dic['chi2redB']
+                        # print('total number of data point', ndata)
+                        # print('\n   chi2 =', chi2_tot)
+                        # gridB.append([modelB, lr, T2, g2, rv, chi2_tot])
+                        # return chi2_tot, chi2A, chi2B, chi2r_tot, chi2redA, chi2redB
+                except TypeError:
+                    # pass
+                    # raise TypeError()
+                    # result_dic['chi2_tot'].append(None)
+                    # result_dic['chi2A'].append(None)
+                    # result_dic['chi2B'].append(None)
+                    # result_dic['chi2r_tot'].append(None)
+                    # result_dic['chi2redA'].append(None)
+                    # result_dic['chi2redB'].append(None)
+                    result_dic['chi2_tot'] = None
+                    result_dic['chi2A'] = None
+                    result_dic['chi2B'] = None
+                    result_dic['chi2r_tot'] = None
+                    result_dic['chi2redA'] = None
+                    result_dic['chi2redB'] = None
+                if v[row, 0] != last_lr and last_lr != None:
+                    t1 = time.time()
+                    print('\n Light ratio = ' + str(v[row, 0]) + ' completed in : ' + str(timedelta(seconds=t1-t0)) + ' [s] \n')
+                    print('\n')            
+                if v[row, 1] != last_he2h and last_lr != None:
+                    t2 = time.time()
+                    print('   He/H ratio = ' + str(v[row, 1]) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(v[row, 0]))
+                last_lr = v[row, 0]
+                last_he2h = v[row, 1]
+                writer.writerow(result_dic.values())
+                if int(100*row/len(df)) in range(10, 110, 10) and int(100*row/len(df)) != int(100*(row-1)/len(df)):
+                    t4 = time.time()
+                    print(int(100*row/len(df)), r'% completed in', str(timedelta(seconds=t4-t3)))
+                    t3 = time.time()
         tf = time.time()
         print('\nComputation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
         # print(result_dic)
-        tf1 = time.time()
-        output = pd.DataFrame.from_dict(result_dic)
-        output = pd.concat([df, output], ignore_index=False, axis=1)
-        print(output)
-        tf2 = time.time()
-        print('dataframe and created in: ' + str(timedelta(seconds=tf2-tf1)) + ' [s] \n')
-        return output
+        # tf1 = time.time()
+        # output = pd.DataFrame.from_dict(result_dic)
+        # output = pd.concat([df, output], ignore_index=False, axis=1)
+        # print(output)
+        # tf2 = time.time()
+        # print('dataframe and created in: ' + str(timedelta(seconds=tf2-tf1)) + ' [s] \n')
+        return result_dic
 
 
     def rescale_flux(self, lrat):
