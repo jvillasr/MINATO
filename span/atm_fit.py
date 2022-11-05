@@ -67,14 +67,24 @@ class atm_fitting:
                             # get models for star A
                             if TA < 16:
                                 modA_w, modA_f, modelA = self.get_model(*[TA,gA,rA], source='atlas')
+                                heini = 0.076
                             else:
                                 modA_w, modA_f, modelA = self.get_model(*[TA,gA,rA], source='tlusty')      
+                                heini = 0.1
                             if modA_f:
                                 # interpolate models to the wavelength of the sliced disentangled spectrum
-                                modA_f_interp = [np.interp(x, modA_w, modA_f) for x in dst_A_w_slc]
+                                # modA_f_interp = [np.interp(x, modA_w, modA_f) for x in dst_A_w_slc]
+                                modA_f_interp = np.interp(dst_A_w_slc, modA_w, modA_f)
+                                chi2A, ndataA = 0, 0
                                 for he in self.grid[1]:
                                     # apply He/H ratio to the interpolated model of star A
-                                    modA_f_interp = self.He2H_ratio(dst_A_w_slc, modA_f_interp, 0.075, he, usr_dicA)
+                                    print('lrat =', lr, 'TeffA =', TA, 'loggA =', gA, 'rotA =', rA, 'he2H =', he)
+                                    modA_f_interp_hefrac = self.He2H_ratio(dst_A_w_slc, modA_f_interp, heini, he, usr_dicA, join=True)
+                                    # for i,line in enumerate(usr_dicA):
+                                    #     ndataA += len(modA_f_interp_hefrac[i])
+                                    #     chi2A += self.chi2(dst_A_f_slc[i], modA_f_interp_hefrac[i])
+                                    ndataA = len(modA_f_interp_hefrac)
+                                    chi2A = self.chi2(dst_A_f_slc, modA_f_interp_hefrac)
                                     for TB in self.grid[5]:
                                         for gB in self.grid[6]:
                                             for rB in self.grid[7]:
@@ -83,26 +93,32 @@ class atm_fitting:
                                                     modB_w, modB_f, modelB = self.get_model(*[TB,gB,rB], source='tlusty')                                        
                                                     if modA_f and modB_f:
                                                         #  interpolate models to the wavelength of the sliced disentangled spectrum
-                                                        modB_f_interp = [np.interp(x, modB_w, modB_f) for x in dst_B_w_slc]
+                                                        modB_f_interp = np.interp(dst_B_w_slc, modB_w, modB_f)
 
-                                                        chi2A, chi2B, ndataA, ndataB = 0, 0, 0, 0
+                                                        chi2B, ndataB = 0, 0
                                                         # crop nebular emission from Balmer lines and compute chi^2
-                                                        for i,line in enumerate(usr_dicB):
-                                                            if line == 4102:
-                                                                dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4098, 4105)
-                                                                spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc[i], modB_f_interp[i], 4098, 4105)
-                                                            elif line == 4340:
-                                                                dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4334, 4347)
-                                                                spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc[i], modB_f_interp[i], 4334, 4347)
-                                                            else:
-                                                                dst_B_x_crop, dst_B_y_crop    = dst_B_w_slc[i], dst_B_f_slc[i]
-                                                                spl_wavB_crop, modB_f_interp_crop = dst_B_w_slc[i], modB_f_interp[i]
-                                                            ndataB += len(modB_f_interp_crop)
-                                                            chi2B += self.chi2(dst_B_y_crop, modB_f_interp_crop)                  
-                                                        for i,line in enumerate(usr_dicA):
-                                                            ndataA += len(modA_f_interp[i])
-                                                            chi2A += self.chi2(dst_A_f_slc[i], modA_f_interp[i])
+                                                        dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc, dst_B_f_slc, [[4097, 4105], [4335, 4346]])
+                                                        spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc, modB_f_interp, [[4097, 4105], [4335, 4346]])
+                                                        ndataB = len(modB_f_interp_crop)
+                                                        chi2B = self.chi2(dst_B_y_crop, modB_f_interp_crop)   
+                                                        # for i,line in enumerate(usr_dicB):
+                                                        #     if line == 4102:
+                                                        #         dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4098, 4105)
+                                                        #         spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc[i], modB_f_interp[i], 4098, 4105)
+                                                        #     elif line == 4340:
+                                                        #         dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4334, 4347)
+                                                        #         spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc[i], modB_f_interp[i], 4334, 4347)
+                                                        #     else:
+                                                        #         dst_B_x_crop, dst_B_y_crop    = dst_B_w_slc[i], dst_B_f_slc[i]
+                                                        #         spl_wavB_crop, modB_f_interp_crop = dst_B_w_slc[i], modB_f_interp[i]
+                                                        #     ndataB += len(modB_f_interp_crop)
+                                                        #     chi2B += self.chi2(dst_B_y_crop, modB_f_interp_crop)                  
+                                                        # for i,line in enumerate(usr_dicA):
+                                                        #     ndataA += len(modA_f_interp[i])
+                                                        #     print(i, line, self.chi2(dst_A_f_slc[i], modA_f_interp[i]))
+                                                        #     chi2A += self.chi2(dst_A_f_slc[i], modA_f_interp[i])
                                                         chi2_tot = chi2A + chi2B
+                                                        print('chi2 = ', chi2_tot)
                                                         ndata = ndataA + ndataB
                                                         chi2redA = chi2A/(ndataA-nparams)
                                                         chi2redB = chi2B/(ndataB-nparams)
@@ -112,15 +128,18 @@ class atm_fitting:
                                                         for key, val in zip(col, row):
                                                             result_dic[key].append(val)
                                                 except TypeError:
+                                                    print('there was a typerror 1')
                                                     nomodel += 1
                                                     pass
                                         progold = prog
+                                        print(gridlen, nomodel)
                                         prog = int(100*len(result_dic['chi2_tot'])/(gridlen-nomodel))
                                         if prog in range(10, 110, 10) and prog != progold:
                                             t4 = time.time()
                                             print(str(prog)+r'% completed in', str(timedelta(seconds=t4-t3)))
                                             t3 = time.time()
                         except TypeError:
+                            print('there was a typerror 2')
                             nomodel += 1
                             pass
                 t2 = time.time()
@@ -151,21 +170,34 @@ class atm_fitting:
         flux_new_A = (fluxA -1)*((1-ratio0)/(1-ratio1)) + 1
         flux_new_B = (fluxB -1)*(ratio0/ratio1) + 1
         return flux_new_A, flux_new_B
+    # def slicedata(self, x_data, y_data, dictionary):
+    #     '''Slices data given a dictionary of spectral lines and wavelength ranges'''
+    #     self.x_data = x_data
+    #     self.y_data = y_data
+    #     self.dictionary = dictionary
+    #     x_data = pd.Series(x_data)
+    #     y_data = pd.Series(y_data)
+    #     x_data_sliced = []
+    #     y_data_sliced = []
+    #     for line in dictionary:
+    #         reg = dictionary[line]['region']
+    #         cond = (x_data > reg[0]) & (x_data < reg[1])
+    #         x_data_sliced.append(np.array(x_data[cond]))
+    #         y_data_sliced.append(np.array(y_data[cond]))
+    #     return x_data_sliced, y_data_sliced
     def slicedata(self, x_data, y_data, dictionary):
         '''Slices data given a dictionary of spectral lines and wavelength ranges'''
         self.x_data = x_data
         self.y_data = y_data
         self.dictionary = dictionary
-        x_data = pd.Series(x_data)
-        y_data = pd.Series(y_data)
         x_data_sliced = []
         y_data_sliced = []
         for line in dictionary:
             reg = dictionary[line]['region']
             cond = (x_data > reg[0]) & (x_data < reg[1])
-            x_data_sliced.append(np.array(x_data[cond]))
-            y_data_sliced.append(np.array(y_data[cond]))
-        return x_data_sliced, y_data_sliced
+            x_data_sliced.extend(x_data[cond])
+            y_data_sliced.extend(y_data[cond])
+        return np.array(x_data_sliced), np.array(y_data_sliced)
     def get_model(self, *pars, source='tlusty'):
         '''
         Obtains the precomputed TLUSTY or ATLAS9 model from the parameters T, logg and vrot
@@ -210,8 +242,56 @@ class atm_fitting:
                 # print('WARNING: No model named '+model+' was found')
                 # raise ValueError('   WARNING: No model available for '+model)
                 pass
+    # def He2H_ratio(self, wave, flux, ratio0, ratio1, dictionary, join=False):
+    #     new_spectrum = []
+    #     '''
+    #     Modifies the He/H ratio
+    #     It works on sliced data. Returns sliced data unless 'join' is True.
+    #     '''
+    #     self.wave = wave
+    #     self.flux = flux
+    #     self.ratio0 = ratio0
+    #     self.ratio1 = ratio1
+    #     self.dictionary = dictionary
+    #     self.join = join
+    #     for i,line in enumerate(dictionary):
+    #         # print(line, len(wave[i]), len(flux[i]))
+    #         # reg = dictionary[line]['region']
+    #         # cond = (wave > reg[0]) & (wave < reg[1])
+    #         if line in [4026, 4144, 4388]:
+    #             new_spectrum.append( (flux[i] -1)*(ratio1/ratio0) + 1 )
+    #         elif line==4121:
+    #             reg_4121 = []
+    #             cond1 = wave[i] < 4120
+    #             cond2 = (wave[i] > 4120) & (wave[i] < 4122)
+    #             cond3 = wave[i] > 4122
+    #             # plt.plot(wave[i][cond1], flux[i][cond1])
+    #             reg_4121.append( flux[i][cond1] )
+    #             reg_4121.append( (flux[i][cond2] -1)*(ratio1/ratio0) + 1 )
+    #             reg_4121.append( flux[i][cond3] )
+    #             new_spectrum.append(np.array(list(itertools.chain.from_iterable(reg_4121))))
+    #         elif line==4471:
+    #             reg_4471 = []
+    #             cond1 = wave[i] < 4468
+    #             cond2 = (wave[i] > 4468) & (wave[i] < 4475)
+    #             cond3 = wave[i] > 4475
+    #             # plt.plot(wave[i][cond1], flux[i][cond1])
+    #             reg_4471.append( flux[i][cond1] )
+    #             reg_4471.append( (flux[i][cond2] -1)*(ratio1/ratio0) + 1 )
+    #             reg_4471.append( flux[i][cond3] )
+    #             new_spectrum.append(np.array(list(itertools.chain.from_iterable(reg_4471))))
+    #         elif line in [4102, 4340]:
+    #             new_spectrum.append(  (flux[i] -1)*((1-ratio1)/(1-ratio0)) + 1 )
+    #         else:
+    #             new_spectrum.append(flux[i])
+    #     if join==True:
+    #         new_spectrum = np.array(list(itertools.chain.from_iterable(new_spectrum)))
+    #         new_wave = np.array(list(itertools.chain.from_iterable(wave)))
+    #         return new_wave, new_spectrum
+    #     else:
+    #         return new_spectrum
     def He2H_ratio(self, wave, flux, ratio0, ratio1, dictionary, join=False):
-        new_spetrum = []
+        new_spectrum = []
         '''
         Modifies the He/H ratio
         It works on sliced data. Returns sliced data unless 'join' is True.
@@ -224,53 +304,66 @@ class atm_fitting:
         self.join = join
         for i,line in enumerate(dictionary):
             # print(line, len(wave[i]), len(flux[i]))
-            # reg = dictionary[line]['region']
-            # cond = (wave > reg[0]) & (wave < reg[1])
+            reg = dictionary[line]['region']
+            cond = (wave > reg[0]) & (wave < reg[1])
             if line in [4026, 4144, 4388]:
-                new_spetrum.append( (flux[i] -1)*(ratio1/ratio0) + 1 )
+                new_spectrum.append( (flux[cond] -1)*(ratio1/ratio0) + 1 )
             elif line==4121:
                 reg_4121 = []
-                cond1 = wave[i] < 4120
-                cond2 = (wave[i] > 4120) & (wave[i] < 4122)
-                cond3 = wave[i] > 4122
+                cond1 = wave[cond] < 4120
+                cond2 = (wave[cond] > 4120) & (wave[cond] < 4122)
+                cond3 = wave[cond] > 4122
                 # plt.plot(wave[i][cond1], flux[i][cond1])
-                reg_4121.append( flux[i][cond1] )
-                reg_4121.append( (flux[i][cond2] -1)*(ratio1/ratio0) + 1 )
-                reg_4121.append( flux[i][cond3] )
-                new_spetrum.append(np.array(list(itertools.chain.from_iterable(reg_4121))))
+                reg_4121.append( flux[cond][cond1] )
+                reg_4121.append( (flux[cond][cond2] -1)*(ratio1/ratio0) + 1 )
+                reg_4121.append( flux[cond][cond3] )
+                new_spectrum.append(np.array(list(itertools.chain.from_iterable(reg_4121))))
             elif line==4471:
                 reg_4471 = []
-                cond1 = wave[i] < 4468
-                cond2 = (wave[i] > 4468) & (wave[i] < 4475)
-                cond3 = wave[i] > 4475
+                cond1 = wave[cond] < 4468
+                cond2 = (wave[cond] > 4468) & (wave[cond] < 4475)
+                cond3 = wave[cond] > 4475
                 # plt.plot(wave[i][cond1], flux[i][cond1])
-                reg_4471.append( flux[i][cond1] )
-                reg_4471.append( (flux[i][cond2] -1)*(ratio1/ratio0) + 1 )
-                reg_4471.append( flux[i][cond3] )
-                new_spetrum.append(np.array(list(itertools.chain.from_iterable(reg_4471))))
+                reg_4471.append( flux[cond][cond1] )
+                reg_4471.append( (flux[cond][cond2] -1)*(ratio1/ratio0) + 1 )
+                reg_4471.append( flux[cond][cond3] )
+                new_spectrum.append(np.array(list(itertools.chain.from_iterable(reg_4471))))
             elif line in [4102, 4340]:
-                new_spetrum.append(  (flux[i] -1)*((1-ratio1)/(1-ratio0)) + 1 )
+                new_spectrum.append(  (flux[cond] -1)*((1-ratio1)/(1-ratio0)) + 1 )
             else:
-                new_spetrum.append(flux[i])
+                new_spectrum.append(flux[cond])
         if join==True:
-            new_spetrum = np.array(list(itertools.chain.from_iterable(new_spetrum)))
-            new_wave = np.array(list(itertools.chain.from_iterable(wave)))
-            return new_wave, new_spetrum
+            new_spectrum = np.array(list(itertools.chain.from_iterable(new_spectrum)))
+            # new_wave = np.array(list(itertools.chain.from_iterable(wave)))
+            return new_spectrum
         else:
-            return new_spetrum
+            return new_spectrum
     def chi2(self, obs, exp):
         '''Computes chi^2 statistics'''
         self.obs = obs
         self.exp = exp
+        # print(((obs-exp)**2)/exp)
         return np.sum(((obs-exp)**2)/exp)
-    def crop_data(self, x_data, y_data, range1, range2):
-        '''Crops a range of wavelength'''
+    # def crop_data(self, x_data, y_data, range1, range2):
+    #     '''Crops a range of wavelength'''
+    #     self.x_data = x_data
+    #     self.y_data = y_data
+    #     self.range1 = range1
+    #     self.range2 = range2
+    #     cond = (x_data < range1) | (x_data > range2)
+    #     return x_data[cond], y_data[cond]
+    def crop_data(self, x_data, y_data, range_list):
+        '''Crops a range of wavelength between range_n amd range_n+1
+           range_list = [[wave0, wave1], [wave3, wave2]]
+        '''
         self.x_data = x_data
         self.y_data = y_data
-        self.range1 = range1
-        self.range2 = range2
-        cond = (x_data < range1) | (x_data > range2)
-        return x_data[cond], y_data[cond]
+        self.range_list = range_list
+        for range in range_list:
+            cond = (x_data < range[0]) | (x_data > range[1])
+            x_data = x_data[cond]
+            y_data = y_data[cond]
+        return x_data, y_data
 
 class Spectra(atm_fitting):
     def read_spec(self):
