@@ -60,6 +60,8 @@ class atm_fitting:
             fluA, fluB = spectra.rescale_flux(lr)
             dst_A_w_slc, dst_A_f_slc = self.slicedata(wavA, fluA, usr_dicA)
             dst_B_w_slc, dst_B_f_slc = self.slicedata(wavB, fluB, usr_dicB)
+            # crop nebular emission from disentangled spectrum
+            dst_B_w_slc, dst_B_f_slc = self.crop_data(dst_B_w_slc, dst_B_f_slc, [[4097, 4105], [4335, 4346]])
             for TA in self.grid[2]:
                 for gA in self.grid[3]:
                     for rA in self.grid[4]:
@@ -78,7 +80,7 @@ class atm_fitting:
                                 chi2A, ndataA = 0, 0
                                 for he in self.grid[1]:
                                     # apply He/H ratio to the interpolated model of star A
-                                    print('lrat =', lr, 'TeffA =', TA, 'loggA =', gA, 'rotA =', rA, 'he2H =', he)
+                                    # print('lrat =', lr, 'TeffA =', TA, 'loggA =', gA, 'rotA =', rA, 'he2H =', he)
                                     modA_f_interp_hefrac = self.He2H_ratio(dst_A_w_slc, modA_f_interp, heini, he, usr_dicA, join=True)
                                     # for i,line in enumerate(usr_dicA):
                                     #     ndataA += len(modA_f_interp_hefrac[i])
@@ -90,17 +92,15 @@ class atm_fitting:
                                             for rB in self.grid[7]:
                                                 try:
                                                     # get models for star B
-                                                    modB_w, modB_f, modelB = self.get_model(*[TB,gB,rB], source='tlusty')                                        
+                                                    modB_w, modB_f, modelB = self.get_model(*[TB,gB,rB], source='tlusty')                                     
                                                     if modA_f and modB_f:
                                                         #  interpolate models to the wavelength of the sliced disentangled spectrum
                                                         modB_f_interp = np.interp(dst_B_w_slc, modB_w, modB_f)
-
+                                                        # crop nebular emission from model and compute chi^2
                                                         chi2B, ndataB = 0, 0
-                                                        # crop nebular emission from Balmer lines and compute chi^2
-                                                        dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc, dst_B_f_slc, [[4097, 4105], [4335, 4346]])
                                                         spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc, modB_f_interp, [[4097, 4105], [4335, 4346]])
                                                         ndataB = len(modB_f_interp_crop)
-                                                        chi2B = self.chi2(dst_B_y_crop, modB_f_interp_crop)   
+                                                        chi2B = self.chi2(dst_B_f_slc, modB_f_interp_crop)   
                                                         # for i,line in enumerate(usr_dicB):
                                                         #     if line == 4102:
                                                         #         dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4098, 4105)
@@ -118,7 +118,7 @@ class atm_fitting:
                                                         #     print(i, line, self.chi2(dst_A_f_slc[i], modA_f_interp[i]))
                                                         #     chi2A += self.chi2(dst_A_f_slc[i], modA_f_interp[i])
                                                         chi2_tot = chi2A + chi2B
-                                                        print('chi2 = ', chi2_tot)
+                                                        # print('chi2 = ', chi2_tot)
                                                         ndata = ndataA + ndataB
                                                         chi2redA = chi2A/(ndataA-nparams)
                                                         chi2redB = chi2B/(ndataB-nparams)
@@ -128,18 +128,18 @@ class atm_fitting:
                                                         for key, val in zip(col, row):
                                                             result_dic[key].append(val)
                                                 except TypeError:
-                                                    print('there was a typerror 1')
+                                                    # print('there was a typerror 1', [TB,gB,rB])
                                                     nomodel += 1
                                                     pass
                                         progold = prog
-                                        print(gridlen, nomodel)
+                                        # print(gridlen, nomodel)
                                         prog = int(100*len(result_dic['chi2_tot'])/(gridlen-nomodel))
                                         if prog in range(10, 110, 10) and prog != progold:
                                             t4 = time.time()
                                             print(str(prog)+r'% completed in', str(timedelta(seconds=t4-t3)))
                                             t3 = time.time()
                         except TypeError:
-                            print('there was a typerror 2')
+                            # print('there was a typerror 2')
                             nomodel += 1
                             pass
                 t2 = time.time()
