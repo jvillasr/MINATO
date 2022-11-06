@@ -6,3 +6,4 @@ Main scopes:
 - Time series analysis &emsp; &emsp; &emsp; &nbsp; --> currently under Ravel
 - Spectral analysis &emsp; &emsp; &emsp; &emsp; &ensp; --> Span
 - SED fitting &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &nbsp; &nbsp; --> to be implemented
+- Spectral classification &emsp; &emsp; &nbsp; --> to be implemented
