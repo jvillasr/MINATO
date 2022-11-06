@@ -1,4 +1,6 @@
 import time
+import sys
+import csv
 import itertools
 import pandas as pd
 import numpy as np
@@ -6,6 +8,7 @@ import matplotlib.pyplot as plt
 import scipy.interpolate as inter
 from glob import glob
 from datetime import timedelta, date
+from math import prod
 current_date = str(date.today())
 
 class atm_fitting:
@@ -13,7 +16,6 @@ class atm_fitting:
         self.grid = grid
         self.spectrumA = spectrumA
         self.spectrumB = spectrumB
-        # self.lrat = lrat
     lines_dic = {
                     4026: { 'region':[4005, 4033], 'title':'He I $\lambda$4009/26'},
                     4102: { 'region':[4084-20, 4117], 'title':'H$\delta$'},
@@ -26,150 +28,141 @@ class atm_fitting:
                     4553: { 'region':[4536, 4560], 'title':'Fe II, Si III'} }
     def user_dic(self, lines):
         self.lines = lines
-        usr_dic = { line: self.lines_dic[line] for line in self.lines }
-        return usr_dic
+        dic = { line: self.lines_dic[line] for line in self.lines }
+        return dic
     def compute_chi2(self, dic_lines_A, dic_lines_B):
+        '''
+        It iterates over the grid of parameters to compare models of synthetic spectra 
+        to observations and computes the chi^2 test.
+        '''
         self.dic_lines_A = dic_lines_A
         self.dic_lines_B = dic_lines_B
-        try:
-            df = pd.read_feather(self.grid)
-        except:
-            df = pd.read_csv(self.grid)
-        nparams = len(df.columns)
-        # print(df[:5])
-
+        nparams = len(self.grid)
+        # compute length of the grid
+        gridlen = prod([len(x) for x in self.grid])
+        # create spectra object to retrieve wavelength and flux
         spectra = Spectra(self.grid, self.spectrumA, self.spectrumB)
         wavA, wavB = spectra.get_wave()
+        # setting the dictionaries with the spectral lines selected for the fit
         usr_dicA = self.user_dic(dic_lines_A)
         usr_dicB = self.user_dic(dic_lines_B)
-
-        # result_dic = dict()
-        result_dic = {'chi2_tot': [], 'chi2A': [], 'chi2B': [], 'chi2r_tot': [], 'chi2redA': [], 'chi2redB': []}
-        # #Iterate over all values in pivot table
-        # t0 = time.time()
-        # rownum = 50000
-        # v = df[:rownum].values
-        # last_lr = None
-        # for row in range(df[:rownum].shape[0]):
-            
-        #     if df['lrat'].loc[row] != last_lr:
-        #         print(row, df['lrat'].loc[row])
-        #         fluA, fluB = spectra.rescale_flux(df['lrat'].loc[row])
-        #     for column in range(df[:rownum].shape[1]):
-        #         test = v[row, column]
-        #     # print(v[row])
-        #     last_lr = df['lrat'].loc[row]
-        # t1 = time.time()
-        # print('Iteration over values takes: ' + str(t1-t0))
-
-        #Iterate over all values in pivot table
+        # creating dictionary to store results
+        result_dic = {'lrat': [], 'teffA': [], 'loggA': [], 'rotA': [], 'He2H': [], 'teffB': [], 'loggB': [], 'rotB': [], 
+                        'chi2_tot': [], 'chi2A': [], 'chi2B': [], 'chi2r_tot': [], 'chi2redA': [], 'chi2redB': []}
+        col = list(result_dic.keys())
         t0 = time.time()
-        # rownum = 500000
-        # rownum = 1460
-        v = df.values
-        last_lr, last_he2h = None, None
-        # print(last_lr)
-        for row in range(df.shape[0]):
-            # print(v[row])
-            # print(v[row, 0])
-            if v[row, 0] != last_lr:
-                # print(row, *v[row, 2:5])
-                fluA, fluB = spectra.rescale_flux(v[row, 0])
-                dst_A_w_slc, dst_A_f_slc = self.slicedata(wavA, fluA, usr_dicA)
-                dst_B_w_slc, dst_B_f_slc = self.slicedata(wavB, fluB, usr_dicB)
-
-            try:
-                if v[row, 2] < 16:
-                    modA_w, modA_f, modelA = self.get_model(*v[row, 2:5], source='atlas')
-                else:
-                    modA_w, modA_f, modelA = self.get_model(*v[row, 2:5], source='tlusty')
-                modB_w, modB_f, modelB = self.get_model(*v[row, 5:], source='tlusty')
-                # print('models: ', modelA, modelB)
-
-                if modA_f and modB_f:
-                    splA = inter.UnivariateSpline(modA_w, modA_f)
-                    splA.set_smoothing_factor(0.)
-                    spl_fluxA = [splA(x) for x in dst_A_w_slc]
-                    #
-                    splB = inter.UnivariateSpline(modB_w, modB_f)
-                    splB.set_smoothing_factor(0.)
-                    spl_fluxB = [splB(x) for x in dst_B_w_slc]
-
-                    if v[row, 1] != last_he2h:
-                        # print('last He/H: ', last_he2h)
-                        spl_fluxA = self.He2H_ratio(dst_A_w_slc, spl_fluxA, 0.075, v[row, 1], usr_dicA)
-                        # spl_fluxB = He2H_ratio(dst_B_x, spl_fluxB, 0.1, he2h, dicB)
-
-
-
-                    chi2A, chi2B, ndataA, ndataB = 0, 0, 0, 0
-                    for i,line in enumerate(usr_dicB):
-                        if line == 4102:
-                            dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4098, 4105)
-                            spl_wavB_crop, spl_fluxB_crop = self.crop_data(dst_B_w_slc[i], spl_fluxB[i], 4098, 4105)
-                        elif line == 4340:
-                            dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4334, 4347)
-                            spl_wavB_crop, spl_fluxB_crop = self.crop_data(dst_B_w_slc[i], spl_fluxB[i], 4334, 4347)
-                        else:
-                            dst_B_x_crop, dst_B_y_crop    = dst_B_w_slc[i], dst_B_f_slc[i]
-                            spl_wavB_crop, spl_fluxB_crop = dst_B_w_slc[i], spl_fluxB[i]
-                        ndataB += len(spl_fluxB_crop)
-                        chi2B += self.chi2(dst_B_y_crop, spl_fluxB_crop)
-                    # print('number of data point of spectrum B', ndataB)
-                    for i,line in enumerate(usr_dicA):
-                        ndataA += len(spl_fluxA[i])
-                        chi2A += self.chi2(dst_A_f_slc[i], spl_fluxA[i])
-                        # print('chi2A =', chi2A, 'chi2B =', chi2B)
-                        # chisqr = chi2A + chi2B
-                        # print(line, chisqr)
-                        # print(line, chisqr/len(dst_B_y_crop), len(dst_B_y_crop))
-                    chi2_tot = chi2A + chi2B
-                    result_dic['chi2_tot'].append(chi2_tot)
-                    result_dic['chi2A'].append(chi2A)
-                    result_dic['chi2B'].append(chi2B)
-                    # print('number of data point of spectrum A', ndataA)
-                    ndata = ndataA + ndataB
-                    chi2redA = chi2A/(ndataA-nparams)
-                    chi2redB = chi2B/(ndataB-nparams)
-                    chi2r_tot = chi2redA + chi2redB
-                    result_dic['chi2r_tot'].append(chi2r_tot)
-                    result_dic['chi2redA'].append(chi2redA)
-                    result_dic['chi2redB'].append(chi2redB)
-                    # print('total number of data point', ndata)
-                    # print('\n   chi2 =', chi2_tot)
-                    # gridB.append([modelB, lr, T2, g2, rv, chi2_tot])
-                    # return chi2_tot, chi2A, chi2B, chi2r_tot, chi2redA, chi2redB
-            except TypeError:
-                # pass
-                # raise TypeError()
-                result_dic['chi2_tot'].append(None)
-                result_dic['chi2A'].append(None)
-                result_dic['chi2B'].append(None)
-                result_dic['chi2r_tot'].append(None)
-                result_dic['chi2redA'].append(None)
-                result_dic['chi2redB'].append(None)
-            if v[row, 0] != last_lr and last_lr != None:
-                t1 = time.time()
-                print('\n Light ratio = ' + str(v[row, 0]) + ' completed in : ' + str(timedelta(seconds=t1-t0)) + ' [s] \n')
-                print('\n')            
-            if v[row, 1] != last_he2h:
+        prog = 0 # progress counter
+        nomodel = 0 # number of models not found to compute progress
+        t3 = time.time()
+        print('\n ##### Computing chi^2 for grid #####\n')
+        for lr in self.grid[0]:
+            # rescale flux to new light ratio and slice data to regions for chi^2 computation
+            fluA, fluB = spectra.rescale_flux(lr)
+            dst_A_w_slc, dst_A_f_slc = self.slicedata(wavA, fluA, usr_dicA)
+            dst_B_w_slc, dst_B_f_slc = self.slicedata(wavB, fluB, usr_dicB)
+            # crop nebular emission from disentangled spectrum
+            dst_B_w_slc, dst_B_f_slc = self.crop_data(dst_B_w_slc, dst_B_f_slc, [[4097, 4105], [4335, 4346]])
+            for TA in self.grid[2]:
+                for gA in self.grid[3]:
+                    for rA in self.grid[4]:
+                        try:
+                            # get models for star A
+                            if TA < 16:
+                                modA_w, modA_f, modelA = self.get_model(*[TA,gA,rA], source='atlas')
+                                heini = 0.076
+                            else:
+                                modA_w, modA_f, modelA = self.get_model(*[TA,gA,rA], source='tlusty')      
+                                heini = 0.1
+                            if modA_f:
+                                # interpolate models to the wavelength of the sliced disentangled spectrum
+                                # modA_f_interp = [np.interp(x, modA_w, modA_f) for x in dst_A_w_slc]
+                                modA_f_interp = np.interp(dst_A_w_slc, modA_w, modA_f)
+                                chi2A, ndataA = 0, 0
+                                for he in self.grid[1]:
+                                    # apply He/H ratio to the interpolated model of star A
+                                    # print('lrat =', lr, 'TeffA =', TA, 'loggA =', gA, 'rotA =', rA, 'he2H =', he)
+                                    modA_f_interp_hefrac = self.He2H_ratio(dst_A_w_slc, modA_f_interp, heini, he, usr_dicA, join=True)
+                                    # for i,line in enumerate(usr_dicA):
+                                    #     ndataA += len(modA_f_interp_hefrac[i])
+                                    #     chi2A += self.chi2(dst_A_f_slc[i], modA_f_interp_hefrac[i])
+                                    ndataA = len(modA_f_interp_hefrac)
+                                    chi2A = self.chi2(dst_A_f_slc, modA_f_interp_hefrac)
+                                    for TB in self.grid[5]:
+                                        for gB in self.grid[6]:
+                                            for rB in self.grid[7]:
+                                                try:
+                                                    # get models for star B
+                                                    modB_w, modB_f, modelB = self.get_model(*[TB,gB,rB], source='tlusty')                                     
+                                                    if modA_f and modB_f:
+                                                        #  interpolate models to the wavelength of the sliced disentangled spectrum
+                                                        modB_f_interp = np.interp(dst_B_w_slc, modB_w, modB_f)
+                                                        # crop nebular emission from model and compute chi^2
+                                                        chi2B, ndataB = 0, 0
+                                                        spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc, modB_f_interp, [[4097, 4105], [4335, 4346]])
+                                                        ndataB = len(modB_f_interp_crop)
+                                                        chi2B = self.chi2(dst_B_f_slc, modB_f_interp_crop)   
+                                                        # for i,line in enumerate(usr_dicB):
+                                                        #     if line == 4102:
+                                                        #         dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4098, 4105)
+                                                        #         spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc[i], modB_f_interp[i], 4098, 4105)
+                                                        #     elif line == 4340:
+                                                        #         dst_B_x_crop, dst_B_y_crop    = self.crop_data(dst_B_w_slc[i], dst_B_f_slc[i], 4334, 4347)
+                                                        #         spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc[i], modB_f_interp[i], 4334, 4347)
+                                                        #     else:
+                                                        #         dst_B_x_crop, dst_B_y_crop    = dst_B_w_slc[i], dst_B_f_slc[i]
+                                                        #         spl_wavB_crop, modB_f_interp_crop = dst_B_w_slc[i], modB_f_interp[i]
+                                                        #     ndataB += len(modB_f_interp_crop)
+                                                        #     chi2B += self.chi2(dst_B_y_crop, modB_f_interp_crop)                  
+                                                        # for i,line in enumerate(usr_dicA):
+                                                        #     ndataA += len(modA_f_interp[i])
+                                                        #     print(i, line, self.chi2(dst_A_f_slc[i], modA_f_interp[i]))
+                                                        #     chi2A += self.chi2(dst_A_f_slc[i], modA_f_interp[i])
+                                                        chi2_tot = chi2A + chi2B
+                                                        # print('chi2 = ', chi2_tot)
+                                                        ndata = ndataA + ndataB
+                                                        chi2redA = chi2A/(ndataA-nparams)
+                                                        chi2redB = chi2B/(ndataB-nparams)
+                                                        chi2r_tot = chi2redA + chi2redB
+                                                        # appending to dictionary
+                                                        row = [lr, TA, gA, rA, he, TB, gB, rB, chi2_tot, chi2A, chi2B, chi2r_tot, chi2redA, chi2redB]
+                                                        for key, val in zip(col, row):
+                                                            result_dic[key].append(val)
+                                                except TypeError:
+                                                    # print('there was a typerror 1', [TB,gB,rB])
+                                                    nomodel += 1
+                                                    pass
+                                        progold = prog
+                                        # print(gridlen, nomodel)
+                                        prog = int(100*len(result_dic['chi2_tot'])/(gridlen-nomodel))
+                                        if prog in range(10, 110, 10) and prog != progold:
+                                            t4 = time.time()
+                                            print(str(prog)+r'% completed in', str(timedelta(seconds=t4-t3)))
+                                            t3 = time.time()
+                        except TypeError:
+                            # print('there was a typerror 2')
+                            nomodel += 1
+                            pass
                 t2 = time.time()
-                print('   He/H ratio = ' + str(v[row, 1]) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(v[row, 0]))
-            last_lr = v[row, 0]
-            last_he2h = v[row, 1]
+                print('   Teff_A = ' + str(TA) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(lr))
+            t1 = time.time()
+            print('\n Light ratio = ' + str(lr) + ' completed in : ' + str(timedelta(seconds=t1-t0)) + ' [s] \n')
+            print('\n')            
         tf = time.time()
-        print('\nComputation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
-        # print(result_dic)
+        print('Computation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
+
         tf1 = time.time()
         output = pd.DataFrame.from_dict(result_dic)
-        output = pd.concat([df, output], ignore_index=False, axis=1)
         print(output)
         tf2 = time.time()
-        print('dataframe and created in: ' + str(timedelta(seconds=tf2-tf1)) + ' [s] \n')
+        print('dataframe from dict and created in: ' + str(timedelta(seconds=tf2-tf1)) + ' [s] \n')
         return output
 
 
     def rescale_flux(self, lrat):
+        '''
+        Rescales flux given a light ratio
+        Returns: rescaled flux of both stars
+        '''
         self.lrat = lrat
         ratio0 = 0.3
         ratio1 = lrat
@@ -177,23 +170,39 @@ class atm_fitting:
         flux_new_A = (fluxA -1)*((1-ratio0)/(1-ratio1)) + 1
         flux_new_B = (fluxB -1)*(ratio0/ratio1) + 1
         return flux_new_A, flux_new_B
+    # def slicedata(self, x_data, y_data, dictionary):
+    #     '''Slices data given a dictionary of spectral lines and wavelength ranges'''
+    #     self.x_data = x_data
+    #     self.y_data = y_data
+    #     self.dictionary = dictionary
+    #     x_data = pd.Series(x_data)
+    #     y_data = pd.Series(y_data)
+    #     x_data_sliced = []
+    #     y_data_sliced = []
+    #     for line in dictionary:
+    #         reg = dictionary[line]['region']
+    #         cond = (x_data > reg[0]) & (x_data < reg[1])
+    #         x_data_sliced.append(np.array(x_data[cond]))
+    #         y_data_sliced.append(np.array(y_data[cond]))
+    #     return x_data_sliced, y_data_sliced
     def slicedata(self, x_data, y_data, dictionary):
+        '''Slices data given a dictionary of spectral lines and wavelength ranges'''
         self.x_data = x_data
         self.y_data = y_data
         self.dictionary = dictionary
-        x_data = pd.Series(x_data)
-        y_data = pd.Series(y_data)
         x_data_sliced = []
         y_data_sliced = []
         for line in dictionary:
             reg = dictionary[line]['region']
             cond = (x_data > reg[0]) & (x_data < reg[1])
-            x_data_sliced.append(np.array(x_data[cond]))
-            y_data_sliced.append(np.array(y_data[cond]))
-        return x_data_sliced, y_data_sliced
+            x_data_sliced.extend(x_data[cond])
+            y_data_sliced.extend(y_data[cond])
+        return np.array(x_data_sliced), np.array(y_data_sliced)
     def get_model(self, *pars, source='tlusty'):
         '''
+        Obtains the precomputed TLUSTY or ATLAS9 model from the parameters T, logg and vrot
         source : Source of the models. Options are 'tlusty' and 'atlas'.
+        Returns: wavelength, flux and name of the model
         '''
         T, g, rot = pars
         lowT_models_path = '~/Science/github/jvillasr/MINATO/span/models/ATLAS9/'
@@ -217,7 +226,6 @@ class atm_fitting:
                 if T>30:
                     model = 'T'+str(int(T*10))+'g'+str(int(g*10))+'v10r'+str(int(rot))+'fw05'
                     df = pd.read_csv(tlustyO_path+model,header=None, sep='\s+')
-
                 else:
                     df = pd.read_csv(tlustyB_path+model,header=None, sep='\s+')
                 return df[0].array, df[1].array, model
@@ -225,7 +233,6 @@ class atm_fitting:
                 # print('WARNING: No model named '+model+' was found')
                 # raise ValueError('   WARNING: No model available for '+model)
                 pass
-
         elif source=='atlas':
             model = 'T'+str(int(T))+'g'+str(int(g))+'v2r'+str(int(rot))+'fw05'
             try:
@@ -235,8 +242,56 @@ class atm_fitting:
                 # print('WARNING: No model named '+model+' was found')
                 # raise ValueError('   WARNING: No model available for '+model)
                 pass
+    # def He2H_ratio(self, wave, flux, ratio0, ratio1, dictionary, join=False):
+    #     new_spectrum = []
+    #     '''
+    #     Modifies the He/H ratio
+    #     It works on sliced data. Returns sliced data unless 'join' is True.
+    #     '''
+    #     self.wave = wave
+    #     self.flux = flux
+    #     self.ratio0 = ratio0
+    #     self.ratio1 = ratio1
+    #     self.dictionary = dictionary
+    #     self.join = join
+    #     for i,line in enumerate(dictionary):
+    #         # print(line, len(wave[i]), len(flux[i]))
+    #         # reg = dictionary[line]['region']
+    #         # cond = (wave > reg[0]) & (wave < reg[1])
+    #         if line in [4026, 4144, 4388]:
+    #             new_spectrum.append( (flux[i] -1)*(ratio1/ratio0) + 1 )
+    #         elif line==4121:
+    #             reg_4121 = []
+    #             cond1 = wave[i] < 4120
+    #             cond2 = (wave[i] > 4120) & (wave[i] < 4122)
+    #             cond3 = wave[i] > 4122
+    #             # plt.plot(wave[i][cond1], flux[i][cond1])
+    #             reg_4121.append( flux[i][cond1] )
+    #             reg_4121.append( (flux[i][cond2] -1)*(ratio1/ratio0) + 1 )
+    #             reg_4121.append( flux[i][cond3] )
+    #             new_spectrum.append(np.array(list(itertools.chain.from_iterable(reg_4121))))
+    #         elif line==4471:
+    #             reg_4471 = []
+    #             cond1 = wave[i] < 4468
+    #             cond2 = (wave[i] > 4468) & (wave[i] < 4475)
+    #             cond3 = wave[i] > 4475
+    #             # plt.plot(wave[i][cond1], flux[i][cond1])
+    #             reg_4471.append( flux[i][cond1] )
+    #             reg_4471.append( (flux[i][cond2] -1)*(ratio1/ratio0) + 1 )
+    #             reg_4471.append( flux[i][cond3] )
+    #             new_spectrum.append(np.array(list(itertools.chain.from_iterable(reg_4471))))
+    #         elif line in [4102, 4340]:
+    #             new_spectrum.append(  (flux[i] -1)*((1-ratio1)/(1-ratio0)) + 1 )
+    #         else:
+    #             new_spectrum.append(flux[i])
+    #     if join==True:
+    #         new_spectrum = np.array(list(itertools.chain.from_iterable(new_spectrum)))
+    #         new_wave = np.array(list(itertools.chain.from_iterable(wave)))
+    #         return new_wave, new_spectrum
+    #     else:
+    #         return new_spectrum
     def He2H_ratio(self, wave, flux, ratio0, ratio1, dictionary, join=False):
-        new_spetrum = []
+        new_spectrum = []
         '''
         Modifies the He/H ratio
         It works on sliced data. Returns sliced data unless 'join' is True.
@@ -249,56 +304,68 @@ class atm_fitting:
         self.join = join
         for i,line in enumerate(dictionary):
             # print(line, len(wave[i]), len(flux[i]))
-            # reg = dictionary[line]['region']
-            # cond = (wave > reg[0]) & (wave < reg[1])
+            reg = dictionary[line]['region']
+            cond = (wave > reg[0]) & (wave < reg[1])
             if line in [4026, 4144, 4388]:
-                new_spetrum.append( (flux[i] -1)*(ratio1/ratio0) + 1 )
+                new_spectrum.append( (flux[cond] -1)*(ratio1/ratio0) + 1 )
             elif line==4121:
                 reg_4121 = []
-                cond1 = wave[i] < 4120
-                cond2 = (wave[i] > 4120) & (wave[i] < 4122)
-                cond3 = wave[i] > 4122
+                cond1 = wave[cond] < 4120
+                cond2 = (wave[cond] > 4120) & (wave[cond] < 4122)
+                cond3 = wave[cond] > 4122
                 # plt.plot(wave[i][cond1], flux[i][cond1])
-                reg_4121.append( flux[i][cond1] )
-                reg_4121.append( (flux[i][cond2] -1)*(ratio1/ratio0) + 1 )
-                reg_4121.append( flux[i][cond3] )
-                new_spetrum.append(np.array(list(itertools.chain.from_iterable(reg_4121))))
+                reg_4121.append( flux[cond][cond1] )
+                reg_4121.append( (flux[cond][cond2] -1)*(ratio1/ratio0) + 1 )
+                reg_4121.append( flux[cond][cond3] )
+                new_spectrum.append(np.array(list(itertools.chain.from_iterable(reg_4121))))
             elif line==4471:
                 reg_4471 = []
-                cond1 = wave[i] < 4468
-                cond2 = (wave[i] > 4468) & (wave[i] < 4475)
-                cond3 = wave[i] > 4475
+                cond1 = wave[cond] < 4468
+                cond2 = (wave[cond] > 4468) & (wave[cond] < 4475)
+                cond3 = wave[cond] > 4475
                 # plt.plot(wave[i][cond1], flux[i][cond1])
-                reg_4471.append( flux[i][cond1] )
-                reg_4471.append( (flux[i][cond2] -1)*(ratio1/ratio0) + 1 )
-                reg_4471.append( flux[i][cond3] )
-                new_spetrum.append(np.array(list(itertools.chain.from_iterable(reg_4471))))
+                reg_4471.append( flux[cond][cond1] )
+                reg_4471.append( (flux[cond][cond2] -1)*(ratio1/ratio0) + 1 )
+                reg_4471.append( flux[cond][cond3] )
+                new_spectrum.append(np.array(list(itertools.chain.from_iterable(reg_4471))))
             elif line in [4102, 4340]:
-                new_spetrum.append(  (flux[i] -1)*((1-ratio1)/(1-ratio0)) + 1 )
+                new_spectrum.append(  (flux[cond] -1)*((1-ratio1)/(1-ratio0)) + 1 )
             else:
-                new_spetrum.append(flux[i])
+                new_spectrum.append(flux[cond])
         if join==True:
-            new_spetrum = np.array(list(itertools.chain.from_iterable(new_spetrum)))
-            new_wave = np.array(list(itertools.chain.from_iterable(wave)))
-            return new_wave, new_spetrum
+            new_spectrum = np.array(list(itertools.chain.from_iterable(new_spectrum)))
+            # new_wave = np.array(list(itertools.chain.from_iterable(wave)))
+            return new_spectrum
         else:
-            return new_spetrum
+            return new_spectrum
     def chi2(self, obs, exp):
+        '''Computes chi^2 statistics'''
         self.obs = obs
         self.exp = exp
+        # print(((obs-exp)**2)/exp)
         return np.sum(((obs-exp)**2)/exp)
-    def crop_data(self, x_data, y_data, range1, range2):
+    # def crop_data(self, x_data, y_data, range1, range2):
+    #     '''Crops a range of wavelength'''
+    #     self.x_data = x_data
+    #     self.y_data = y_data
+    #     self.range1 = range1
+    #     self.range2 = range2
+    #     cond = (x_data < range1) | (x_data > range2)
+    #     return x_data[cond], y_data[cond]
+    def crop_data(self, x_data, y_data, range_list):
+        '''Crops a range of wavelength between range_n amd range_n+1
+           range_list = [[wave0, wave1], [wave3, wave2]]
+        '''
         self.x_data = x_data
         self.y_data = y_data
-        self.range1 = range1
-        self.range2 = range2
-        cond = (x_data < range1) | (x_data > range2)
-        return x_data[cond], y_data[cond]
-
+        self.range_list = range_list
+        for range in range_list:
+            cond = (x_data < range[0]) | (x_data > range[1])
+            x_data = x_data[cond]
+            y_data = y_data[cond]
+        return x_data, y_data
 
 class Spectra(atm_fitting):
-    # def __init__(atm_fitting):
-
     def read_spec(self):
         dsnt_A = pd.read_csv(self.spectrumA, header=None, sep='\s+')        
         dsnt_B = pd.read_csv(self.spectrumB, header=None, sep='\s+')
@@ -313,15 +380,3 @@ class Spectra(atm_fitting):
         fluxA = specA[1]
         fluxB = specB[1]
         return fluxA, fluxB
-
-
-# dsnt_A = '/Users/jaime/Science/KUL_postdoc/BBC/291/tomer/ADIS_lguess_K1K2=0.3_94.0_15.0_renorm.txt'
-# dsnt_B = '/Users/jaime/Science/KUL_postdoc/BBC/291/tomer/BDIS_lguess_K1K2=0.3_94.0_15.0.txt'
-# grid = '~/Science/github/jvillasr/MINATO/SpecAnalysis/data/grid.feather'
-
-# select_linesA = [4026, 4102, 4121, 4144, 4267, 4340, 4388, 4471, 4553]
-# select_linesB = [4026, 4102, 4121, 4144, 4267, 4340, 4388, 4553]
-
-# res_df = atm_fitting(grid, dsnt_A, dsnt_B).compute_chi2(select_linesA, select_linesB)
-# # print(res_dic)
-# res_df.to_feather('./data/minchi2_result_'+current_date+'.feather')

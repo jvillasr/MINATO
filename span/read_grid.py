@@ -85,9 +85,31 @@ def skewedG0(xlist, amp, cen, sig, gam):
 #def skewedG(x, amp, cen, sig, gam, h):
 #    return [h - amp * np.exp(-(t-cen)**2 / (2*sig**2)) * (1 + math.erf(gam*(t-cen)/(sig*np.sqrt(2))))  / (sig*np.sqrt(2*np.pi)) for t in x]
 
-def skewedG(x, amp, cen, sig, gam, h):
-    return [h - amp * np.exp(-(t-cen)**2 / (2*sig**2)) * (1 + math.erf(gam*(t-cen)/(sig*np.sqrt(2)))) for t in x]
+# def skewedG(x, amp, cen, sig, gam, h):
+    # return [h - amp * np.exp(-(t-cen)**2 / (2*sig**2)) * (1 + math.erf(gam*(t-cen)/(sig*np.sqrt(2)))) for t in x]
+def skewedG(x, amp, cen, wid, gam, ymin):
+    h = ymin+amp
+    return [h - amp * np.exp(-2.355**2 * (t-cen)**2 / (2*wid**2)) * (1 + math.erf(2.355*gam*(t-cen)/(wid*np.sqrt(2)))) for t in x]
 
+def fit_skewG(x, y, amp, cen, wid, gam, ymin):
+    pars = Parameters()
+    skG = Model(skewedG)
+    pars.update(skG.make_params())
+    
+    #pars['amp'].set(amp, min=500)
+    pars['cen'].set(cen, vary=True)
+    #pars['sig'].set(cen*0.5, min=0)
+    pars['gam'].set(gam)
+
+    pars['amp'].set(amp, min=0)
+    #pars['cen'].set(cen, min=cen*0.8, max=cen*1.2)
+    #pars['cen'].set(cen, vary=False)
+    pars['wid'].set(wid, min=0)
+    #pars['gam'].set(gam, min=gam-np.abs(gam*2), max=gam+np.abs(gam*2))
+    pars['ymin'].set(ymin, min=0)
+    mod = skG
+    results = mod.fit(y, pars, x=x)
+    return results
 
 def parab_interc(y, a, h, k):
     "return x-value for certain y"
@@ -104,27 +126,6 @@ def fit_parab(x, y, a , h, k):
     results = mod.fit(y, pars, x=x)
     return results
 
-def fit_skewG(x, y, amp, cen, gam, h):
-    pars = Parameters()
-    skG = Model(skewedG)
-    pars.update(skG.make_params())
-    
-    
-    #pars['amp'].set(amp, min=500)
-    pars['cen'].set(cen, vary=True)
-    #pars['sig'].set(cen*0.5, min=0)
-    pars['gam'].set(gam)
-
-    pars['amp'].set(amp, min=0)
-    #pars['cen'].set(cen, min=cen*0.8, max=cen*1.2)
-    #pars['cen'].set(cen, vary=False)
-    pars['sig'].set(cen*0.5, min=0)
-    #pars['gam'].set(gam, min=gam-np.abs(gam*2), max=gam+np.abs(gam*2))
-    pars['h'].set(h, min=0)
-    mod = skG
-    results = mod.fit(y, pars, x=x)
-    return results
-
 def get_interc(x_fit, y_fit, conf_level):
     y_min = min(y_fit)
     idmin = np.where(y_fit==y_min)
@@ -134,4 +135,46 @@ def get_interc(x_fit, y_fit, conf_level):
     err_u = abs(x_fit[idxs[1]] - x_min)
     return x_fit[idmin].item(), err_l, err_u
 
-    
+def fitplot(wA, fA, wM, fM, model, lr, dictionary, lines, figu='save', nrows=3, ncols=3, legend_ax=3,
+            xlabel_ax=7, ylabel_ax=3, balmer_min_y=0.75):
+    '''
+    wA, fA : wavelength and flux of the observed spectrum.
+    wM, fM : wavelength and flux of the mdoels (list).
+    model  : name/identifier of the models. Used for labels in legend (list).
+    lr     : light ratio contribution from the secondary. Used in figure title and name of the saved plot.
+    dictionary : Python dictionary with name/identifier on the spectral lines, the region and title for each subplot.
+    lines  : lines used in the dictionary (list).
+    #savefig : default False. True will save the figure (bool).
+    figu : default 'save'. Use 'show' to show the plot without saving it.
+    nrows, ncols : number of rows and columns for subplots (int).
+    legend_ax : number of the preferred subplot to display the legend (int).
+    '''
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(8*ncols, 6*nrows), sharey=False)
+    if type(axes)==np.ndarray:
+        ax = axes.flatten()
+    else:
+        ax = [axes]
+    for i, line in enumerate(dictionary):
+        reg = dictionary[line]['region']
+        cond = (wA > reg[0]) & (wA < reg[1])
+        ax[i].plot(wA[cond], fA[cond],c='k',ls='-', linewidth=4, label='disent. spec')
+        # ax[i].plot(wA[cond], fA[cond], 'ko', ms=8,ls='none', label='disent. spec')
+        for f, w, mod in zip(fM, wM, model):
+            cond = (w > reg[0]) & (w < reg[1])
+            ax[i].plot(w[cond], f[cond],'--', c='orange', linewidth=4, label=mod)
+            # ax[i].plot(w[cond], f[cond],'.', linewidth=2, label=mod)
+        if line in [4102, 4340]:
+            ax[i].set_ylim(balmer_min_y, 1.05)
+        ax[i].set_title(dictionary[line]['title'], size=36)
+        ax[i].tick_params(axis='both', which='major', labelsize=32)
+    ax[legend_ax].legend(frameon=False, fontsize=20)
+    fig.supxlabel(r'Wavelength (\AA)', size=48)
+    fig.supylabel(r'Flux', x=0.01, size=48)
+    fig.suptitle('Secondary light contribution = '+str(int(lr))+'\%'+' - fitted lines: '+str(lines), y=1, fontsize=36)
+    plt.tight_layout()
+    if figu=='save':
+    # plt.savefig(model+'lr'+str(lr)+'_'+str(lines)+'.pdf')
+        plt.savefig(str(model[0])+'_lr'+str(int(lr))+'.pdf')
+    else:
+        plt.show()
+    plt.close()
