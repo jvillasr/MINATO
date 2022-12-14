@@ -77,7 +77,7 @@ class atm_fitting:
                                 # interpolate models to the wavelength of the sliced disentangled spectrum
                                 # modA_f_interp = [np.interp(x, modA_w, modA_f) for x in dst_A_w_slc]
                                 modA_f_interp = np.interp(dst_A_w_slc, modA_w, modA_f)
-                                chi2A, ndataA = 0, 0
+                                # chi2A, ndataA = 0, 0
                                 for he in self.grid[1]:
                                     # apply He/H ratio to the interpolated model of star A
                                     # print('lrat =', lr, 'TeffA =', TA, 'loggA =', gA, 'rotA =', rA, 'he2H =', he)
@@ -92,12 +92,15 @@ class atm_fitting:
                                             for rB in self.grid[7]:
                                                 try:
                                                     # get models for star B
-                                                    modB_w, modB_f, modelB = self.get_model(*[TB,gB,rB], source='tlusty')                                     
+                                                    if TA < 16: 
+                                                        modB_w, modB_f, modelB = self.get_model(*[TB,gB,rB], source='atlas')        
+                                                    else:
+                                                        modB_w, modB_f, modelB = self.get_model(*[TB,gB,rB], source='tlusty')
                                                     if modA_f and modB_f:
                                                         #  interpolate models to the wavelength of the sliced disentangled spectrum
                                                         modB_f_interp = np.interp(dst_B_w_slc, modB_w, modB_f)
                                                         # crop nebular emission from model and compute chi^2
-                                                        chi2B, ndataB = 0, 0
+                                                        # chi2B, ndataB = 0, 0
                                                         spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc, modB_f_interp, [[4097, 4105], [4335, 4346]])
                                                         ndataB = len(modB_f_interp_crop)
                                                         chi2B = self.chi2(dst_B_f_slc, modB_f_interp_crop)   
@@ -120,6 +123,7 @@ class atm_fitting:
                                                         chi2_tot = chi2A + chi2B
                                                         # print('chi2 = ', chi2_tot)
                                                         ndata = ndataA + ndataB
+                                                        print(ndata)
                                                         chi2redA = chi2A/(ndataA-nparams)
                                                         chi2redB = chi2B/(ndataB-nparams)
                                                         chi2r_tot = chi2redA + chi2redB
@@ -128,7 +132,7 @@ class atm_fitting:
                                                         for key, val in zip(col, row):
                                                             result_dic[key].append(val)
                                                 except TypeError:
-                                                    # print('there was a typerror 1', [TB,gB,rB])
+                                                    print('there was a typerror 1', [TB,gB,rB])
                                                     nomodel += 1
                                                     pass
                                         progold = prog
@@ -139,22 +143,23 @@ class atm_fitting:
                                             print(str(prog)+r'% completed in', str(timedelta(seconds=t4-t3)))
                                             t3 = time.time()
                         except TypeError:
-                            # print('there was a typerror 2')
+                            print('there was a typerror 2')
                             nomodel += 1
                             pass
                 t2 = time.time()
                 print('   Teff_A = ' + str(TA) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(lr))
+                # print('ndata:', ndata)
             t1 = time.time()
             print('\n Light ratio = ' + str(lr) + ' completed in : ' + str(timedelta(seconds=t1-t0)) + ' [s] \n')
             print('\n')            
         tf = time.time()
         print('Computation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
-
         tf1 = time.time()
         output = pd.DataFrame.from_dict(result_dic)
         print(output)
         tf2 = time.time()
-        print('dataframe from dict and created in: ' + str(timedelta(seconds=tf2-tf1)) + ' [s] \n')
+        print('total number of points used in the fit:', ndata)
+        # print('dataframe from dict and created in: ' + str(timedelta(seconds=tf2-tf1)) + ' [s] \n')
         return output
 
 
@@ -165,6 +170,7 @@ class atm_fitting:
         '''
         self.lrat = lrat
         ratio0 = 0.3
+        print('\n#     Warning: you are using an initial light ratio of', ratio0, '\n')
         ratio1 = lrat
         fluxA, fluxB = self.get_flux()
         flux_new_A = (fluxA -1)*((1-ratio0)/(1-ratio1)) + 1

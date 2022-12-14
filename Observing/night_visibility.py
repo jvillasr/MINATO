@@ -89,7 +89,7 @@ def NVTC(name, RA, DEC, time0, location):
 # obj_altaz = obj_coords.transform_to(AltAz(obstime=obj_time,location=coords))
 # print(obj_altaz.alt.to_string(unit=u.deg, precision=5))
 
-ORM = 'Roque de los Muchachos'
-ra, dec = ['20 18 00.62'], ['36 39 03.06']
-time = '2022-09-10 22:10'
-NVTC('[NH52] 63', ra, dec, time, ORM)
+# ORM = 'Roque de los Muchachos'
+# ra, dec = ['20 18 00.62'], ['36 39 03.06']
+# time = '2022-12-01 21:00'
+# NVTC('[NH52] 63', ra, dec, time, ORM)
