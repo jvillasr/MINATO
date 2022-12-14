@@ -92,7 +92,7 @@ class atm_fitting:
                                             for rB in self.grid[7]:
                                                 try:
                                                     # get models for star B
-                                                    if TA < 16: 
+                                                    if TB < 16: 
                                                         modB_w, modB_f, modelB = self.get_model(*[TB,gB,rB], source='atlas')        
                                                     else:
                                                         modB_w, modB_f, modelB = self.get_model(*[TB,gB,rB], source='tlusty')
