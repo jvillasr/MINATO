@@ -131,7 +131,7 @@ class atm_fitting:
                                                         for key, val in zip(col, row):
                                                             result_dic[key].append(val)
                                                 except TypeError:
-                                                    # print('there was a typerror 1', [TB,gB,rB])
+                                                    # print('there was a typerror 2', [TB,gB,rB])
                                                     nomodel += 1
                                                     pass
                                         progold = prog
@@ -142,7 +142,7 @@ class atm_fitting:
                                             print(str(prog)+r'% completed in', str(timedelta(seconds=t4-t3)))
                                             t3 = time.time()
                         except TypeError:
-                            # print('there was a typerror 2')
+                            # print('there was a typerror 1', [TA,gA,rA])
                             nomodel += 1
                             pass
                 t2 = time.time()
