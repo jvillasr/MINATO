@@ -123,7 +123,6 @@ class atm_fitting:
                                                         chi2_tot = chi2A + chi2B
                                                         # print('chi2 = ', chi2_tot)
                                                         ndata = ndataA + ndataB
-                                                        print(ndata)
                                                         chi2redA = chi2A/(ndataA-nparams)
                                                         chi2redB = chi2B/(ndataB-nparams)
                                                         chi2r_tot = chi2redA + chi2redB
@@ -132,7 +131,7 @@ class atm_fitting:
                                                         for key, val in zip(col, row):
                                                             result_dic[key].append(val)
                                                 except TypeError:
-                                                    print('there was a typerror 1', [TB,gB,rB])
+                                                    # print('there was a typerror 1', [TB,gB,rB])
                                                     nomodel += 1
                                                     pass
                                         progold = prog
@@ -143,7 +142,7 @@ class atm_fitting:
                                             print(str(prog)+r'% completed in', str(timedelta(seconds=t4-t3)))
                                             t3 = time.time()
                         except TypeError:
-                            print('there was a typerror 2')
+                            # print('there was a typerror 2')
                             nomodel += 1
                             pass
                 t2 = time.time()
