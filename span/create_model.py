@@ -2,12 +2,12 @@ from span import rotin_inp as ri
 import numpy as np
 
 starA=True
-starB=True
+starB=False
 
 if starA==True:
-    teffA = np.linspace(10, 18, 9, dtype=int)
+    teffA = np.linspace(10, 15, 6, dtype=int)
     # rotA = np.linspace(10, 70, 7, dtype=int)
-    rotA = [0]
+    rotA = list(range(0, 650, 50))
     for T1 in teffA:
         if T1 < 16:
             loggA = [18, 20, 22, 24, 26, 28, 30]
