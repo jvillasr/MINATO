@@ -16,16 +16,41 @@ class atm_fitting:
         self.grid = grid
         self.spectrumA = spectrumA
         self.spectrumB = spectrumB
+    # lines_dic = {
+    #                 4026: { 'region':[4005, 4033], 'title':'He I $\lambda$4009/26'},
+    #                 4102: { 'region':[4084-20, 4117], 'title':'H$\delta$'},
+    #                 4121: { 'region':[4117, 4135], 'title':'He I $\lambda$4121, Si II $\lambda$4128/32'},
+    #                 4144: { 'region':[4137, 4151], 'title':'He I $\lambda$4144'},
+    #                 4267: { 'region':[4260, 4275], 'title':'C II $\lambda$4267'},
+    #                 4340: { 'region':[4320, 4362], 'title':'H$\gamma$'},
+    #                 4388: { 'region':[4380, 4396], 'title':'He I $\lambda$4388'},
+    #                 4471: { 'region':[4465, 4485], 'title':'He I $\lambda$4471, Mg II $\lambda$4481'},
+    #                 4553: { 'region':[4536, 4560], 'title':'Fe II $\lambda$4550/56, Si III $\lambda$4553'} }
+    # lines_dic = {
+    #                 4009: { 'region':[3990, 4000], 'title':'N II $\lambda$3995'},
+    #                 4026: { 'region':[4005, 4033], 'title':'He I $\lambda$4009/26'},
+    #                 4102: { 'region':[4085, 4117], 'title':'H$\delta$'},
+    #                 4121: { 'region':[4117, 4135], 'title':'He I $\lambda$4121, Si II $\lambda$4128/32'},
+    #                 4144: { 'region':[4139, 4149], 'title':'He I $\lambda$4144'},
+    #                 4233: { 'region':[4229, 4237], 'title':'Fe II $\lambda$4233'},
+    #                 4267: { 'region':[4262, 4272], 'title':'C II $\lambda$4267'},
+    #                 4340: { 'region':[4324, 4358], 'title':'H$\gamma$'},
+    #                 4388: { 'region':[4382, 4394], 'title':'He I $\lambda$4388'},
+    #                 4471: { 'region':[4465, 4485], 'title':'He I $\lambda$4471, Mg II $\lambda$4481'},
+    #                 4553: { 'region':[4539, 4560], 'title':'Fe II $\lambda$4550/56, Si III $\lambda$4553'} }
     lines_dic = {
+                    4009: { 'region':[3990, 4000], 'title':'N II $\lambda$3995'},
                     4026: { 'region':[4005, 4033], 'title':'He I $\lambda$4009/26'},
                     4102: { 'region':[4084-20, 4117], 'title':'H$\delta$'},
                     4121: { 'region':[4117, 4135], 'title':'He I $\lambda$4121, Si II $\lambda$4128/32'},
-                    4144: { 'region':[4137, 4151], 'title':'He I $\lambda$414'},
+                    4144: { 'region':[4137, 4151], 'title':'He I $\lambda$4144'},
+                    4233: { 'region':[4225, 4241], 'title':'Fe II $\lambda$4233'},
                     4267: { 'region':[4260, 4275], 'title':'C II $\lambda$4267'},
                     4340: { 'region':[4320, 4362], 'title':'H$\gamma$'},
                     4388: { 'region':[4380, 4396], 'title':'He I $\lambda$4388'},
                     4471: { 'region':[4465, 4485], 'title':'He I $\lambda$4471, Mg II $\lambda$4481'},
-                    4553: { 'region':[4536, 4560], 'title':'Fe II, Si III'} }
+                    # 4553: { 'region':[4536, 4560], 'title':'Fe II $\lambda$4550/56, Si III $\lambda$4553'} }
+                    4553: { 'region':[4536, 4560], 'title':'He II $\lambda$4542, Si III $\lambda$4553'} }
     def user_dic(self, lines):
         self.lines = lines
         dic = { line: self.lines_dic[line] for line in self.lines }

@@ -199,27 +199,87 @@ def fitplot(wA, fA, wM, fM, model, lr, dictionary, lines, figu='save', nrows=3, 
         plt.show()
     plt.close()
 
-def plot_corr(df, pars_dic, nrows=4, ncols=4, subplots_positions=[6, 7, 8, 9, 3, 4, 5, 1, 2, 0], vmax=0.6, save=None, rot_labels=None):
+def combin(n, r):
+    '''
+    n: number of elements
+    r: desired subset
+    '''
+    from math import factorial as fac
+    ncomb = fac(n) / (fac( n - r )* fac(r))
+    return int(ncomb)
+
+def plot_corr(df, pars_dic, vmax=0.6, save=None, rot_labels=None, cmap='magma_r', interp='hanning'):
     '''Produces a corner plot of correlations between parameters
     df: a dataframe with the results; parameter values and chi2
     pars_dic: a dictionary the parameter name and values
+
+    interp: Interpolation method. Possible values:  None, 'none', 'nearest', 'bilinear', 'bicubic', 'spline16',
+                                                    'spline36', 'hanning', 'hamming', 'hermite', 'kaiser', 'quadric',
+                                                    'catrom', 'gaussian', 'bessel', 'mitchell', 'sinc', 'lanczos'.
+
+
     '''
+    # x_labels = ['Light ratio', 'He/H', r'$T_{\text{eff}, A}$ [kK]', r'$\log g_A$', r'$T_{\text{eff}, B}$ [kK]', \
+    #         r'$\log g_B$', r'$\varv \sin i_A$ [km/s]', r'$\varv \sin i_B$ [km/s]']
+
+    npars = len(pars_dic) # num of parameters
+    ncomb = combin(npars,2) # num of possible param pairs
+    pos0 = list(range(ncomb))
+    positions = [pos0[int(i*(i+1)/2):int(i*(i+1)/2)+i+1] for i in range(npars-1)][::-1] 
+    corner_position = [x for sublist in positions for x in sublist] # indexes of corner plot
+    print(corner_position)
+    import copy
+    labels = copy.deepcopy(list(pars_dic.keys()))
+
+    for i,key in enumerate(pars_dic.keys()):
+        if key=='lrat':
+            labels[i] = 'Light ratio'
+        elif key=='He2H':
+            labels[i] = 'He/H'
+        elif key=='teffA':
+            labels[i] = r'$T_{\text{eff}, A}$ [kK]'
+        elif key=='teffB':
+            labels[i] = r'$T_{\text{eff}, B}$ [kK]'
+        elif key=='loggA':
+            labels[i] = r'$\log g_A$'
+        elif key=='loggB':
+            labels[i] = r'$\log g_B$'
+        elif key=='rotA':
+            labels[i] = r'$\varv \sin i_A$ [km/s]'
+        elif key=='rotB':
+            labels[i] = r'$\varv \sin i_B$ [km/s]'
+
     pair_pars = list(itertools.combinations(pars_dic.values(), 2))
     pair_names = list(itertools.combinations(pars_dic.keys(), 2))
-
-    corner_position = subplots_positions
+    print(pair_names)
+    pair_labels = list(itertools.combinations(labels, 2))
 
     pair_pars  = [x for (y,x) in sorted(zip(corner_position,pair_pars), key=lambda pair: pair[0])]
     pair_names = [x for (y,x) in sorted(zip(corner_position,pair_names), key=lambda pair: pair[0])]
+    pair_labels = [x for (y,x) in sorted(zip(corner_position,pair_labels), key=lambda pair: pair[0])]
+    print(pair_names)
+    nrows=npars-1
+    ncols=npars-1
 
-    fig, axes = plt.subplots(nrows,ncols,figsize=(16, 14))
+    plot_idx = list(range(nrows**2))
+    corner_idx = [plot_idx[i:i+nrows] for i in range(0,len(plot_idx),nrows)] # split list in <nrows> number of sublists
+    corner_idx = [x[::-1] for x in corner_idx] # invert order of sublists
+    print(corner_idx)
+    corner_idx = [x[-i-1:] for i,x in enumerate(corner_idx)] # drop upper right indexes
+    print(corner_idx)
+    corner_idx = [x for sublist in corner_idx for x in sublist] # join sublists
+
+    fig, axes = plt.subplots(nrows,ncols,figsize=(4*nrows, 4*ncols), sharey=True, sharex=True)
     ax = axes.flatten()
     # print(list(range(len(ax))))
-    if nrows*ncols>9:
-        corner_idx = [0, 5, 4, 10, 9, 8, 15, 14, 13, 12]
-    else:
-        corner_idx = [0, 4, 3, 8, 7, 6]
-    for k, (x, y), (u,v) in zip(corner_idx, pair_pars, pair_names):
+    # if nrows*ncols==16:
+    #     corner_idx = [0, 5, 4, 10, 9, 8, 15, 14, 13, 12]
+    # elif nrows*ncols==49:
+    #     # [21, 22, 23, 24, 25, 26, 27, 15, 16, 17, 18, 19, 20, 10, 11, 12, 13, 14,  6,  7,  8,  9,  3,  4,  5,  1,  2,  0]
+    #     corner_idx = [0, 5, 4, 10, 9, 8, 15, 14, 13, 12,   ]
+    # else:
+    #     corner_idx = [0, 4, 3, 8, 7, 6]
+    for k, (x, y), (u,v), (m,n) in zip(corner_idx, pair_pars, pair_names, pair_labels):
         # print(x, y)
         corrgrid = np.zeros((len(x), len(y)))
         # print(corrgrid)
@@ -227,7 +287,7 @@ def plot_corr(df, pars_dic, nrows=4, ncols=4, subplots_positions=[6, 7, 8, 9, 3,
             for j in range(len(y)):
                 corrgrid[i][j] = round(df['chi2'][(df[u]==x[i]) & (df[v]==y[j])].min(), 3)
         dfcorr = pd.DataFrame(corrgrid, columns=y, index=x)
-        heatmap = ax[k].imshow(dfcorr, cmap='magma_r', interpolation='hanning', norm=LogNorm(vmin=np.nanmin(dfcorr), vmax=vmax), aspect='auto')
+        heatmap = ax[k].imshow(dfcorr, cmap=cmap, interpolation=interp, norm=LogNorm(vmin=np.nanmin(dfcorr), vmax=vmax), aspect='auto')
         ax[k].set_xticks(range(len(dfcorr.columns)))
         if rot_labels=='All':
             ax[k].set_xticklabels(dfcorr.columns, rotation=45)
@@ -236,8 +296,9 @@ def plot_corr(df, pars_dic, nrows=4, ncols=4, subplots_positions=[6, 7, 8, 9, 3,
         else:
             ax[k].set_xticklabels(dfcorr.columns)
         ax[k].set_yticks(range(len(dfcorr.index)))
+        ax[k].tick_params(axis='both', colors='grey')
         ax[k].set_yticklabels(dfcorr.index)
-        ax[k].set(xlabel=v, ylabel=u)
+        ax[k].set(xlabel=n, ylabel=m)
     for i,_  in enumerate(ax):
         if i not in corner_idx:
             ax[i].remove()

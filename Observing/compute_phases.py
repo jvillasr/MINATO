@@ -71,7 +71,7 @@ def compute_phases(time, location, period, num_epochs, phase_tolerance, max_date
             j=0
             next_phase = epochs + (j+1)*period*u.day
             while next_phase < max_date:
-                print(next_phase, max_date)
+                # print(j, next_phase, max_date)
                 next_phase = epochs + (j+1)*period*u.day
                 next_phase_min = next_phase-tolerance
                 next_phase_max = next_phase+tolerance
