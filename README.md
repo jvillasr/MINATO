@@ -1,9 +1,13 @@
 # MINATO: Massive bINaries Analysis TOols
 Python tools for the analysis of massive binary stars
 
-Main scopes:
-- Radial velocity measurements --> Ravel
-- Time series analysis &emsp; &emsp; &emsp; &nbsp; --> currently under Ravel
-- Spectral analysis &emsp; &emsp; &emsp; &emsp; &ensp; --> Span
-- SED fitting &emsp; &emsp; &emsp; &emsp; &emsp; &emsp; &nbsp; &nbsp; --> to be implemented
-- Spectral classification &emsp; &emsp; &nbsp; --> to be implemented
+Version 1.0:
+- Spectral analysis (span): It allows to fit the spectra of binary stars simultaneously with synthetic spectra. Effective temperatures, log surface gravities, rotational velocities, He/H ratios, and the light ratio is returned.
+
+
+Future additions:
+- Radial velocity measurements
+- Time series analysis
+- Spectral analysis
+- SED fitting
+- Spectral classification

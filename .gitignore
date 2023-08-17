@@ -1,6 +1,17 @@
 # Exclude jupyter notebook checkpoints
 .ipynb_checkpoints
-# Exclude .DS_Store files
+# Exclude .DS_Store and other files
 .DS_Store*
+.token
 __pycache*
 **/data
+# Exclude develop directories
+Observing
+pyrvfit
+ravel
+span
+# Exclude file in minato
+minato/__pycache*
+minato/models/ATLAS9.zip
+mianto/tutorials/polynom_fitreport.txt
+mianto/tutorials/atmfit_results_0.feather
