@@ -3,6 +3,7 @@
 # Exclude .DS_Store and other files
 .DS_Store*
 .token
+.vscode/
 __pycache*
 **/data
 # Exclude develop directories
