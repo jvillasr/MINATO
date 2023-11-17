@@ -403,8 +403,8 @@ class atmfit:
         """
         self.x_data = x_data
         self.y_data = y_data
-        self.range_list = range_list
-        for wav in range_list:
+        self.wavelength_ranges = wavelength_ranges
+        for wav in wavelength_ranges:
             cond = (x_data < wav[0]) | (x_data > wav[1])
             x_data = x_data[cond]
             y_data = y_data[cond]
