@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.interpolate as inter
 from glob import glob
-from datetime import timedelta, date
+from datetime import timedelta, date, datetime
 from math import prod
 current_date = str(date.today())
 
@@ -37,7 +37,7 @@ class atmfit:
 
     lines_dic = {
                     3995: { 'region':[3990, 4000],  'HeH_region':[], 'title':'N II $\lambda$3995'},
-                    4026: { 'region':[4005, 4033],  'HeH_region':[4005, 4028], 'title':'He I $\lambda$4009/26'},
+                    4026: { 'region':[4005, 4033],  'HeH_region':[4005, 4033], 'title':'He I $\lambda$4009/26'},
                     4102: { 'region':[4084-20, 4117],  'HeH_region':[4091, 4111], 'title':'H$\delta$'},
                     4121: { 'region':[4117, 4135],  'HeH_region':[4120, 4122], 'title':'He I $\lambda$4121, Si II $\lambda$4128/32'},
                     4144: { 'region':[4137, 4151],  'HeH_region':[4142, 4146], 'title':'He I $\lambda$4144'},
@@ -102,6 +102,7 @@ class atmfit:
         t0 = time.time()
 
         print('\n ##### Computing chi^2 for grid #####\n')
+        plot=True
         for lr in self.grid[0]:
             # rescale flux to new light ratio and slice data to regions for chi^2 computation
             fluA, fluB = self.rescale_flux(lr)
@@ -125,13 +126,19 @@ class atmfit:
                                 modA_f_interp = np.interp(dst_A_w_slc, modA_w, modA_f)
 
                                 for he in self.grid[1]:
+                                    print('He:', he)
                                     # apply He/H ratio to the interpolated model of star A
-                                    modA_f_interp_hefrac = self.He2H_ratio(dst_A_w_slc, modA_f_interp, heini, he, usr_dicA, join=True)
+                                    modA_f_interp_hefrac = self.He2H_ratio(dst_A_w_slc, modA_f_interp, heini, he, usr_dicA, join=True, plot=plot, model=modelA)
+                                    plot=False
                                     ndataA = len(modA_f_interp_hefrac)
+                                    # print(len(dst_A_f_slc), len(modA_f_interp_hefrac))
                                     chi2A = self.chi2(dst_A_f_slc, modA_f_interp_hefrac)
                                     for TB in self.grid[5]:
+                                        print('TB:', TB)
                                         for gB in self.grid[6]:
+                                            print('gB:', gB)
                                             for rB in self.grid[7]:
+                                                print('rB:', rB)
                                                 try:
                                                     # get models for star B
                                                     if TB < 16: 
@@ -294,13 +301,14 @@ class atmfit:
                 # raise ValueError('   WARNING: No model available for '+model)
                 pass
 
-    def He2H_ratio(self, wave, flux, ratio0, ratio1, dictionary, join=False):
-        new_spectrum = []
+    def He2H_ratio(self, wave, flux, ratio0, ratio1, dictionary, join=False, plot=False, model=None):
         """
-        Modify the Helium-to-Hydrogen (He/H) ratio in a given spectrum.
+        Modify the Helium-to-Hydrogen (He/H) ratio in a given spectrum and optionally plot the modifications.
 
         This function modifies the He/H ratio in a given spectrum based on the provided wavelength
         range and ratio values. The spectrum is modified for specific lines defined in the dictionary.
+        If the plot parameter is set to True, a plot of the original and modified spectrum is generated
+        for each line and saved to a file.
 
         :param wave: Wavelength array of the spectrum.
                     Type: numpy array or list of floats
@@ -311,9 +319,13 @@ class atmfit:
         :param ratio1: Desired He/H ratio after modification.
                     Type: float
         :param dictionary: Dictionary containing line information with 'region' and 'HeH_region'.
-                        Type: dict
+                    Type: dict
         :param join: If True, the modified spectrum is joined and returned as a single array. If False,
                     a list of modified segments is returned.
+                    Default: False
+                    Type: bool
+        :param plot: If True, a plot of the original and modified spectrum is generated for each line
+                    and saved to a file. The regions where the He/H ratio is modified are highlighted.
                     Default: False
                     Type: bool
 
@@ -326,7 +338,10 @@ class atmfit:
         self.ratio1 = ratio1
         self.dictionary = dictionary
         self.join = join
+        # print('length of wave:', len(wave), 'length of flux:', len(flux))
         # Iterate over dictionary to modify spectrum segments
+        new_spectrum = []
+        original_flux = np.copy(flux)
         for i,line in enumerate(dictionary):
             reg = dictionary[line]['region']
             he_regs = dictionary[line]['HeH_region']
@@ -335,17 +350,24 @@ class atmfit:
                 reg_heline = []
                 # Handle line-specific modifications
                 if line==4026:
-                    cond1 = wave[cond] < 4008
-                    cond2 = (wave[cond] > 4008) & (wave[cond] < 4011)
-                    cond3 = (wave[cond] > 4011) & (wave[cond] < he_regs[0])
-                    cond4 = (wave[cond] > he_regs[0]) & (wave[cond] < he_regs[1])
-                    cond5 = wave[cond] > he_regs[1]
+                    cond1 = wave[cond] < 4007
+                    cond2 = (wave[cond] >= 4007) & (wave[cond] < 4012)
+                    cond3 = (wave[cond] >= 4012) & (wave[cond] < 4022)
+                    cond4 = (wave[cond] >= 4022) & (wave[cond] < 4030)
+                    cond5 = wave[cond] > 4030
                     reg_heline.append( flux[cond][cond1] )
                     reg_heline.append( (flux[cond][cond2] -1)*(ratio1/ratio0) + 1 )
                     reg_heline.append( flux[cond][cond3] )
                     reg_heline.append( (flux[cond][cond4] -1)*(ratio1/ratio0) + 1 )
                     reg_heline.append( flux[cond][cond5] )
-                    new_spectrum.append(np.array(list(itertools.chain.from_iterable(reg_heline))))
+                    temp_spec = np.array(list(itertools.chain.from_iterable(reg_heline)))
+                    new_spectrum.append(temp_spec)
+                    # flux[cond][cond1] = flux[cond][cond1]
+                    # flux[cond][cond2] = (flux[cond][cond2] -1)*(ratio1/ratio0) + 1
+                    # flux[cond][cond3] = flux[cond][cond3]
+                    # flux[cond][cond4] = (flux[cond][cond4] -1)*(ratio1/ratio0) + 1
+                    # flux[cond][cond5] = flux[cond][cond5]
+                    # new_spectrum.append(flux[cond])
                 else:
                     cond1 = wave[cond] < he_regs[0]
                     cond2 = (wave[cond] > he_regs[0]) & (wave[cond] < he_regs[1])
@@ -353,15 +375,50 @@ class atmfit:
                     reg_heline.append( flux[cond][cond1] )
                     reg_heline.append( (flux[cond][cond2] -1)*(ratio1/ratio0) + 1 )
                     reg_heline.append( flux[cond][cond3] )
-                    new_spectrum.append(np.array(list(itertools.chain.from_iterable(reg_heline))))
+                    temp_spec = np.array(list(itertools.chain.from_iterable(reg_heline)))
+                    new_spectrum.append(temp_spec)
+                    # flux[cond][cond1] = flux[cond][cond1]
+                    # print("Number of points where cond2 is true:", np.sum(cond2))
+                    # print("Original flux where cond2 is true:", flux[cond][cond2])
+                    # flux[cond][cond2] = (flux[cond][cond2] -1)*(ratio1/ratio0) + 1
+                    # print("Modified flux where cond2 is true:", flux[cond][cond2])
+                    # flux[cond][cond3] = flux[cond][cond3]
+                    # new_spectrum.append(flux[cond])
             elif line in [4102, 4340]:
-                new_spectrum.append(  (flux[cond] -1)*((1-ratio1)/(1-ratio0)) + 1 )
+                temp_spec = (flux[cond] -1)*((1-ratio1)/(1-ratio0)) + 1
+                new_spectrum.append( temp_spec  )
             else:
                 new_spectrum.append(flux[cond])
+            # Plot the region where the He/H ratio is being modified
+            if plot and line in [4026, 4102, 4121, 4144, 4340, 4388, 4471]:
+                plt.figure(figsize=(6,4))
+                plt.plot(wave[cond], original_flux[cond], label='Original')
+                plt.plot(wave[cond], temp_spec, alpha=0.5, label='Modified')
+                if line==4026:
+                    # for lin in [4007, 4012, 4022, 4030]:
+                    #     plt.axvline(x=lin, color='r', linestyle='--', alpha=0.5)
+                    for lin1, lin2 in [(4007, 4012), (4022, 4030)]:
+                        # plt.fill_between(wave, original_flux, where=(wave > lin1) & (wave < lin2), color='red', alpha=0.5)
+                        plt.fill_between(wave[cond], min(original_flux[cond]), max(original_flux[cond]), where=(wave[cond] > lin1) & (wave[cond] < lin2), color='orange', alpha=0.3)
+                else:
+                    # for lin in he_regs:
+                    #     plt.axvline(x=lin, color='r', linestyle='--', alpha=0.5)
+                    # plt.fill_between(wave, original_flux, where=(wave > he_regs[0]) & (wave < he_regs[1]), color='red', alpha=0.5)
+                    plt.fill_between(wave[cond], min(original_flux[cond]), max(original_flux[cond]), where=(wave[cond] > he_regs[0]) & (wave[cond] < he_regs[1]), color='orange', alpha=0.3)
+                plt.title(f'Line {line}')
+                plt.xlabel('Wavelength')
+                plt.ylabel('Flux')
+                plt.legend()
+                # timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                # print('line:', line, 'model:', model)
+                plt.savefig('line'+str(line)+'_'+model+'he'+str(ratio1)+'.png', dpi=100)
+                plt.close()
         if join==True:
             new_spectrum = np.array(list(itertools.chain.from_iterable(new_spectrum)))
+            # print('join==True. Length of new spectrum:', len(new_spectrum))
             return new_spectrum
         else:
+            # print('join==False. Length of new spectrum:', len(new_spectrum))
             return new_spectrum
 
     def chi2(self, obs, exp):
