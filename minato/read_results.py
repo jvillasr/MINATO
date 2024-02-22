@@ -2,18 +2,21 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
-import myRC
+# import myRC
 import sys
 import math
 import itertools
+import traceback
 import scipy.interpolate as scInterp
 from matplotlib.colors import LogNorm
 from matplotlib.collections import LineCollection
 from matplotlib import cm, colors
 from scipy.stats.distributions import chi2 as scipy_chi2
 from lmfit import Model, Parameters, models
-from lmfit.models import SkewedGaussianModel
+from lmfit.models import SkewedGaussianModel, PolynomialModel
 from datetime import datetime
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
 
 def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4, 9, 5, 4, 6, 6, 4, 4], save_to=None):
     """
@@ -45,8 +48,10 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
     """
     dof = df.loc[0,'ndata']-len(df.columns)
     # read in unscaled chi2
-    unscaled_chi2 = df['chi2_tot']
+    # unscaled_chi2 = df['chi2_tot']
+    unscaled_chi2 = df['chi2A']
     print('min unscaled chi2 value =', unscaled_chi2.min())
+    print('max unscaled chi2 value =', unscaled_chi2.max())
 
     # renormalize the chi2 such that the best fit corresponds to a chi2 = dof
     # which is similar to setting the reduced chi2 =1
@@ -55,21 +60,29 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
     print('max scaled chi2 value =', chi2.max())
 
     # Plot to examine the chi2 values
+    num_bins = int(np.sqrt(len(chi2)))
     fig, ax = plt.subplots(figsize=(12,4))
-    ax.hist(chi2, bins=np.logspace(np.log10(chi2.min()),np.log10(chi2.max()), 1000))
+    ax.hist(chi2, bins=np.logspace(np.log10(chi2.min()),np.log10(chi2.max()), num_bins))
     # plt.xlim(0.4,100)
     ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
-    ax.set_xticks([2000, 5000, 1000, 20000, 50000])
-    ax.set_xlim(1500, 90000)
+    # Calculate the minimum and maximum powers of 10 that cover the range of the data
+    min_power_of_10 = np.floor(np.log10(chi2.min()))
+    max_power_of_10 = np.ceil(np.log10(chi2.max()))
+    # Generate the xticks as powers of 10
+    xticks = np.logspace(min_power_of_10, max_power_of_10, num=int(max_power_of_10-min_power_of_10+1))
+
+    # ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    ax.set_xticks(xticks)
+    ax.set_xlim(chi2.min()*0.9, chi2.max()*1.1)
     ax.set_xlabel('$\chi^2$') 
+    #
     ax2 = ax.twiny()
     # ax2.hist(unscaled_chi2, bins=np.logspace(np.log10(unscaled_chi2.min()),np.log10(unscaled_chi2.max()), 1000), alpha=0.3, color='darkorange')
     ax2.set_xlabel('Unscaled $\chi^2$') 
     ax2.set_xscale('log')
-    ax2.xaxis.set_ticks([1, 2, 5, 10, 20], labels=[1, 2, 5, 10, 20])
-    ax2.set_xlim(1500*unscaled_chi2.min()/dof, 90000*unscaled_chi2.min()/dof)
+    # ax2.xaxis.set_ticks([1, 2, 5, 10, 20], labels=[1, 2, 5, 10, 20])
+    # ax2.set_xlim(1500*unscaled_chi2.min()/dof, 90000*unscaled_chi2.min()/dof)
     plt.show()
     plt.close()
 
@@ -77,11 +90,11 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
     conf_level = scipy_chi2.ppf(cl, dof)
     print(str(cl*100)+'% confidence level =', conf_level)
 
-    teffA, loggA, rotA = df['teffA'], df['loggA']/10, df['rotA']
-    teffB, loggB, rotB = df['teffB'], df['loggB']/10, df['rotB']
+    teffA, loggA, micA, rotA = df['teffA'], df['loggA']/10, df['vmicA'], df['rotA']
+    teffB, loggB, micB, rotB = df['teffB'], df['loggB']/10, df['vmicB'], df['rotB']
     lrat, he2h = df['lrat'], df['He2H']
 
-    pars = [lrat, he2h, teffA, loggA, teffB, loggB, rotA, rotB]
+    pars = [lrat, he2h, teffA, loggA, teffB, loggB, rotA, rotB, micA, micB]
 
     # get chi2 minimum
     idx_min = chi2.idxmin()
@@ -89,12 +102,14 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
     pars_min = []
     print('\nGetting min values and intercepts (no interpolation)')
     for par in pars:
-        print(par.name)
-        par_i, par_chi, par_arr, par_interp = interp_models(par, chi2)
-        print(par_i) # values of the parameter (from the grid)
-        print(par_chi) # min chi2 value for each parameter value (to fit parabola/skew gaussian)
-        # # sys.exit()
-        pars_min.append([par_i, par_chi]) # chi2
+        # if par:
+        if not par.isnull().any():
+            print(par.name)
+            par_i, par_chi, par_arr, par_interp = interp_models(par, chi2)
+            # print(par_i) # values of the parameter (from the grid)
+            # print(par_chi) # min chi2 value for each parameter value (to fit parabola/skew gaussian)
+            # # sys.exit()
+            pars_min.append([par_i, par_chi]) # chi2
 
     ###################################################################
     # Performing the fit
@@ -120,7 +135,7 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
                 pass
     elif fit_type == 'skewedG':
         print('\nFitting skwed Gaussian to parameter:')
-        gammas = [0, 0, 0, 0, 0, 0, 0, 10]
+        gammas = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         out_file = open('skewG_fitreport_noBalmer.txt', 'w')
         for par, pmin, gamm in zip(pars, pars_min, gammas):
             print('   '+par.name)
@@ -134,8 +149,9 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
                 fit_pars.append(fit_res.best_values)
                 out_file.write('\n'+par.name+'\n')
                 out_file.write(fit_res.fit_report()+'\n')
-            except ValueError:
-                print('   # fit unsuccessful')
+            except Exception as e:
+                print('   # fit unsuccessful. Error:', e)
+                # print(traceback.format_exc())
                 fit_pars.append(np.nan)
                 pass
     if fit_type == 'poly':
@@ -143,68 +159,102 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
         out_file = open('polynom_fitreport.txt', 'w')
         for par, pmin in zip(pars, pars_min):
             print('   '+par.name)
-            if par.name == 'teffB':
-                pmin[0] = np.delete(pmin[0], [3, 5])
-                pmin[1] = np.delete(pmin[1], [3, 5])   
+            # if par.name == 'teffB':
+            #     pmin[0] = np.delete(pmin[0], [3, 5])
+            #     pmin[1] = np.delete(pmin[1], [3, 5])   
             try:
-                fit_res = fit_poly(pmin[0], pmin[1])
-                results.append(fit_res)
-                fit_pars.append(fit_res.best_values)
-                out_file.write('\n'+par.name+'\n')
-                out_file.write(fit_res.fit_report()+'\n')
-            except ValueError:
-                print('   # fit unsuccessful')
+                coefs = fit_poly(pmin[0], pmin[1])
+                results.append(coefs)
+                if coefs is not None:
+                    fit_pars.append(coefs)
+                    out_file.write('\n'+par.name+'\n')
+                    out_file.write('Coefficients: ' + ', '.join(map(str, coefs)) + '\n')
+                else:
+                    print("Failed to fit polynomial for parameter", par.name)
+            except ValueError as e:
+                print("   Error:", str(e))
                 fit_pars.append(np.nan)
-                pass
     out_file.close()
 
     ###################################################################
     # Making the plot
-    labels= [ r'L_rat', r'He/H', r'$T_{\text{eff}, A}$', r'$\log g_A$', 
-            r'$T_{\text{eff}, B}$', r'$\log g_B$', r'$\varv \sin i_A$', r'$\varv\sin i_B$']
+    labels= [ r'L_rat', r'He/H', r'$T_{\mathrm{eff}, A}$', r'$\log g_A$', 
+            r'$T_{\mathrm{eff}, B}$', r'$\log g_B$', r'$\nu \sin i_A$', r'$\nu\sin i_B$', r'$\xi_A$', r'$\xi_B' ]
 
-    x_labels = ['Light ratio', 'He/H', r'$T_{\text{eff}, A}$ [kK]', r'$\log g_A$', r'$T_{\text{eff}, B}$ [kK]', \
-            r'$\log g_B$', r'$\varv \sin i_A$ [km/s]', r'$\varv \sin i_B$ [km/s]']
+    x_labels = ['Light ratio', 'He/H', r'$T_{\mathrm{eff}, A}$ [kK]', r'$\log g_A$', r'$T_{\mathrm{eff}, B}$ [kK]', \
+            r'$\log g_B$', r'$\nu \sin i_A$ [km/s]', r'$\nu \sin i_B$ [km/s]', r'$\xi_A$ [km/s]', r'$\xi_B$ [km/s]' ]
     props = dict(boxstyle='round', facecolor='papayawhip', alpha=0.9)
-    panels_id = ['a)', 'b)', 'c)', 'd)', 'e)', 'f)', 'g)', 'h)']
+    panels_id = ['a)', 'b)', 'c)', 'd)', 'e)', 'f)', 'g)', 'h)', 'i)', 'j)']
     yy = chi2 < chi2max
     print('\nMaking plot')
-    fig, axes = plt.subplots(nrows=4, ncols=2, figsize=(9*1, 9*2), sharey=True)
+    # Filter out parameters that have only one unique value
+    unique_pars = [par for par in pars if len(np.unique(par.values)) > 1]
+    unique_pars_min = [minval for par, minval in zip(pars, pars_min) if len(np.unique(par.values)) > 1]
+    unique_results = [result for par, result in zip(pars, results) if len(np.unique(par.values)) > 1]
+    unique_fit_pars = [fit_par for par, fit_par in zip(pars, fit_pars) if len(np.unique(par.values)) > 1]
+    print(len(unique_pars), len(unique_fit_pars))
+    # Update labels and xlabels to match unique_pars
+    labels = [label for par, label in zip(pars, labels) if len(np.unique(par.values)) > 1]
+    x_labels = [xlabel for par, xlabel in zip(pars, x_labels) if len(np.unique(par.values)) > 1]
+    # Calculate the number of rows and columns needed
+    nrows = len(unique_pars) // 2 + len(unique_pars) % 2
+    ncols = 2 if len(unique_pars) > 1 else 1
+    # Create the subplots
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(9*ncols, 9*nrows), sharey=True)
     fig.subplots_adjust(wspace=0., hspace=0.34)
     ax = axes.flatten()
-
-    for i, par, minval, d in zip(range(len(pars)), pars, pars_min, polydeg):
-        print('   plotting panel', i, par.name)
-        ax[i].plot(par[yy].values, chi2[yy].values, ls='None', marker='.', c='grey', alpha=0.3, zorder=0)
-        ax[i].axhline(conf_level, color='crimson', lw=1, alpha=0.7, zorder=1)
+    # Calculate the label sizes based on the figure size
+    tick_label_size = 20
+    label_size = 22
+    marker_size = 12
+    line_width = 3
+    # tick_label_size = max(fig.get_figwidth(), fig.get_figheight()) * 0.5
+    # label_size = max(fig.get_figwidth(), fig.get_figheight()) * 0.7
+    # marker_size = max(fig.get_figwidth(), fig.get_figheight()) * 0.4  # adjust multiplier as needed
+    # line_width = max(fig.get_figwidth(), fig.get_figheight()) * 0.1  # adjust multiplier as needed
+    for i, par, minval in zip(range(len(unique_pars)), unique_pars, unique_pars_min):
+        ax[i].plot(par[yy].values, chi2[yy].values, ls='None', marker='.', ms=marker_size, c='grey', alpha=0.3, zorder=0)
+        ax[i].axhline(conf_level, color='crimson', lw=line_width, alpha=0.7, zorder=1)
         if minval[1] is not np.nan:
             x_parab = np.linspace(minval[0][0], minval[0][-1], 1000)
             if fit_type == 'parab':
-                y_parab = parab(x_parab, fit_pars[i]['a'], fit_pars[i]['h'], fit_pars[i]['k'])
+                y_parab = parab(x_parab, unique_fit_pars[i]['a'], unique_fit_pars[i]['h'], unique_fit_pars[i]['k'])
             elif fit_type == 'skewedG':
-                y_parab = skewedG(x_parab, fit_pars[i]['amp'], fit_pars[i]['cen'], fit_pars[i]['wid'], fit_pars[i]['gam'], fit_pars[i]['ymin'])
+                y_parab = skewedG(x_parab, unique_fit_pars[i]['amp'], unique_fit_pars[i]['cen'], unique_fit_pars[i]['wid'], unique_fit_pars[i]['gam'], unique_fit_pars[i]['ymin'])
             elif fit_type == 'poly':
-                y_parab = results[i].eval(x=x_parab)
-            # ax[i].plot(minval[0], minval[1], 'crimson', marker='.', ls='none', alpha=1, zorder=2)
-            ax[i].plot(x_parab, y_parab, lw=2, c='dodgerblue', zorder=3)
+                if unique_results[i] is not None:
+                    y_parab = np.polyval(unique_results[i], x_parab)
+                else:
+                    print(f"No polynomial fit for {par.name}")
+                    continue
+            # ax[i].plot(minval[0], minval[1], 'crimson', marker='.', ms=marker_size, ls='none', alpha=1, zorder=2)
+            ax[i].plot(x_parab, y_parab, lw=line_width, c='dodgerblue', zorder=3)
             ax[i].text(0.07, 0.84, panels_id[i], fontsize=26, horizontalalignment='center', transform = ax[i].transAxes)
+            # print(x_parab, y_parab, conf_level)
             try:
                 par_val, par_ler, par_uer = get_interc(x_parab, y_parab, conf_level)
                 if i == 1:
                     label = labels[i]+' = '+f'{par_val:.3f}'+r'$^{+'+f'{par_uer:.3f}'+'}'+r'_{-'+f'{par_ler:.3f}'+'}$'
                 else:
                     label = labels[i]+' = '+f'{par_val:.2f}'+r'$^{+'+f'{par_uer:.2f}'+'}'+r'_{-'+f'{par_ler:.2f}'+'}$'
-                ax[i].text(0.5, 0.8, label, fontsize=16, horizontalalignment='center', transform = ax[i].transAxes, bbox=props)
-            except:
+                ax[i].text(0.5, 0.8, label, fontsize=tick_label_size, horizontalalignment='center', transform = ax[i].transAxes, bbox=props)
+            except Exception as e:
                 print(par.name, 'computing interceptions failed')
+                print("Error:", str(e))
             # ax[i].plot(minval[0], minval[1], 'orange', lw=2, alpha=.75, zorder=3)
             # pass
-        ax[i].set_xlabel(x_labels[i])
+        ax[i].set_xlabel(x_labels[i], fontsize=label_size)
         if i in [0, 2, 4, 6]:
-            ax[i].set_ylabel(r'$\chi^2$')
+            ax[i].set_ylabel(r'$\chi^2$', fontsize=label_size)
         xrange = minval[0][-1] - minval[0][0]
         ax[i].set_xlim(minval[0][0] - 0.2*xrange, minval[0][-1] + 0.2*xrange)
-    plt.ylim(chi2.min()-200, chi2max)
+        ax[i].tick_params(axis='x', labelsize=tick_label_size)
+        ax[i].tick_params(axis='y', labelsize=tick_label_size)
+    # Set the y-axis limits
+    y_min = min(chi2[yy].values.min(), y_parab.min())
+    y_max = max(chi2[yy].values.max(), y_parab.max())
+    # plt.ylim(y_parab.min() - 0.1 * y_parab.ptp(), y_parab.max() + 0.1 * y_parab.ptp())
+    plt.ylim(y_min - 0.1 * (y_max - y_min), y_max + 0.1 * (y_max - y_min))
     # plt.yscale('log')
     if save_to is not None:
         plt.savefig(save_to, bbox_inches='tight')
@@ -360,7 +410,8 @@ def skewedG(x, amp, cen, wid, gam, ymin):
              Type: numpy array
     """
     h = ymin+amp
-    return [h - amp * np.exp(-2.355**2 * (t-cen)**2 / (2*wid**2)) * (1 + math.erf(2.355*gam*(t-cen)/(wid*np.sqrt(2)))) for t in x]
+    y = [h - amp * np.exp(-2.355**2 * (t-cen)**2 / (2*wid**2)) * (1 + math.erf(2.355*gam*(t-cen)/(wid*np.sqrt(2)))) for t in x]
+    return np.array(y) 
 
 def fit_skewG(x, y, amp, cen, wid, gam, ymin):
     """
@@ -390,6 +441,9 @@ def fit_skewG(x, y, amp, cen, wid, gam, ymin):
              and other information.
              Type: lmfit.model.ModelResult
     """
+    if len(x) < 5 or len(y) < 5:
+        raise ValueError("The input data must have at least 5 points for a skewed Gaussian fit.")
+
     pars = Parameters()
     skG = Model(skewedG)
     pars.update(skG.make_params())
@@ -502,40 +556,79 @@ def polynfit(x, a, b, c, d, e, f, g, h, i):
     """
     return a* x**0 + b* x**1 + c* x**2 + d* x**3 + e* x**4 + f* x**5 + g* x**6 + h* x**7 + i* x**8
 
-def fit_poly(x, y):
-    """
-    Fit a polynomial function to given data points using the least-squares method.
+# def fit_poly(x, y):
+#     """
+#     Fit a polynomial function to given data points using the least-squares method.
 
-    This function fits a polynomial function of the form:
-    y = a*x^0 + b*x^1 + c*x^2 + d*x^3 + e*x^4 + f*x^5 + g*x^6 + h*x^7 + i*x^8
+#     This function fits a polynomial function of the form:
+#     y = a*x^0 + b*x^1 + c*x^2 + d*x^3 + e*x^4 + f*x^5 + g*x^6 + h*x^7 + i*x^8
 
-    to the provided data points (x, y) using the least-squares optimization technique.
+#     to the provided data points (x, y) using the least-squares optimization technique.
 
-    :param x: The x-values of the data points.
-              Type: array-like
-    :param y: The corresponding y-values of the data points.
-              Type: array-like
+#     :param x: The x-values of the data points.
+#               Type: array-like
+#     :param y: The corresponding y-values of the data points.
+#               Type: array-like
 
-    :return: A lmfit Result object containing the fitting results and statistics.
-             It provides access to attributes like 'params', 'best_values', 'residual', etc.
-             Type: lmfit.Result
-    """
-    pmodel = Model(polynfit)
-    a, b, c, d, e, f, g, h, i = 0, 0, 0, 0, 0, 0, 0, 0, 0
-    coefs = [a, b, c, d, e, f, g, h, i]
-    coefs_names = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
-    for i,c in enumerate(coefs):
-        max_coef = len(x)
-        if i >= max_coef:
-            coefs[i] = 0
-        else:
-            coefs[i] = 1
-    params = pmodel.make_params(a=coefs[0], b=coefs[1], c=coefs[2], d=coefs[3], e=coefs[4], f=coefs[5], g=coefs[6], h=coefs[7], i=coefs[8])
-    for c,n in zip(coefs, coefs_names):
-        if c==0:
-            params[n].set(c, vary=False)
-    result = pmodel.fit(y, params, x=x)
-    return result
+#     :return: A lmfit Result object containing the fitting results and statistics.
+#              It provides access to attributes like 'params', 'best_values', 'residual', etc.
+#              Type: lmfit.Result
+#     """
+#     pmodel = Model(polynfit)
+#     a, b, c, d, e, f, g, h, i = 0, 0, 0, 0, 0, 0, 0, 0, 0
+#     coefs = [a, b, c, d, e, f, g, h, i]
+#     coefs_names = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
+#     for i,c in enumerate(coefs):
+#         max_coef = len(x)
+#         if i >= max_coef:
+#             coefs[i] = 0
+#         else:
+#             coefs[i] = 1
+#     params = pmodel.make_params(a=coefs[0], b=coefs[1], c=coefs[2], d=coefs[3], e=coefs[4], f=coefs[5], g=coefs[6], h=coefs[7], i=coefs[8])
+#     for c,n in zip(coefs, coefs_names):
+#         if c==0:
+#             params[n].set(c, vary=False)
+#     result = pmodel.fit(y, params, x=x)
+#     return result
+
+def fit_poly(x, y, max_degree=7, plots=False):
+    # Handle cases with a small number of data points
+    if len(x) < 4:
+        print("Insufficient data points for fitting.")
+        return None
+    elif len(x) <= 5:
+        max_degree = min(3, len(x)-1)
+
+    # Ensure max_degree does not exceed 7
+    max_degree = min(max_degree, 7)
+
+    # Fit polynomials of degrees 1 to max_degree
+    coefs = [np.polyfit(x, y, deg=i) for i in range(1, max_degree+1)]
+
+    if plots==True:
+        # Create subplots
+        fig, axs = plt.subplots(4, 2, figsize=(15, 20))
+        axs = axs.ravel()
+
+        # Generate more x-values for plotting
+        x_plot = np.linspace(np.array(x).min(), np.array(x).max(), 100)
+
+        for i, c in enumerate(coefs, start=1):
+            y_fit = np.polyval(c, x_plot)
+            axs[i-1].plot(x, y, 'o', label='Data')
+            axs[i-1].plot(x_plot, y_fit, label=f'Degree {i}')
+            axs[i-1].legend()
+
+        plt.tight_layout()
+        plt.show()
+
+    # Find the degree with the smallest validation MSE
+    mse = [np.mean((y - np.polyval(c, x))**2) for c in coefs]
+    best_degree = np.argmin(mse) + 1
+
+    # Return the best fit result
+    return coefs[best_degree-1]
+
 
 def get_interc(x_fit, y_fit, conf_level):
     """
@@ -716,8 +809,10 @@ def plot_corr(df, pars_dic, vmax=1, save=None, rot_labels=None, cmap='magma_r', 
 
 
     '''
+    # \varv has been changed to \nu due to issues with latex
+
     # x_labels = ['Light ratio', 'He/H', r'$T_{\text{eff}, A}$ [kK]', r'$\log g_A$', r'$T_{\text{eff}, B}$ [kK]', \
-    #         r'$\log g_B$', r'$\varv \sin i_A$ [km/s]', r'$\varv \sin i_B$ [km/s]']
+    #         r'$\log g_B$', r'$\nu \sin i_A$ [km/s]', r'$\nu \sin i_B$ [km/s]']
 
     npars = len(pars_dic) # num of parameters
     ncomb = combin(npars,2) # num of possible param pairs
@@ -742,9 +837,9 @@ def plot_corr(df, pars_dic, vmax=1, save=None, rot_labels=None, cmap='magma_r', 
         elif key=='loggB':
             labels[i] = r'$\log g_B$'
         elif key=='rotA':
-            labels[i] = r'$\varv \sin i_A$ [km/s]'
+            labels[i] = r'$\nu \sin i_A$ [km/s]'
         elif key=='rotB':
-            labels[i] = r'$\varv \sin i_B$ [km/s]'
+            labels[i] = r'$\nu \sin i_B$ [km/s]'
 
     pair_pars = list(itertools.combinations(pars_dic.values(), 2))
     pair_names = list(itertools.combinations(pars_dic.keys(), 2))
