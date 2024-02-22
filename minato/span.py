@@ -12,7 +12,7 @@ from math import prod
 current_date = str(date.today())
 
 class atmfit:
-    def __init__(self, grid, spectrumA, spectrumB, lrat0=None):
+    def __init__(self, grid, spectrumA, spectrumB, lrat0=None, modelsA_path=None, modelsB_path=None):
         """
         Initialize the atmosphere fitting class.
 
@@ -34,6 +34,8 @@ class atmfit:
         self.spectrumA = spectrumA
         self.spectrumB = spectrumB
         self.lrat0 = lrat0
+        self.modelsA_path = modelsA_path
+        self.modelsB_path = modelsB_path
 
     lines_dic = {
                     3995: { 'region':[3990, 4000],  'HeH_region':[], 'title':'N II $\lambda$3995'},
@@ -96,7 +98,7 @@ class atmfit:
         usr_dicA = self.user_dic(dic_lines_A)
         usr_dicB = self.user_dic(dic_lines_B)
         # creating dictionary to store results
-        result_dic = {'lrat': [], 'teffA': [], 'loggA': [], 'rotA': [], 'He2H': [], 'teffB': [], 'loggB': [], 'rotB': [], 
+        result_dic = {'lrat': [], 'teffA': [], 'loggA': [], 'vmicA': [], 'rotA': [], 'He2H': [], 'teffB': [], 'loggB': [], 'vmicB': [], 'rotB': [], 
                         'chi2_tot': [], 'chi2A': [], 'chi2B': [], 'chi2r_tot': [], 'chi2redA': [], 'chi2redB': [], 'ndata': []}
         col = list(result_dic.keys())
         t0 = time.time()
@@ -111,40 +113,69 @@ class atmfit:
             # crop nebular emission from disentangled spectrum
             dst_B_w_slc, dst_B_f_slc = self.crop_data(dst_B_w_slc, dst_B_f_slc, [[4100, 4104], [4338, 4346]])
             for TA in self.grid[2]:
+                print('Teff_A:', TA)
                 for gA in self.grid[3]:
+                    print('   logg_A:', gA)
                     for rA in self.grid[4]:
-                        try:
-                            # get models for star A
-                            if TA < 16:
-                                modA_w, modA_f, modelA = self.get_model(*[TA,gA,rA], source='atlas')
-                                heini = 0.076
-                            else:
-                                modA_w, modA_f, modelA = self.get_model(*[TA,gA,rA], source='tlusty')      
+                        print('      rotA:', rA)
+                        # if self.grid[5]:
+                        for micA in self.grid[5]:
+                            print('         vmicA:', micA)
+                            try:
+                                modA_w, modA_f, modelA = self.get_model({'T':TA, 'g':gA, 'v':micA, 'r':rA }, models_path=self.modelsA_path)      
                                 heini = 0.1
-                            if modA_f.size:
-                                # interpolate models to the wavelength of the sliced disentangled spectrum
-                                modA_f_interp = np.interp(dst_A_w_slc, modA_w, modA_f)
-
-                                for he in self.grid[1]:
-                                    print('He:', he)
+                            except TypeError as e:
+                                print('Exception in loop:', e)
+                                # print('there was a typerror 0', [TA,gA,rA, micA])
+                                continue
+                            # else:
+                            #     try:
+                            #         # get models for star A
+                            #         if TA < 16:
+                            #             modA_w, modA_f, modelA = self.get_model([TA,gA,rA], source='atlas')
+                            #             heini = 0.076
+                            #         else:
+                            #             modA_w, modA_f, modelA = self.get_model([TA,gA,rA], source='tlusty')      
+                            #             heini = 0.1
+                            #     except TypeError:
+                            #         print('there was a typerror 1', [TA,gA,rA])
+                            #         pass
+                            # if modA_f.size:
+                            # interpolate models to the wavelength of the sliced disentangled spectrum
+                            modA_f_interp = np.interp(dst_A_w_slc, modA_w, modA_f)
+                            if self.grid[1]: # Check if self.grid[1] is not empty or None
+                                he_values = self.grid[1]
+                            else:
+                                he_values = [None]
+                            for he in he_values:
+                                print('            He:', he)
+                                if he is not None:
+                                    # print('He:', he)
                                     # apply He/H ratio to the interpolated model of star A
-                                    modA_f_interp_hefrac = self.He2H_ratio(dst_A_w_slc, modA_f_interp, heini, he, usr_dicA, join=True, plot=plot, model=modelA)
+                                    modA_f_interp_hefrac = self.He2H_ratio(dst_A_w_slc, modA_f_interp, heini, he, usr_dicA, join=True, plot=plot, model=modelA.replace(self.modelsA_path, ''))
                                     plot=False
                                     ndataA = len(modA_f_interp_hefrac)
                                     # print(len(dst_A_f_slc), len(modA_f_interp_hefrac))
                                     chi2A = self.chi2(dst_A_f_slc, modA_f_interp_hefrac)
-                                    for TB in self.grid[5]:
-                                        print('TB:', TB)
-                                        for gB in self.grid[6]:
-                                            print('gB:', gB)
-                                            for rB in self.grid[7]:
-                                                print('rB:', rB)
+                                else:
+                                    ndataA = len(modA_f_interp)
+                                    chi2A = self.chi2(dst_A_f_slc, modA_f_interp)
+                                print('model A:', lr, TA,gA, micA,rA, he)
+                                for TB in self.grid[6]:
+                                    print('   TB:', TB)
+                                    for gB in self.grid[7]:
+                                        print('      gB:', gB)
+                                        for rB in self.grid[8]:
+                                            print('         rB:', rB)
+                                            for micB in self.grid[9]:
+                                                print('            micB:', micB)
                                                 try:
                                                     # get models for star B
-                                                    if TB < 16: 
-                                                        modB_w, modB_f, modelB = self.get_model(*[TB,gB,rB], source='atlas')        
-                                                    else:
-                                                        modB_w, modB_f, modelB = self.get_model(*[TB,gB,rB], source='tlusty')
+                                                    modB_w, modB_f, modelB = self.get_model({'T':TB, 'g':gB, 'v':micB, 'r':rB }, models_path=self.modelsB_path)
+                                                    # if TB < 16: 
+                                                    #     modB_w, modB_f, modelB = self.get_model([TB,gB,rB], source='atlas')        
+                                                    # else:
+                                                    #     modB_w, modB_f, modelB = self.get_model([TB,gB,rB], source='tlusty')
                                                     if modA_f.size and modB_f.size:
                                                         #  interpolate models to the wavelength of the sliced disentangled spectrum
                                                         modB_f_interp = np.interp(dst_B_w_slc, modB_w, modB_f)
@@ -158,19 +189,19 @@ class atmfit:
                                                         chi2redB = chi2B/(ndataB-nparams)
                                                         chi2r_tot = chi2redA + chi2redB
                                                         # appending to dictionary
-                                                        row = [lr, TA, gA, rA, he, TB, gB, rB, chi2_tot, chi2A, chi2B, chi2r_tot, chi2redA, chi2redB, ndata]
+                                                        row = [lr, TA, gA, micA, rA, he, TB, gB, micB, rB, chi2_tot, chi2A, chi2B, chi2r_tot, chi2redA, chi2redB, ndata]
                                                         # if chi2_tot < 0:
                                                             # print('\nWarning: chi2 < O')
                                                             # print(row)
                                                             # sys.exit()
                                                         for key, val in zip(col, row):
                                                             result_dic[key].append(val)
-                                                except TypeError:
+                                                # except TypeError:
+                                                except TypeError as e:
+                                                    print('Exception in companion\'s loop:', e)
                                                     # print('there was a typerror 2', [TB,gB,rB])
                                                     pass
-                        except TypeError:
-                            # print('there was a typerror 1', [TA,gA,rA])
-                            pass
+
                 t2 = time.time()
                 print('   Teff_A = ' + str(TA) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(lr))
             t1 = time.time()
@@ -244,7 +275,7 @@ class atmfit:
             y_data_sliced.extend(y_data[cond])
         return np.array(x_data_sliced), np.array(y_data_sliced)
 
-    def get_model(self, *pars, source='tlusty'):
+    def get_model(self, pars, models_path=None, source=None):
         """
         Obtain a precomputed TLUSTY or ATLAS9 model based on temperature, logg, and rotational velocity.
 
@@ -260,46 +291,57 @@ class atmfit:
         :return: Wavelength array, flux array, and name of the retrieved model.
                  Type: tuple of numpy arrays (floats), str
         """
-        T, g, rot = pars
-        lowT_models_path = '~/Science/github/jvillasr/MINATO/minato/models/ATLAS9/'             # Users will have to add the path to the models
-        tlustyB_path =     '~/Science/github/jvillasr/MINATO/minato/models/TLUSTY/BLMC_v2/'
-        tlustyO_path =     '~/Science/github/jvillasr/MINATO/minato/models/TLUSTY/OLMC_v10/'
-
-        lowT_models_list = sorted(glob(lowT_models_path+'*fw05'))
-        lowT_models_list = [x.replace(lowT_models_path, '') for x in lowT_models_list]
-
-        tlustyB_list = sorted(glob(tlustyB_path+'*fw05'))
-        tlustyB_list = [x.replace(tlustyB_path, '') for x in tlustyB_list]
-
-        tlustyO_list = sorted(glob(tlustyO_path+'*fw05'))
-        tlustyO_list = [x.replace(tlustyO_path, '') for x in tlustyO_list]
-        tlustyOB_list = tlustyB_list + tlustyO_list
+        if models_path:
+            model = models_path 
+            for key, value in pars.items():
+                model += key + str(int(value))
+            print('getting model:', model)
+            try:
+                df = pd.read_csv(model, header=None, sep='\s+')
+                return df[0].to_numpy(), df[1].to_numpy(), model
+            except FileNotFoundError:
+                print('WARNING: No model named '+model+' was found')
+                pass
+        else:
+            T, g, rot = pars
+            lowT_models_path = '~/Science/github/jvillasr/MINATO/minato/models/ATLAS9/'             # Users will have to add the path to the models
+            tlustyB_path =     '~/Science/github/jvillasr/MINATO/minato/models/TLUSTY/BLMC_v2/'
+            tlustyO_path =     '~/Science/github/jvillasr/MINATO/minato/models/TLUSTY/OLMC_v10/'
         
-        model = 'T'+str(int(T))+'g'+str(int(g*10))+'v2r'+str(int(rot))+'fw05'
+            lowT_models_list = sorted(glob(lowT_models_path+'*fw05'))
+            lowT_models_list = [x.replace(lowT_models_path, '') for x in lowT_models_list]
 
-        if source=='tlusty':
-            try:
-                if T>30:
-                    model = 'T'+str(int(T*10))+'g'+str(int(g*10))+'v10r'+str(int(rot))+'fw05'
-                    df = pd.read_csv(tlustyO_path+model,header=None, sep='\s+')
-                else:
-                    df = pd.read_csv(tlustyB_path+model,header=None, sep='\s+')
-                # return df[0].array, df[1].array, model
-                return df[0].to_numpy(), df[1].to_numpy(), model
-            except FileNotFoundError:
-                # print('WARNING: No model named '+model+' was found')
-                # raise ValueError('   WARNING: No model available for '+model)
-                pass
-        elif source=='atlas':
-            model = 'T'+str(int(T))+'g'+str(int(g))+'v2r'+str(int(rot))+'fw05'
-            try:
-                df = pd.read_csv(lowT_models_path+model,header=None, sep='\s+')
-                # return df[0].array, df[1].array, model  # pandas array are not accepted by slicedata
-                return df[0].to_numpy(), df[1].to_numpy(), model
-            except FileNotFoundError:
-                # print('WARNING: No model named '+model+' was found')
-                # raise ValueError('   WARNING: No model available for '+model)
-                pass
+            tlustyB_list = sorted(glob(tlustyB_path+'*fw05'))
+            tlustyB_list = [x.replace(tlustyB_path, '') for x in tlustyB_list]
+
+            tlustyO_list = sorted(glob(tlustyO_path+'*fw05'))
+            tlustyO_list = [x.replace(tlustyO_path, '') for x in tlustyO_list]
+            tlustyOB_list = tlustyB_list + tlustyO_list
+
+            if source=='tlusty':
+                try:
+                    if T>30:                        
+                        model = 'T'+str(int(T*10))+'g'+str(int(g*10))+'v10r'+str(int(rot))+'fw05'
+                        df = pd.read_csv(tlustyO_path+model,header=None, sep='\s+')
+                    else:
+                        model = 'T'+str(int(T))+'g'+str(int(g*10))+'v2r'+str(int(rot))+'fw05'
+                        df = pd.read_csv(tlustyB_path+model,header=None, sep='\s+')
+                    # return df[0].array, df[1].array, model
+                    return df[0].to_numpy(), df[1].to_numpy(), model
+                except FileNotFoundError:
+                    # print('WARNING: No model named '+model+' was found')
+                    # raise ValueError('   WARNING: No model available for '+model)
+                    pass
+            elif source=='atlas':
+                model = 'T'+str(int(T))+'g'+str(int(g))+'v2r'+str(int(rot))+'fw05'
+                try:
+                    df = pd.read_csv(lowT_models_path+model,header=None, sep='\s+')
+                    # return df[0].array, df[1].array, model  # pandas array are not accepted by slicedata
+                    return df[0].to_numpy(), df[1].to_numpy(), model
+                except FileNotFoundError:
+                    # print('WARNING: No model named '+model+' was found')
+                    # raise ValueError('   WARNING: No model available for '+model)
+                    pass
 
     def He2H_ratio(self, wave, flux, ratio0, ratio1, dictionary, join=False, plot=False, model=None):
         """
