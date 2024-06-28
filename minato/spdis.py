@@ -11,7 +11,7 @@ from astropy.io import ascii
 from astropy.table import Table
 from astropy.constants import c
 from datetime import date
-from minato import myRC
+import myRC
 
 class SpecDisent:
     def __init__(self, lines, orbparams, epochs, spectra, extension='.fits'):
@@ -801,7 +801,7 @@ class SpecDisent:
             
     #Reduce nebular lines regions:
         if self.rmNebChi2 == True:
-            for wrange in PosLimCondC:
+            for wrange in self.PosLimCondC:
                 if 'NebCond' in locals():
                     NebCond += (waves > wrange[0]*(1+self.Gamma/self.clight) ) * (waves < wrange[1]*(1+self.Gamma/self.clight)  )
                 else:
