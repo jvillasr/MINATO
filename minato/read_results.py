@@ -2,7 +2,11 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
-# import myRC
+from . import myRC
+import importlib
+importlib.reload(myRC)
+import os
+os.environ["PATH"] += os.pathsep + '/Library/TeX/texbin/'
 import sys
 import math
 import itertools
@@ -12,13 +16,15 @@ from matplotlib.colors import LogNorm
 from matplotlib.collections import LineCollection
 from matplotlib import cm, colors
 from scipy.stats.distributions import chi2 as scipy_chi2
+from scipy.interpolate import griddata
+from scipy.ndimage import gaussian_filter
 from lmfit import Model, Parameters, models
 from lmfit.models import SkewedGaussianModel, PolynomialModel
 from datetime import datetime
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
+# from sklearn.model_selection import train_test_split
+# from sklearn.metrics import mean_squared_error
 
-def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4, 9, 5, 4, 6, 6, 4, 4], save_to=None):
+def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4, 9, 5, 4, 6, 6, 4, 4], save_to=None, chi2col='chi2', dof=None):
     """
     Compute best-fit values and perform statistical analysis on chi-squared values.
 
@@ -46,10 +52,13 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
                     Type: str or None
 
     """
-    dof = df.loc[0,'ndata']-len(df.columns)
+    print(df.columns)
+    if dof is None:
+        dof = df.loc[0,'ndata']-len(df.columns)
+    # dof = df.loc[0,'ndata']-4
     # read in unscaled chi2
-    # unscaled_chi2 = df['chi2_tot']
-    unscaled_chi2 = df['chi2A']
+    unscaled_chi2 = df['chi2_tot']
+    # unscaled_chi2 = df[chi2col]
     print('min unscaled chi2 value =', unscaled_chi2.min())
     print('max unscaled chi2 value =', unscaled_chi2.max())
 
@@ -87,30 +96,60 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
     plt.close()
 
     # get confidence level
+    print('dof =', dof)
     conf_level = scipy_chi2.ppf(cl, dof)
+    sigma2 = scipy_chi2.ppf(0.95, dof)
+    sigma3 = scipy_chi2.ppf(0.997, dof)
     print(str(cl*100)+'% confidence level =', conf_level)
 
-    teffA, loggA, micA, rotA = df['teffA'], df['loggA']/10, df['vmicA'], df['rotA']
-    teffB, loggB, micB, rotB = df['teffB'], df['loggB']/10, df['vmicB'], df['rotB']
-    lrat, he2h = df['lrat'], df['He2H']
+    # teffA, loggA, micA, rotA = df['teffA'], df['loggA']/10, df['vmicA'], df['rotA']
+    # teffB, loggB, micB, rotB = df['teffB'], df['loggB']/10, df['vmicB'], df['rotB']
+    # lrat, he2h = df['lrat'], df['He2H']
 
-    pars = [lrat, he2h, teffA, loggA, teffB, loggB, rotA, rotB, micA, micB]
+    # pars = [lrat, he2h, teffA, loggA, teffB, loggB, rotA, rotB, micA, micB]
 
-    # get chi2 minimum
-    idx_min = chi2.idxmin()
+    # # get chi2 minimum
+    # idx_min = chi2.idxmin()
 
+    # pars_min = []
+    # print('\nGetting min values and intercepts (no interpolation)')
+    # for par in pars:
+    #     # if par:
+    #     if not par.isnull().any():
+    #         print(par.name)
+    #         par_i, par_chi, par_arr, par_interp = interp_models(par, chi2)
+    #         # print(par_i) # values of the parameter (from the grid)
+    #         # print(par_chi) # min chi2 value for each parameter value (to fit parabola/skew gaussian)
+    #         # # sys.exit()
+    #         pars_min.append([par_i, par_chi]) # chi2
+
+
+
+    ###################################################################
+
+    # List of columns to exclude
+    exclude_columns = ['modelA', 'modelB', 'chisqr', 'ndata', 'chi2_tot', 'chi2A', 'chi2B', 'chi2r_tot', 'chi2redA', 'chi2redB']
+    pars = []
     pars_min = []
-    print('\nGetting min values and intercepts (no interpolation)')
-    for par in pars:
-        # if par:
+    # Loop through the DataFrame columns
+    for column in df.columns:
+        # Skip non-physical parameter columns
+        if column in exclude_columns  or df[column].isna().all():
+            continue
+
+        # If the column is not in the exclude list, it's a physical parameter
+        par = df[column]
+        pars.append(par)
+        
+        # Check if the column has any null values
         if not par.isnull().any():
             print(par.name)
             par_i, par_chi, par_arr, par_interp = interp_models(par, chi2)
-            # print(par_i) # values of the parameter (from the grid)
-            # print(par_chi) # min chi2 value for each parameter value (to fit parabola/skew gaussian)
-            # # sys.exit()
-            pars_min.append([par_i, par_chi]) # chi2
+            print(par_i) # values of the parameter (from the grid)
+            print(par_chi) # min chi2 value for each parameter value (to fit parabola/skew gaussian)
+            pars_min.append([par_i, par_chi])  # chi2
 
+    print('pars_min = ', pars_min)
     ###################################################################
     # Performing the fit
     results = []
@@ -159,6 +198,8 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
         out_file = open('polynom_fitreport.txt', 'w')
         for par, pmin in zip(pars, pars_min):
             print('   '+par.name)
+            print('      ',pmin[0], pmin[1])
+            # plt.plot(pmin[0], pmin[1], 'o')
             # if par.name == 'teffB':
             #     pmin[0] = np.delete(pmin[0], [3, 5])
             #     pmin[1] = np.delete(pmin[1], [3, 5])   
@@ -178,88 +219,98 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
 
     ###################################################################
     # Making the plot
+    print('\nMaking plot')
+    # Constants for the plot
+    tick_label_size = 20
+    label_size = 24
+    marker_size = 14
+    line_width = 3
+
     labels= [ r'L_rat', r'He/H', r'$T_{\mathrm{eff}, A}$', r'$\log g_A$', 
-            r'$T_{\mathrm{eff}, B}$', r'$\log g_B$', r'$\nu \sin i_A$', r'$\nu\sin i_B$', r'$\xi_A$', r'$\xi_B' ]
+            r'$T_{\mathrm{eff}, B}$', r'$\log g_B$', r'$\varv \sin i_A$', r'$\varv\sin i_B$', r'$\xi_A$', r'$\xi_B' ]
 
     x_labels = ['Light ratio', 'He/H', r'$T_{\mathrm{eff}, A}$ [kK]', r'$\log g_A$', r'$T_{\mathrm{eff}, B}$ [kK]', \
-            r'$\log g_B$', r'$\nu \sin i_A$ [km/s]', r'$\nu \sin i_B$ [km/s]', r'$\xi_A$ [km/s]', r'$\xi_B$ [km/s]' ]
+            r'$\log g_B$', r'$\varv \sin i_A$ [km/s]', r'$\varv \sin i_B$ [km/s]', r'$\xi_A$ [km/s]', r'$\xi_B$ [km/s]' ]
     props = dict(boxstyle='round', facecolor='papayawhip', alpha=0.9)
     panels_id = ['a)', 'b)', 'c)', 'd)', 'e)', 'f)', 'g)', 'h)', 'i)', 'j)']
     yy = chi2 < chi2max
-    print('\nMaking plot')
-    # Filter out parameters that have only one unique value
-    unique_pars = [par for par in pars if len(np.unique(par.values)) > 1]
-    unique_pars_min = [minval for par, minval in zip(pars, pars_min) if len(np.unique(par.values)) > 1]
-    unique_results = [result for par, result in zip(pars, results) if len(np.unique(par.values)) > 1]
-    unique_fit_pars = [fit_par for par, fit_par in zip(pars, fit_pars) if len(np.unique(par.values)) > 1]
-    print(len(unique_pars), len(unique_fit_pars))
-    # Update labels and xlabels to match unique_pars
-    labels = [label for par, label in zip(pars, labels) if len(np.unique(par.values)) > 1]
-    x_labels = [xlabel for par, xlabel in zip(pars, x_labels) if len(np.unique(par.values)) > 1]
-    # Calculate the number of rows and columns needed
-    nrows = len(unique_pars) // 2 + len(unique_pars) % 2
-    ncols = 2 if len(unique_pars) > 1 else 1
-    # Create the subplots
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(9*ncols, 9*nrows), sharey=True)
-    fig.subplots_adjust(wspace=0., hspace=0.34)
-    ax = axes.flatten()
-    # Calculate the label sizes based on the figure size
-    tick_label_size = 20
-    label_size = 22
-    marker_size = 12
-    line_width = 3
-    # tick_label_size = max(fig.get_figwidth(), fig.get_figheight()) * 0.5
-    # label_size = max(fig.get_figwidth(), fig.get_figheight()) * 0.7
-    # marker_size = max(fig.get_figwidth(), fig.get_figheight()) * 0.4  # adjust multiplier as needed
-    # line_width = max(fig.get_figwidth(), fig.get_figheight()) * 0.1  # adjust multiplier as needed
-    for i, par, minval in zip(range(len(unique_pars)), unique_pars, unique_pars_min):
-        ax[i].plot(par[yy].values, chi2[yy].values, ls='None', marker='.', ms=marker_size, c='grey', alpha=0.3, zorder=0)
-        ax[i].axhline(conf_level, color='crimson', lw=line_width, alpha=0.7, zorder=1)
-        if minval[1] is not np.nan:
-            x_parab = np.linspace(minval[0][0], minval[0][-1], 1000)
-            if fit_type == 'parab':
-                y_parab = parab(x_parab, unique_fit_pars[i]['a'], unique_fit_pars[i]['h'], unique_fit_pars[i]['k'])
-            elif fit_type == 'skewedG':
-                y_parab = skewedG(x_parab, unique_fit_pars[i]['amp'], unique_fit_pars[i]['cen'], unique_fit_pars[i]['wid'], unique_fit_pars[i]['gam'], unique_fit_pars[i]['ymin'])
-            elif fit_type == 'poly':
-                if unique_results[i] is not None:
-                    y_parab = np.polyval(unique_results[i], x_parab)
-                else:
-                    print(f"No polynomial fit for {par.name}")
-                    continue
-            # ax[i].plot(minval[0], minval[1], 'crimson', marker='.', ms=marker_size, ls='none', alpha=1, zorder=2)
-            ax[i].plot(x_parab, y_parab, lw=line_width, c='dodgerblue', zorder=3)
-            ax[i].text(0.07, 0.84, panels_id[i], fontsize=26, horizontalalignment='center', transform = ax[i].transAxes)
-            # print(x_parab, y_parab, conf_level)
-            try:
-                par_val, par_ler, par_uer = get_interc(x_parab, y_parab, conf_level)
-                if i == 1:
-                    label = labels[i]+' = '+f'{par_val:.3f}'+r'$^{+'+f'{par_uer:.3f}'+'}'+r'_{-'+f'{par_ler:.3f}'+'}$'
-                else:
-                    label = labels[i]+' = '+f'{par_val:.2f}'+r'$^{+'+f'{par_uer:.2f}'+'}'+r'_{-'+f'{par_ler:.2f}'+'}$'
-                ax[i].text(0.5, 0.8, label, fontsize=tick_label_size, horizontalalignment='center', transform = ax[i].transAxes, bbox=props)
-            except Exception as e:
-                print(par.name, 'computing interceptions failed')
-                print("Error:", str(e))
-            # ax[i].plot(minval[0], minval[1], 'orange', lw=2, alpha=.75, zorder=3)
-            # pass
-        ax[i].set_xlabel(x_labels[i], fontsize=label_size)
-        if i in [0, 2, 4, 6]:
-            ax[i].set_ylabel(r'$\chi^2$', fontsize=label_size)
-        xrange = minval[0][-1] - minval[0][0]
-        ax[i].set_xlim(minval[0][0] - 0.2*xrange, minval[0][-1] + 0.2*xrange)
-        ax[i].tick_params(axis='x', labelsize=tick_label_size)
-        ax[i].tick_params(axis='y', labelsize=tick_label_size)
-    # Set the y-axis limits
-    y_min = min(chi2[yy].values.min(), y_parab.min())
-    y_max = max(chi2[yy].values.max(), y_parab.max())
-    # plt.ylim(y_parab.min() - 0.1 * y_parab.ptp(), y_parab.max() + 0.1 * y_parab.ptp())
-    plt.ylim(y_min - 0.1 * (y_max - y_min), y_max + 0.1 * (y_max - y_min))
-    # plt.yscale('log')
-    if save_to is not None:
-        plt.savefig(save_to, bbox_inches='tight')
-    plt.show()
-    plt.close()
+    
+    
+    def filter_unique_parameters(pars, pars_min, results, fit_pars, labels, x_labels):
+        # Filter out parameters that have only one unique value
+        unique_pars = [par for par in pars if len(np.unique(par.values)) > 1]
+        unique_pars_min = [minval for par, minval in zip(pars, pars_min) if len(np.unique(par.values)) > 1]
+        unique_results = [result for par, result in zip(pars, results) if len(np.unique(par.values)) > 1]
+        unique_fit_pars = [fit_par for par, fit_par in zip(pars, fit_pars) if len(np.unique(par.values)) > 1]
+        # Update labels and xlabels to match unique_pars
+        labels = [label for par, label in zip(pars, labels) if len(np.unique(par.values)) > 1]
+        x_labels = [xlabel for par, xlabel in zip(pars, x_labels) if len(np.unique(par.values)) > 1]
+        return unique_pars, unique_pars_min, unique_results, unique_fit_pars, labels, x_labels
+
+    def create_subplots(unique_pars):
+        # Calculate the number of rows and columns needed
+        nrows = len(unique_pars) // 2 + len(unique_pars) % 2
+        ncols = 2 if len(unique_pars) > 1 else 1
+        # Create the subplots
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5*ncols, 5*nrows), sharey=True)
+        fig.subplots_adjust(wspace=0., hspace=0.24)
+        ax = axes.flatten()
+        return fig, ax
+
+    def plot_data(ax, chi2, yy, conf_level, unique_fit_pars, fit_type, unique_pars, unique_pars_min, labels, x_labels):
+        for i, par, minval in zip(range(len(unique_pars)), unique_pars, unique_pars_min):
+            ax[i].plot(par[yy].values, chi2[yy].values, ls='None', marker='.', ms=marker_size, c='grey', alpha=0.3, zorder=0)
+            ax[i].axhline(conf_level, color='crimson', lw=line_width, alpha=0.7, zorder=1)
+            if minval[1] is not np.nan:
+                x_parab = np.linspace(minval[0][0], minval[0][-1], 1000)
+                if fit_type == 'parab':
+                    y_parab = parab(x_parab, unique_fit_pars[i]['a'], unique_fit_pars[i]['h'], unique_fit_pars[i]['k'])
+                elif fit_type == 'skewedG':
+                    y_parab = skewedG(x_parab, unique_fit_pars[i]['amp'], unique_fit_pars[i]['cen'], unique_fit_pars[i]['wid'], unique_fit_pars[i]['gam'], unique_fit_pars[i]['ymin'])
+                elif fit_type == 'poly':
+                    if unique_results[i] is not None:
+                        y_parab = np.polyval(unique_results[i], x_parab)
+                    else:
+                        print(f"No polynomial fit for {par.name}")
+                        # continue
+                # ax[i].plot(minval[0], minval[1], 'crimson', marker='.', ms=marker_size, ls='none', alpha=1, zorder=2)
+                ax[i].plot(x_parab, y_parab, lw=line_width, c='dodgerblue', zorder=3)
+                ax[i].text(0.07, 0.84, panels_id[i], fontsize=26, horizontalalignment='center', transform = ax[i].transAxes)
+                # print(x_parab, y_parab, conf_level)
+                try:
+                    par_val, par_ler, par_uer = get_interc(x_parab, y_parab, conf_level)
+                    if i == 1:
+                        label = labels[i]+' = '+f'{par_val:.3f}'+r'$^{+'+f'{par_uer:.3f}'+'}'+r'_{-'+f'{par_ler:.3f}'+'}$'
+                    else:
+                        label = labels[i]+' = '+f'{par_val:.2f}'+r'$^{+'+f'{par_uer:.2f}'+'}'+r'_{-'+f'{par_ler:.2f}'+'}$'
+                    ax[i].text(0.5, 0.8, label, fontsize=tick_label_size, horizontalalignment='center', transform = ax[i].transAxes, bbox=props)
+                except Exception as e:
+                    print(par.name, 'computing interceptions failed')
+                    print("Error:", str(e))
+                # ax[i].plot(minval[0], minval[1], 'orange', lw=2, alpha=.75, zorder=3)
+                # pass
+            ax[i].set_xlabel(x_labels[i], fontsize=label_size)
+            if i in [0, 2, 4, 6]:
+                ax[i].set_ylabel(r'$\chi^2$', fontsize=label_size)
+            xrange = minval[0][-1] - minval[0][0]
+            ax[i].set_xlim(minval[0][0] - 0.2*xrange, minval[0][-1] + 0.2*xrange)
+            ax[i].tick_params(axis='x', labelsize=tick_label_size)
+            ax[i].tick_params(axis='y', labelsize=tick_label_size)
+        # Set the y-axis limits
+        y_min = min(chi2[yy].values.min(), y_parab.min())
+        y_max = max(chi2[yy].values.max(), y_parab.max())
+        # plt.ylim(y_parab.min() - 0.1 * y_parab.ptp(), y_parab.max() + 0.1 * y_parab.ptp())
+        plt.ylim(y_min - 0.1 * (y_max - y_min), y_max + 0.1 * (y_max - y_min))
+        # plt.yscale('log')
+        if save_to is not None:
+            plt.savefig(save_to, bbox_inches='tight')
+        plt.show()
+        plt.close()
+
+    unique_pars, unique_pars_min, unique_results, unique_fit_pars, labels, x_labels = filter_unique_parameters(pars, pars_min, results, fit_pars, labels, x_labels)
+    fig, ax = create_subplots(unique_pars)
+    plot_data(ax, chi2, yy, conf_level, unique_fit_pars, fit_type, unique_pars, unique_pars_min, labels, x_labels)
+
 
 def interp_models(parameter, chi2_array):
     """
@@ -737,7 +788,7 @@ def fitplot(wA, fA, wM, fM, model, lr, dictionary, lines, figu='save', nrows=3, 
         #     if line==4026:
         #         ax[j].axvline(4008)
         #         ax[j].axvline(4010)
-        for f, w, mod, col in zip(fM, wM, model, colors):
+        for f, w, mod, col in zip(fM, wM, model, colors[1:]):
             cond = (w > reg[0]) & (w < reg[1])
             # if j==0:
             hndl2, = ax[j].plot(w[cond], f[cond],'--', c=col, linewidth=2, label=mod)
@@ -789,7 +840,7 @@ def combin(n, r):
     return int(ncomb)
 
 
-def plot_corr(df, pars_dic, vmax=1, save=None, rot_labels=None, cmap='magma_r', interp='hanning', clabels='numeric'):
+def plot_corr(df, pars_dic, vmax=None, save=None, rot_labels=None, cmap='magma_r', interp='hanning', clabels='numeric'):
     '''
     Produce a corner plot of correlations between parameters.
 
@@ -809,16 +860,16 @@ def plot_corr(df, pars_dic, vmax=1, save=None, rot_labels=None, cmap='magma_r', 
 
 
     '''
-    # \varv has been changed to \nu due to issues with latex
-
-    # x_labels = ['Light ratio', 'He/H', r'$T_{\text{eff}, A}$ [kK]', r'$\log g_A$', r'$T_{\text{eff}, B}$ [kK]', \
-    #         r'$\log g_B$', r'$\nu \sin i_A$ [km/s]', r'$\nu \sin i_B$ [km/s]']
+    # Calculate vmax if it's not provided
+    if vmax is None:
+        vmax = np.nanmax(df['chi2'])
 
     npars = len(pars_dic) # num of parameters
     ncomb = combin(npars,2) # num of possible param pairs
     pos0 = list(range(ncomb))
     positions = [pos0[int(i*(i+1)/2):int(i*(i+1)/2)+i+1] for i in range(npars-1)][::-1] 
     corner_position = [x for sublist in positions for x in sublist] # indexes of corner plot
+
 
     import copy
     labels = copy.deepcopy(list(pars_dic.keys()))
@@ -837,9 +888,13 @@ def plot_corr(df, pars_dic, vmax=1, save=None, rot_labels=None, cmap='magma_r', 
         elif key=='loggB':
             labels[i] = r'$\log g_B$'
         elif key=='rotA':
-            labels[i] = r'$\nu \sin i_A$ [km/s]'
+            labels[i] = r'$\varv \sin i_A$ [km/s]'
         elif key=='rotB':
-            labels[i] = r'$\nu \sin i_B$ [km/s]'
+            labels[i] = r'$\varv \sin i_B$ [km/s]'
+        elif key=='vmicA':
+            labels[i] = r'$\xi_A$ [km/s]'
+        elif key=='vmicB':
+            labels[i] = r'$\xi_B$ [km/s]'
 
     pair_pars = list(itertools.combinations(pars_dic.values(), 2))
     pair_names = list(itertools.combinations(pars_dic.keys(), 2))
@@ -887,7 +942,7 @@ def plot_corr(df, pars_dic, vmax=1, save=None, rot_labels=None, cmap='magma_r', 
         #     ax[k].axhline(0.38)
         # # Add contours to the plot
         from scipy.stats.distributions import chi2 as scipy_chi2
-        dof = 2165-8
+        dof = df.loc[0,'ndata']-len(pars_dic.keys())
         sig1 = scipy_chi2.ppf(0.68, dof)
         sig2 = scipy_chi2.ppf(0.95, dof)
         sig3 = scipy_chi2.ppf(0.99, dof)
@@ -900,10 +955,31 @@ def plot_corr(df, pars_dic, vmax=1, save=None, rot_labels=None, cmap='magma_r', 
         # clev = np.logspace(np.log10(np.nanmin(Z)),np.log10(0.977), 50)
         clev = np.logspace(np.log10(np.nanmin(Z)), df['chi2'].max(), 1500)
 
+        # Create a new, finer grid
+        xnew = np.linspace(X.min(), X.max(), 100)  # adjust as needed
+        ynew = np.linspace(Y.min(), Y.max(), 100)  # adjust as needed
+        Xnew, Ynew = np.meshgrid(xnew, ynew)
+        # Interpolate Z onto this new grid
+        # If Z contains nan values, replace them with the mean of the non-nan values
+        if np.isnan(Z).any():
+            Z = np.where(np.isnan(Z), np.nanmax(Z), Z)
+        Znew = griddata((X.flatten(), Y.flatten()), Z.flatten(), (Xnew, Ynew), method='cubic')
+        clev_new = np.logspace(np.log10(np.nanmin(Znew)-0.3), df['chi2'].max(), 3000)
+        sig1_new = np.percentile(Znew, 0.68)#+0.03
+        sig2_new = np.percentile(Znew, 0.95)#+0.15
+        sig3_new = np.percentile(Znew, 0.99)#+0.3
+
         ######### 
+        if k==0:
+            print('vmin:', np.nanmin(Z), 'vmax:', vmax)
+
         try:
-            ax[k].contourf(X, Y, Z, clev, cmap='magma_r', norm=LogNorm(vmin=np.nanmin(Z), vmax=vmax) )
-            contours = ax[k].contour(X, Y, Z, [unscaled_sig1, unscaled_sig2, unscaled_sig3], colors='k')
+            ax[k].contourf(Xnew, Ynew, Znew, clev_new, cmap=cmap, norm=LogNorm(vmin=np.nanmin(Znew), vmax=vmax))
+            # ax[k].contourf(X, Y, Z, clev, cmap=cmap, norm=LogNorm(vmin=np.nanmin(Z), vmax=vmax) )
+            # Plot the contours using the interpolated data
+            contours = ax[k].contour(Xnew, Ynew, Znew, [sig1_new, sig2_new, sig3_new], colors='k')
+            # contours = ax[k].contour(Xnew, Ynew, Znew, [unscaled_sig1, unscaled_sig2, unscaled_sig3], colors='k')
+            # contours = ax[k].contour(X, Y, Z, [unscaled_sig1, unscaled_sig2, unscaled_sig3], colors='r')
             fmt = {}
             if clabels == 'sigma':
                 strs = [ r'1$\sigma$', r'2$\sigma$', r'3$\sigma$' ]
@@ -911,7 +987,8 @@ def plot_corr(df, pars_dic, vmax=1, save=None, rot_labels=None, cmap='magma_r', 
                 strs = [ r'68.3\%', r'95.4\%', r'99.7\%' ]
             for l,s in zip( contours.levels, strs ):
                 fmt[l] = s
-            ax[k].clabel(contours, [unscaled_sig1, unscaled_sig2, unscaled_sig3], inline=True, fmt=fmt, fontsize=10)
+            ax[k].clabel(contours, [sig1_new, sig2_new, sig3_new], inline=True, fmt=fmt, fontsize=10)
+            # ax[k].clabel(contours, [unscaled_sig1, unscaled_sig2, unscaled_sig3], inline=True, fmt=fmt, fontsize=10)
         except TypeError:
             XX = X[0]
             YY = Y[0]
@@ -931,12 +1008,28 @@ def plot_corr(df, pars_dic, vmax=1, save=None, rot_labels=None, cmap='magma_r', 
             segments = np.concatenate([points[:-1], points[1:]], axis=1)
             # Create a continuous norm to map from data points to colors
             norm = plt.Normalize(np.nanmin(zzz), vmax)
-            lc = LineCollection(segments, cmap='magma_r', norm=norm)
+            lc = LineCollection(segments, cmap=cmap, norm=norm)
             # Set the values used for colormapping
             lc.set_array(zzz)
             lc.set_linewidth(10)
             line = ax[k].add_collection(lc)
             # pass
+        # if v == 'teffA':
+        #     ax[k].axvline(x=25.159, color='white', linestyle='-')
+        #     ax[k].axvline(x=25.159-0.937, color='white', linestyle='--')
+        #     ax[k].axvline(x=25.159+0.997, color='white', linestyle='--')
+        # if u == 'teffA':
+        #     ax[k].axhline(y=25.159, color='white', linestyle='-')
+        #     ax[k].axhline(y=25.159-0.937, color='white', linestyle='--')
+        #     ax[k].axhline(y=25.159+0.997, color='white', linestyle='--')
+        # if v == 'vmicA':
+        #     ax[k].axvline(x=11.97, color='white', linestyle='-')
+        #     ax[k].axvline(x=11.97-1.52, color='white', linestyle='--')
+        #     ax[k].axvline(x=11.97+1.48, color='white', linestyle='--')
+        # if u == 'vmicA':
+        #     ax[k].axhline(y=11.97, color='white', linestyle='-')
+        #     ax[k].axhline(y=11.97-1.52, color='white', linestyle='--')
+        #     ax[k].axhline(y=11.97+1.48, color='white', linestyle='--')
         ax[k].set_xticks(dfcorr.columns)
         if rot_labels=='All':
             ax[k].set_xticklabels(dfcorr.columns, rotation=45)
@@ -963,6 +1056,6 @@ def plot_corr(df, pars_dic, vmax=1, save=None, rot_labels=None, cmap='magma_r', 
             ax[i].remove()
     # plt.tight_layout()
     if save:
-        plt.savefig(save, bbox_inches="tight", dpi=100)
+        plt.savefig(save, bbox_inches="tight", dpi=300)
     plt.show()
     plt.close()
