@@ -1,6 +1,7 @@
 import time
 import sys
 import csv
+import os
 import itertools
 import pandas as pd
 import numpy as np
@@ -9,10 +10,13 @@ import scipy.interpolate as inter
 from glob import glob
 from datetime import timedelta, date, datetime
 from math import prod
+# from multiprocessing import Pool
+from concurrent.futures import ProcessPoolExecutor
+from tqdm import tqdm
 current_date = str(date.today())
 
 class atmfit:
-    def __init__(self, grid, spectrumA, spectrumB, lrat0=None, modelsA_path=None, modelsB_path=None):
+    def __init__(self, spectrumA, spectrumB, grid=None, lrat0=None, modelsA_path=None, modelsB_path=None, binary=False, crop_nebular=False, He2H=False, He_ini=0.1):
         """
         Initialize the atmosphere fitting class.
 
@@ -29,14 +33,37 @@ class atmfit:
                          Type: str
         :param lrat0: Initial light ratio. If not provided, defaults to None.
                      Type: float or None
+        :param modelsA_path: Path to the folder containing models for star A.
+                     Type: str
+        :param modelsB_path: Path to the folder containing models for star B.
+                        Type: str
+        :param binary: Flag to indicate if the system is a binary or single star.
+                        Default: False
+                        Type: bool
+        :param He2H: Flag to indicate if the He/H ratio should be modified.
+                        Default: False
+                        Type: bool
+        :param crop_nebular: Flag to indicate if nebular emission should be cropped from the spectrum.
+                        Default: False
+                        Type: bool
+        :param He_ini: Initial He/H ratio to be used when modifying the He/H ratio.
+                        Default: 0.1
+                        Type: float
         """
         self.grid = grid
+        
         self.spectrumA = spectrumA
         self.spectrumB = spectrumB
         self.lrat0 = lrat0
         self.modelsA_path = modelsA_path
         self.modelsB_path = modelsB_path
-
+        self.binary = binary
+        self.He2H = He2H
+        self.crop_nebular = crop_nebular
+        self.He_ini = He_ini
+        self.missing_models = False
+        self.warning_printed = False
+        
     lines_dic = {
                     3995: { 'region':[3990, 4000],  'HeH_region':[], 'title':'N II $\lambda$3995'},
                     4026: { 'region':[4005, 4033],  'HeH_region':[4005, 4033], 'title':'He I $\lambda$4009/26'},
@@ -69,6 +96,85 @@ class atmfit:
         dic = { line: self.lines_dic[line] for line in self.lines }
         return dic
 
+    def compute_single_set(self, params):
+        # interpolate models to the wavelength of the sliced disentangled spectrum
+        # modA_f_interp = np.interp(dst_A_w_slc, modA_w, modA_f)
+        # models should already be interpolated to the wavelength of the disentangled spectrum
+
+        # Get parameters from the grid and make them accessible as attributes of self, e.g. self.lr, self.TA, self.gA, etc.
+        for key, value in zip(self.grid.keys(), params):
+            setattr(self, key, value)
+
+        # Get models
+        if self.binary:
+            modelA_params = {key.replace('A', ''): getattr(self, key) for key in self.grid.keys() if 'A' in key}
+            modelB_params = {key.replace('B', ''): getattr(self, key) for key in self.grid.keys() if 'B' in key}
+        else:
+            modelA_params = {key: getattr(self, key) for key in self.grid.keys()}
+            modelB_params = {}
+
+        try:
+            modA_w, modA_f, modelA = self.get_model(modelA_params, models_path=self.modelsA_path)
+            if self.binary:
+                modB_w, modB_f, modelB = self.get_model(modelB_params, models_path=self.modelsB_path) 
+            else:
+                modB_w, modB_f, modelB = None, None, None
+        except Exception as e:
+            # print('model not found: ', modelA_params)
+            # print(f'Exception in get_model(): {type(e).__name__}: {e}')
+            # print('there was a typerror 0', [TA,gA,rA, micA])
+            pass   
+        
+        else:
+            # print('MODEL FOUND (2): ', modelA, modA_w, modA_f)
+            # Rescale flux of the disentangled specrta to new light ratio 
+            fluA, fluB = self.rescale_flux(self.lr)
+
+            # slice data to regions for chi^2 computation
+            dst_A_w_slc, dst_A_f_slc = self.slicedata(self.wavA, fluA, self.user_dicA)
+            dst_B_w_slc, dst_B_f_slc = self.slicedata(self.wavB, fluB, self.user_dicB) if self.binary else (None, None)
+            mod_A_w_slc, mod_A_f_slc = self.slicedata(modA_w, modA_f, self.user_dicA)
+            mod_B_w_slc, mod_B_f_slc = self.slicedata(modB_w, modB_f, self.user_dicB) if self.binary else (None, None)
+
+            # apply He/H ratio to the sliced model of star A
+            if self.He2H:
+                mod_A_f_slc = self.He2H_ratio(mod_A_w_slc, mod_A_f_slc, self.He_ini, self.He, self.user_dicA, join=True, plot=False, model=modelA.replace(self.modelsA_path, ''))
+
+            # crop nebular emission from disentangled spectrum and model of star B
+            if self.crop_nebular:
+                dst_B_w_slc, dst_B_f_slc = self.crop_data(dst_B_w_slc, dst_B_f_slc, [[4100, 4104], [4338, 4346]])
+                mod_B_w_slc, mod_B_f_slc = self.crop_data(mod_B_w_slc, mod_B_f_slc, [[4100, 4104], [4338, 4346]])
+
+            # compute the chi2 values
+            # if modA_f.size and modB_f.size:
+            ndataA = len(mod_A_f_slc)
+            chi2A = self.chi2(dst_A_f_slc, mod_A_f_slc)
+            chi2redA = chi2A/(ndataA-self.nparams)
+
+            if self.binary:
+                ndataB = len(mod_B_f_slc)    
+                chi2B = self.chi2(dst_B_f_slc, mod_B_f_slc)
+                chi2_tot = chi2A + chi2B
+                ndata = ndataA + ndataB
+                chi2redB = chi2B/(ndataB-self.nparams)
+                chi2r_tot = chi2redA + chi2redB
+            else:
+                chi2_tot = chi2A
+                ndata = ndataA
+                chi2r_tot = chi2redA
+
+            if chi2_tot < 0:
+                raise ValueError("\nWarning: chi2 < O")
+
+            # Create row by getting the values of the parameters from self
+            row = [getattr(self, key) for key in self.cols if hasattr(self, key)]
+            if self.binary:
+                row.extend([chi2_tot, chi2A, chi2B, chi2r_tot, chi2redA, chi2redB, ndata])
+            else:
+                row.extend([chi2_tot, chi2r_tot, ndata])
+            
+            return row
+
     def compute_chi2(self, dic_lines_A, dic_lines_B):
         """
         Perform parameter grid search and compute chi-squared values for different model combinations.
@@ -86,131 +192,58 @@ class atmfit:
                 rotational velocities, He/H ratios, chi-squared values, and related statistics.
                 Type: pandas DataFrame
         """
+        if self.grid is None:
+            raise ValueError("Grid is required for compute_chi2")
+        
         self.dic_lines_A = dic_lines_A
         self.dic_lines_B = dic_lines_B
         nparams = len(self.grid)
+        self.nparams = nparams
+
         # compute length of the grid
         gridlen = prod([len(x) for x in self.grid])
-        # create spectra object to retrieve wavelength and flux
-        # spectra = self.read_spec()
+        
+        # retrieve wavelength from the disentangled spectra
         wavA, wavB = self.get_wave()
+        self.wavA = wavA
+        self.wavB = wavB
         # setting the dictionaries with the spectral lines selected for the fit
         usr_dicA = self.user_dic(dic_lines_A)
         usr_dicB = self.user_dic(dic_lines_B)
+        self.user_dicA = usr_dicA
+        self.user_dicB = usr_dicB
+
         # creating dictionary to store results
-        result_dic = {'lrat': [], 'teffA': [], 'loggA': [], 'vmicA': [], 'rotA': [], 'He2H': [], 'teffB': [], 'loggB': [], 'vmicB': [], 'rotB': [], 
-                        'chi2_tot': [], 'chi2A': [], 'chi2B': [], 'chi2r_tot': [], 'chi2redA': [], 'chi2redB': [], 'ndata': []}
-        col = list(result_dic.keys())
+        result_dic = {key: [] for key in self.grid.keys()}
+        if self.binary:
+            result_dic.update({'chi2_tot': [], 'chi2A': [], 'chi2B': [], 'chi2r_tot': [], 'chi2redA': [], 'chi2redB': [], 'ndata': []})
+        else:
+            result_dic.update({'chi2_tot': [], 'chi2r_tot': [], 'ndata': []})
+        # self.result_dic = result_dic
+        cols = list(result_dic.keys())
+        self.cols = cols
         t0 = time.time()
 
-        print('\n ##### Computing chi^2 for grid #####\n')
-        plot=True
-        for lr in self.grid[0]:
-            # rescale flux to new light ratio and slice data to regions for chi^2 computation
-            fluA, fluB = self.rescale_flux(lr)
-            dst_A_w_slc, dst_A_f_slc = self.slicedata(wavA, fluA, usr_dicA)
-            dst_B_w_slc, dst_B_f_slc = self.slicedata(wavB, fluB, usr_dicB)
-            # crop nebular emission from disentangled spectrum
-            dst_B_w_slc, dst_B_f_slc = self.crop_data(dst_B_w_slc, dst_B_f_slc, [[4100, 4104], [4338, 4346]])
-            for TA in self.grid[2]:
-                print('Teff_A:', TA)
-                for gA in self.grid[3]:
-                    print('   logg_A:', gA)
-                    for rA in self.grid[4]:
-                        print('      rotA:', rA)
-                        # if self.grid[5]:
-                        for micA in self.grid[5]:
-                            print('         vmicA:', micA)
-                            try:
-                                modA_w, modA_f, modelA = self.get_model({'T':TA, 'g':gA, 'v':micA, 'r':rA }, models_path=self.modelsA_path)      
-                                heini = 0.1
-                            except TypeError as e:
-                                print('Exception in loop:', e)
-                                # print('there was a typerror 0', [TA,gA,rA, micA])
-                                continue
-                            # else:
-                            #     try:
-                            #         # get models for star A
-                            #         if TA < 16:
-                            #             modA_w, modA_f, modelA = self.get_model([TA,gA,rA], source='atlas')
-                            #             heini = 0.076
-                            #         else:
-                            #             modA_w, modA_f, modelA = self.get_model([TA,gA,rA], source='tlusty')      
-                            #             heini = 0.1
-                            #     except TypeError:
-                            #         print('there was a typerror 1', [TA,gA,rA])
-                            #         pass
-                            # if modA_f.size:
-                            # interpolate models to the wavelength of the sliced disentangled spectrum
-                            modA_f_interp = np.interp(dst_A_w_slc, modA_w, modA_f)
-                            if self.grid[1]: # Check if self.grid[1] is not empty or None
-                                he_values = self.grid[1]
-                            else:
-                                he_values = [None]
-                            for he in he_values:
-                                print('            He:', he)
-                                if he is not None:
-                                    # print('He:', he)
-                                    # apply He/H ratio to the interpolated model of star A
-                                    modA_f_interp_hefrac = self.He2H_ratio(dst_A_w_slc, modA_f_interp, heini, he, usr_dicA, join=True, plot=plot, model=modelA.replace(self.modelsA_path, ''))
-                                    plot=False
-                                    ndataA = len(modA_f_interp_hefrac)
-                                    # print(len(dst_A_f_slc), len(modA_f_interp_hefrac))
-                                    chi2A = self.chi2(dst_A_f_slc, modA_f_interp_hefrac)
-                                else:
-                                    ndataA = len(modA_f_interp)
-                                    chi2A = self.chi2(dst_A_f_slc, modA_f_interp)
-                                print('model A:', lr, TA,gA, micA,rA, he)
-                                for TB in self.grid[6]:
-                                    print('   TB:', TB)
-                                    for gB in self.grid[7]:
-                                        print('      gB:', gB)
-                                        for rB in self.grid[8]:
-                                            print('         rB:', rB)
-                                            for micB in self.grid[9]:
-                                                print('            micB:', micB)
-                                                try:
-                                                    # get models for star B
-                                                    modB_w, modB_f, modelB = self.get_model({'T':TB, 'g':gB, 'v':micB, 'r':rB }, models_path=self.modelsB_path)
-                                                    # if TB < 16: 
-                                                    #     modB_w, modB_f, modelB = self.get_model([TB,gB,rB], source='atlas')        
-                                                    # else:
-                                                    #     modB_w, modB_f, modelB = self.get_model([TB,gB,rB], source='tlusty')
-                                                    if modA_f.size and modB_f.size:
-                                                        #  interpolate models to the wavelength of the sliced disentangled spectrum
-                                                        modB_f_interp = np.interp(dst_B_w_slc, modB_w, modB_f)
-                                                        # crop nebular emission from model and compute chi^2
-                                                        spl_wavB_crop, modB_f_interp_crop = self.crop_data(dst_B_w_slc, modB_f_interp, [[4100, 4104], [4338, 4346]])
-                                                        ndataB = len(modB_f_interp_crop)
-                                                        chi2B = self.chi2(dst_B_f_slc, modB_f_interp_crop)   
-                                                        chi2_tot = chi2A + chi2B
-                                                        ndata = ndataA + ndataB
-                                                        chi2redA = chi2A/(ndataA-nparams)
-                                                        chi2redB = chi2B/(ndataB-nparams)
-                                                        chi2r_tot = chi2redA + chi2redB
-                                                        # appending to dictionary
-                                                        row = [lr, TA, gA, micA, rA, he, TB, gB, micB, rB, chi2_tot, chi2A, chi2B, chi2r_tot, chi2redA, chi2redB, ndata]
-                                                        # if chi2_tot < 0:
-                                                            # print('\nWarning: chi2 < O')
-                                                            # print(row)
-                                                            # sys.exit()
-                                                        for key, val in zip(col, row):
-                                                            result_dic[key].append(val)
-                                                # except TypeError:
-                                                except TypeError as e:
-                                                    print('Exception in companion\'s loop:', e)
-                                                    # print('there was a typerror 2', [TB,gB,rB])
-                                                    pass
+        # Get all possible combinations of parameters
+        parameters = list(itertools.product(*self.grid.values()))
+        # print('parameters:', parameters)
+        
+        # Compute chi2 values for each set of parameters
+        with ProcessPoolExecutor() as executor:
+            results = list(tqdm(executor.map(self.compute_single_set, parameters), total=len(parameters)))
+        if self.missing_models:
+            print('WARNING: Some models were not found')
 
-                t2 = time.time()
-                print('   Teff_A = ' + str(TA) + ' completed in : ' + str(timedelta(seconds=t2-t0)) + ' [s] for l_rat = ' + str(lr))
-            t1 = time.time()
-            print('\n Light ratio = ' + str(lr) + ' completed in : ' + str(timedelta(seconds=t1-t0)) + ' [s] \n')
-            print('\n')            
+        # Convert list of rows into a dictionary
+        for row in results:
+            if row is not None:
+                for key, val in zip(cols, row):
+                    result_dic[key].append(val)
+        
         tf = time.time()
         print('Computation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
         output = pd.DataFrame.from_dict(result_dic)
-        print('total number of points used in the fit:', ndata)
+        # print('total number of points used in the fit:', ndata)
         return output
 
     def rescale_flux(self, lrat, lrat0=0.3):
@@ -235,7 +268,11 @@ class atmfit:
             ratio0 = self.lrat0
         else:
             ratio0 = lrat0
-        print('\n#     Warning: you are using an initial light ratio of', ratio0, '\n')
+
+        # Print warning only if it hasn't been printed before
+        # if not atmfit.warning_printed:    
+        #     print('\n#     Warning: you are using an initial light ratio of', ratio0, '\n')
+        #     atmfit.warning_printed = True  # Update the class variable
         ratio1 = lrat
         fluxA, fluxB = self.get_flux()
         flux_new_A = (fluxA -1)*((1-ratio0)/(1-ratio1)) + 1
@@ -295,13 +332,16 @@ class atmfit:
             model = models_path 
             for key, value in pars.items():
                 model += key + str(int(value))
-            print('getting model:', model)
+            # print('   get_model: getting model: ', model)
             try:
-                df = pd.read_csv(model, header=None, sep='\s+')
+                model_found = glob(model+'*')
+                # print('   get_model: model_found: ', model_found)
+                df = pd.read_csv(model_found[0], header=None, sep='\s+')
                 return df[0].to_numpy(), df[1].to_numpy(), model
             except FileNotFoundError:
-                print('WARNING: No model named '+model+' was found')
-                pass
+                # print('WARNING: No model named '+model+' was found')
+                self.missing_models = True
+                return None, None, None
         else:
             T, g, rot = pars
             lowT_models_path = '~/Science/github/jvillasr/MINATO/minato/models/ATLAS9/'             # Users will have to add the path to the models
@@ -508,6 +548,39 @@ class atmfit:
             x_data = x_data[cond]
             y_data = y_data[cond]
         return x_data, y_data
+
+    def interpolate_models(self, models_path, models_extension, wavelength, output_path=None):
+        """
+        Interpolate models to the wavelength of the disentangled spectrum.
+
+        This function interpolates the models to the wavelength of the disentangled spectrum
+        based on the provided models_path and wavelength data.
+
+        :param models_path: Path to the folder containing models.
+                        Type: str
+        :param models_extension: Extension of the model files.
+                        Type: str
+        :param wavelength: Wavelength array of the disentangled spectrum.
+                        Type: numpy array of floats
+        :param output_path: Path to save the interpolated models.
+                        Default: None
+                        Type: str, optional
+
+        :return: Interpolated wavelength array, Interpolated flux array.
+                Type: numpy arrays (floats)
+        """
+        self.models_path = models_path
+        self.wavelength = wavelength
+        models_list = sorted(glob(models_path+'*'+models_extension))
+        for model in models_list:
+            mod = pd.read_csv(model, header=None, sep='\s+')
+            mod_w = mod[0]
+            mod_f = mod[1]
+            mod_f_interp = np.interp(wavelength, mod_w, mod_f)
+            mod_interp = pd.DataFrame({'wavelength': wavelength, 'flux': mod_f_interp})
+            # output_filename = os.path.splitext(model)[0] + models_extension
+            output_filename = os.path.basename(model)
+            mod_interp.to_csv(output_path+output_filename, header=False, index=False, sep=' ')
 
 # class Spectra(atmfit):
     def read_spec(self):
