@@ -15,7 +15,7 @@ from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
 current_date = str(date.today())
 
-class atmfit:
+class AtmFit:
     def __init__(self, spectrumA, spectrumB, grid=None, lrat0=None, modelsA_path=None, modelsB_path=None, binary=False, crop_nebular=False, He2H=False, He_ini=0.1):
         """
         Initialize the atmosphere fitting class.
@@ -23,18 +23,17 @@ class atmfit:
         This constructor initializes the `atmfit` class with specified parameters.
         It sets up the initial configuration for the fitting process.
 
-        :param grid: List of parameter grids for the fitting process.
-                     Format: [light_ratio_grid, He_H_ratio_grid, Teff_A_grid, logg_A_grid,
-                              rot_A_grid, Teff_B_grid, logg_B_grid, rot_B_grid]
-                     Type: list of lists (floats)
         :param spectrumA: Path to the spectrum file for star A.
                          Type: str
         :param spectrumB: Path to the spectrum file for star B.
                          Type: str
+        :param grid: Dictionary of parameter for the fitting process.
+                        Format: grid = {'lr': np.arange(5, 30, 5)/100, 'TA': [15000, 20000, 25000, 30000], etc.}
+                        Type: dict
         :param lrat0: Initial light ratio. If not provided, defaults to None.
-                     Type: float or None
+                        Type: float or None
         :param modelsA_path: Path to the folder containing models for star A.
-                     Type: str
+                        Type: str
         :param modelsB_path: Path to the folder containing models for star B.
                         Type: str
         :param binary: Flag to indicate if the system is a binary or single star.
@@ -97,9 +96,24 @@ class atmfit:
         return dic
 
     def compute_single_set(self, params):
-        # interpolate models to the wavelength of the sliced disentangled spectrum
-        # modA_f_interp = np.interp(dst_A_w_slc, modA_w, modA_f)
-        # models should already be interpolated to the wavelength of the disentangled spectrum
+        """
+        Compute chi-squared values for a single set of parameters.
+
+        This method takes a set of parameters, from which it retrieves the model(s), and computes 
+        the chi-squared values for the fit between the model and the data. It handles both binary 
+        and single star cases.
+
+        Parameters
+        ----------
+        params : list
+            A list of parameter values corresponding to the keys in self.grid. 
+
+        Returns
+        -------
+        row : list
+            A list containing the input parameters and the computed chi-squared values. 
+            The order of values in this list is determined by self.cols, followed by the chi-squared values. 
+        """
 
         # Get parameters from the grid and make them accessible as attributes of self, e.g. self.lr, self.TA, self.gA, etc.
         for key, value in zip(self.grid.keys(), params):
@@ -120,13 +134,10 @@ class atmfit:
             else:
                 modB_w, modB_f, modelB = None, None, None
         except Exception as e:
-            # print('model not found: ', modelA_params)
             # print(f'Exception in get_model(): {type(e).__name__}: {e}')
-            # print('there was a typerror 0', [TA,gA,rA, micA])
             pass   
         
         else:
-            # print('MODEL FOUND (2): ', modelA, modA_w, modA_f)
             # Rescale flux of the disentangled specrta to new light ratio 
             fluA, fluB = self.rescale_flux(self.lr)
 
