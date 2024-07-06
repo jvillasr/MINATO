@@ -1,8 +1,8 @@
-import csv
 import sys
 import copy
 import os
 import matplotlib
+import csv
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -48,6 +48,245 @@ def read_fits(fits_file):
         ferr = hdul[1].data['SCI_NORM_ERR']
         return wave, flux, ferr, star_epoch, mjd
 
+def read_spectra(filelist, path, file_type):
+    wavelengths, fluxes, f_errors, names, jds = [], [], [], [], []
+    for spec in filelist:
+        if file_type in ['dat', 'txt', 'csv']:
+            names.append(spec.replace(f'.{file_type}', ''))
+            df = pd.read_csv(path + spec, sep='\t', header=None)
+            wavelengths.append(np.array(df[0]))
+            fluxes.append(np.array(df[1]))
+            try:
+                f_errors.append(np.array(df[2]))
+            except:
+                f_errors.append(1 / (np.array(df[1])) ** 2)
+        elif file_type == 'fits':
+            wave, flux, ferr, star, mjd = read_fits(spec)
+            wavelengths.append(wave)
+            fluxes.append(flux)
+            f_errors.append(ferr)
+            names.append(star)
+            jds.append(mjd)
+    return wavelengths, fluxes, f_errors, names, jds
+
+def setup_star_directory_and_save_jds(names, jds, path):
+    star = names[0].split('_')[0] + '_' + names[0].split('_')[1] + '/'
+    path = path.replace('FITS/', '') + star
+    if not os.path.exists(path):
+        os.makedirs(path)
+    df_mjd = pd.DataFrame()
+    df_mjd['epoch'] = names
+    df_mjd['JD'] = jds
+    df_mjd.to_csv(path + 'JDs.txt', index=False, header=False, sep='\t')
+    return path
+
+def setup_line_dictionary():
+    lines_dic = {
+        3995: { 'region':[3990, 4005], 'wid_ini':2, 'title':'N II $\lambda$3995'},
+        4009: { 'region':[4005, 4018], 'wid_ini':3, 'title':'He I $\lambda$4009'},
+        4026: { 'region':[4017, 4043], 'wid_ini':4, 'title':'He I $\lambda$4026'},
+        4102: { 'region':[4085, 4120], 'wid_ini':5, 'title':'H$\delta$'},
+        4121: { 'region':[4118, 4130], 'wid_ini':3, 'title':'He I $\lambda$4121'},
+        4128: { 'region':[4124, 4136], 'wid_ini':2, 'title':'Si II $\lambda$4128'},
+        4131: { 'region':[4128, 4140], 'wid_ini':2, 'title':'Si II $\lambda$4131'},
+        4144: { 'region':[4135, 4160], 'wid_ini':4, 'title':'He I $\lambda$4144'},
+        4233: { 'region':[4229, 4241], 'wid_ini':2, 'title':'Fe II $\lambda$4233'},
+        4267: { 'region':[4263, 4275], 'wid_ini':2, 'title':'C II $\lambda$4267'},
+        4340: { 'region':[4320, 4360], 'wid_ini':6, 'title':'H$\gamma$'},
+        4388: { 'region':[4380, 4405], 'wid_ini':4, 'title':'He I $\lambda$4388'},
+        4471: { 'region':[4462, 4487], 'wid_ini':4, 'title':'He I $\lambda$4471'},
+        4481: { 'region':[4478, 4490], 'wid_ini':2, 'title':'Mg II $\lambda$4481'},
+        4542: { 'region':[4537, 4552], 'wid_ini':3, 'title':'He II $\lambda$4542'},
+        4553: { 'region':[4547, 4562], 'wid_ini':3, 'title':'Si III $\lambda$4553'},
+        4861: { 'region':[4840, 4875], 'wid_ini':5, 'title':'H$\beta$'}, 
+        4922: { 'region':[4915, 4930], 'wid_ini':4, 'title':'He I $\lambda$4922'}, 
+        5412: { 'region':[5405, 5419], 'wid_ini':4, 'title':'He II $\lambda$5412'},
+        5876: { 'region':[5865, 5888], 'wid_ini':4, 'title':'He I $\lambda$5876'},  
+        5890: { 'region':[5881, 5905], 'wid_ini':3, 'title':'Na I $\lambda$5890'}, 
+        6562: { 'region':[6542, 6583], 'wid_ini':5, 'title':'H$\alpha$'}, 
+        6678: { 'region':[6668, 6690], 'wid_ini':4, 'title':'He I $\lambda$6678'}, 
+        7774: { 'region':[7762, 7786], 'wid_ini':3, 'title':'O I $\lambda$7774'}
+    }
+    return lines_dic
+
+def initialize_fit_variables(lines):
+    cen1, cen1_er = [[] for _ in range(len(lines))], [[] for _ in range(len(lines))]
+    amp1, amp1_er = [[] for _ in range(len(lines))], [[] for _ in range(len(lines))]
+    wid1, wid1_er = [[] for _ in range(len(lines))], [[] for _ in range(len(lines))]
+    cen2, cen2_er = [[] for _ in range(len(lines))], [[] for _ in range(len(lines))]
+    amp2, amp2_er = [[] for _ in range(len(lines))], [[] for _ in range(len(lines))]
+    wid2, wid2_er = [[] for _ in range(len(lines))], [[] for _ in range(len(lines))]
+    dely, sdev = [[] for _ in range(len(lines))], [[] for _ in range(len(lines))]
+    results, comps = [[] for _ in range(len(lines))], [[] for _ in range(len(lines))]
+    delta_cen, chisqr = [[] for _ in range(len(lines))], [[] for _ in range(len(lines))]
+    return (
+        cen1, cen1_er, amp1, amp1_er, wid1, wid1_er, 
+        cen2, cen2_er, amp2, amp2_er, wid2, wid2_er, 
+        dely, sdev, results, comps, delta_cen, chisqr
+    )
+
+def setup_fits_plots(wavelengths):
+    nplots = len(wavelengths)
+    ncols = int(np.sqrt(nplots))
+    nrows = nplots // ncols
+    if ncols * nrows < nplots:
+        nrows += 1
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(3 * ncols, 2 * nrows), sharey=True, sharex=True)
+    fig.subplots_adjust(wspace=0., hspace=0.)
+    axes = axes.flatten()
+    return fig, axes
+
+def fit_sb2(line, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, doubem, shift):
+
+    wave_region = np.logical_and(wave > lines_dic[line]['region'][0], wave < lines_dic[line]['region'][1])
+
+    x_wave = wave[wave_region]
+    y_flux = flux[wave_region]
+
+    cen_ini = line+shift
+    wid_ini = lines_dic[line]['wid_ini']
+    # nebem = Model(nebu, prefix='neb_')
+    # nebem2 = Model(nebu, prefix='neb2_')
+    
+    # Step 1: Create an empty list to hold the models for all epochs
+    models = []
+    pars = Parameters()
+
+    # Create parameters for the common amplitude and width
+    pars.add('common_amp', value=1)
+    pars.add('common_wid', value=1)
+
+    # Step 2: Loop over the epochs
+    for i, epoch in enumerate(wavelengths):
+        # Create a model for the epoch
+        gauss1 = Model(gaussian, prefix='g1_{}_'.format(i))
+        gauss2 = Model(gaussian, prefix='g2_{}_'.format(i))
+        loren1 = Model(lorentzian, prefix='l1_{}_'.format(i))
+        loren2 = Model(lorentzian, prefix='l2_{}_'.format(i))
+        nebem1 = Model(nebu, prefix='neb1_{}_'.format(i))
+        nebem2 = Model(nebu, prefix='neb2_{}_'.format(i))
+        cont = models.LinearModel(prefix='continuum_')
+
+        # Define parameters and set initial values
+        pars.update(cont.make_params())
+        pars['continuum_slope'].set(0, vary=False)
+        pars['continuum_intercept'].set(1, min=0.9)
+
+        if line in Hlines:
+            pars.update(loren1.make_params())
+            pars.update(loren2.make_params())
+            prefix = 'l'
+            sb2_mod = loren1 + loren2
+        else:
+            pars.update(gauss1.make_params())
+            pars.update(gauss2.make_params())
+            prefix = 'g'
+            sb2_mod = gauss1 + gauss2
+
+        for i in range(1, 3):
+            pars[f'{prefix}{i}_amp'].set(1.2-y_flux.min(), min=0.01, max=2. )
+            pars[f'{prefix}{i}_wid'].set(wid_ini, min=1, max=11)
+            pars[f'{prefix}{i}_cen'].set(cen_ini, min=cen_ini-4, max=cen_ini+4)
+        mod = sb2_mod + cont
+
+        # Define a list of nebular emission models
+        nebem_models = [nebem1, nebem2]
+
+        # Loop over the nebular emission models
+        for i, nebem in enumerate(nebem_models, start=1):
+            if line in neblines:
+                pars.update(nebem.make_params())
+                pars[f'neb{i}_amp'].set(y_flux.max()-y_flux.min(), min=0.01)
+                pars[f'neb{i}_wid'].set(1, min=0.1, max=1)
+                pars[f'neb{i}_cen'].set(cen_ini-0.2)
+                mod += nebem
+                if i == 2 and line not in doubem:
+                    break
+
+        # Constrain the amplitude and width to the common parameters
+        pars['g1_{}_amp'.format(i)].expr = 'common_amp'
+        pars['g1_{}_wid'.format(i)].expr = 'common_wid'
+        pars['g2_{}_amp'.format(i)].expr = 'common_amp'
+        pars['g2_{}_wid'.format(i)].expr = 'common_wid'
+
+        # Add the model to the list of models
+        models.append(mod)
+
+    # Step 3: Create a global model by adding together all the models
+    global_model = sum(models)
+
+    # Step 4: Perform the fit using the global model
+    result = global_model.fit(y, pars, x=x)
+
+    return result, x_wave, y_flux, wave_region
+
+def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):  
+
+    wave_region = np.logical_and(wave > lines_dic[line]['region'][0], wave < lines_dic[line]['region'][1])
+
+    x_wave = wave[wave_region]
+    y_flux = flux[wave_region]
+
+    cen_ini = line+shift
+    wid_ini = lines_dic[line]['wid_ini']
+
+    pars = Parameters()
+    gauss1 = Model(gaussian, prefix='g1_')
+    loren1 = Model(lorentzian, prefix='l1_')
+    nebem1 = Model(nebu, prefix='neb1_')
+    nebem2 = Model(nebu, prefix='neb2_')
+    cont = models.LinearModel(prefix='continuum_')
+
+    # Define parameters and set initial values
+    pars.update(cont.make_params())
+    pars['continuum_slope'].set(0, vary=False)
+    pars['continuum_intercept'].set(1, min=0.9)
+
+    if line in Hlines:
+        prefix = 'l1'
+        indiv_mod = loren1
+    else:
+        prefix = 'g1'
+        indiv_mod = gauss1
+
+    pars.update(indiv_mod.make_params())
+    pars[f'{prefix}_amp'].set(1.2-y_flux.min(), min=0.01, max=2. )
+    pars[f'{prefix}_wid'].set(wid_ini, min=1, max=11)
+    pars[f'{prefix}_cen'].set(cen_ini, min=cen_ini-4, max=cen_ini+4)
+    mod = indiv_mod + cont
+    # if line==5890:
+    #     pars.add('g1_wid', value=wid_ini, min=0.1, max=4.)
+    #     pars.update(gauss2.make_params())
+    #     pars.add('g2_cen', value=cen_ini+6., vary=True)
+    #     pars.add('g2_amp', 0.8*(1-y_flux.min()), min=0.05, max=0.5)
+    #     pars.add('g2_wid', value=wid_ini-1.5, min=0.1, max=4.)
+    #     mod = gauss1 + gauss2 + cont
+
+    # Define a list of nebular emission models
+    nebem_models = [nebem1, nebem2]
+    # Loop over the nebular emission models
+    for i, nebem in enumerate(nebem_models, start=1):
+        if line in neblines:
+            pars.update(nebem.make_params())
+            # if y_flux.max() < 1.2:
+            #     pars['neb_amp'].set((1-y_flux.min())/2, min=0.001, max=0.5)
+            # else:
+            #     pars['neb_amp'].set((y_flux.max()-y_flux.min())/1.1, min=0.05)#, max=65)
+            pars[f'neb{i}_amp'].set(y_flux.max()-y_flux.min(), min=0.01)
+            pars[f'neb{i}_wid'].set(1, min=0.05, max=2)
+            if i == 2:
+                pars[f'neb{i}_cen'].set(cen_ini+0.2)
+            else:
+                pars[f'neb{i}_cen'].set(cen_ini-0.2)
+            mod += nebem
+            if i == 2 and line not in doubem:
+                break
+
+    result = mod.fit(y_flux, pars, x=x_wave, weights=1/ferr[wave_region])
+
+    return result, x_wave, y_flux, wave_region
+
+
 def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, neblines=[4102, 4340], doubem=[], SB2=False, shift=0, use_init_pars=False):
     '''
     spectra_list
@@ -65,458 +304,137 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
     if len(spectra_list) == 1:
         print("\n   WARNING: There is only 1 epoch to compute RVs.")
         return    
-
     # doubem = doubem[0]
     Hlines = [4102, 4340, 6562]
-    best_lines, best_lines_index = [], []
-
-    # print( '\n********************************************************************************' )
-    # print( '******************       Fitting spectral lines of spectrum '+str(spec)+'       ******************' )
-    # print( '********************************************************************************\n' )
 
     print('*** SB2 set to: ', SB2, ' ***\n')
-
-    filelist = spectra_list
-    # print(filelist)
     
+    wavelengths, fluxes, f_errors, names, jds = read_spectra(spectra_list, path, file_type)
 
-    wavelengths, fluxes, f_errors, names, jds = [], [], [], [], []
-    for j,spec in enumerate(filelist):
-        # print(j, spec)
-        if file_type in ['dat', 'txt', 'csv']:
-            names.append(spec.replace(f'.{file_type}',''))
-            # print()
-            df = pd.read_csv(path + spec, sep='\t',header=None)
-            # print(df)
-            wavelengths.append(np.array(df[0]))
-            fluxes.append(np.array(df[1]))
-            try:
-                f_errors.append(np.array(df[2]))
-            except:
+    path = setup_star_directory_and_save_jds(names, jds, path)
 
-                f_errors.append(1/(np.array(df[1]))**2)
-        elif file_type == 'fits':
-            wave, flux, ferr, star, mjd = read_fits(spec)
-            wavelengths.append(wave)
-            fluxes.append(flux)
-            f_errors.append(ferr)
-            names.append(star)
-            jds.append(mjd)
-
-
-    print('Names of the files:', names)
-    star = names[0].split('_')[0]+'_'+names[0].split('_')[1]+'/'
-    print(star)
-    path = path.replace('FITS/', '')+star
-    print(path)
-    if not os.path.exists(path):
-        os.makedirs(path)
-    # sys.exit()
-    df_mjd = pd.DataFrame()
-    df_mjd['epoch'] = names
-    df_mjd['JD'] = jds
-    df_mjd.to_csv(path+'JDs.dat', index=False, header=False, sep='\t')
-
-    lines_dic = {
-                    3995: { 'region':[3990, 4005], 'wid_ini':2, 'title':'N II $\lambda$3995'},
-                    4009: { 'region':[4005, 4018], 'wid_ini':3, 'title':'He I $\lambda$4009'},
-                    4026: { 'region':[4017, 4043], 'wid_ini':4, 'title':'He I $\lambda$4026'},
-                    4102: { 'region':[4085, 4120], 'wid_ini':5, 'title':'H$\delta$'},
-                    4121: { 'region':[4118, 4130], 'wid_ini':3, 'title':'He I $\lambda$4121'},
-                    4128: { 'region':[4124, 4136], 'wid_ini':2, 'title':'Si II $\lambda$4128'},
-                    4131: { 'region':[4128, 4140], 'wid_ini':2, 'title':'Si II $\lambda$4131'},
-                    4144: { 'region':[4135, 4160], 'wid_ini':4, 'title':'He I $\lambda$4144'},
-                    4233: { 'region':[4229, 4241], 'wid_ini':2, 'title':'Fe II $\lambda$4233'},
-                    4267: { 'region':[4263, 4275], 'wid_ini':2, 'title':'C II $\lambda$4267'},
-                    4340: { 'region':[4320, 4360], 'wid_ini':6, 'title':'H$\gamma$'},
-                    4388: { 'region':[4380, 4405], 'wid_ini':4, 'title':'He I $\lambda$4388'},
-                    4471: { 'region':[4462, 4487], 'wid_ini':4, 'title':'He I $\lambda$4471'},
-                    4481: { 'region':[4478, 4490], 'wid_ini':2, 'title':'Mg II $\lambda$4481'},
-                    4542: { 'region':[4537, 4552], 'wid_ini':3, 'title':'He II $\lambda$4542'},
-                    4553: { 'region':[4547, 4562], 'wid_ini':3, 'title':'Si III $\lambda$4553'},
-                    4861: { 'region':[4840, 4875], 'wid_ini':5, 'title':'H$\beta$'}, 
-                    4922: { 'region':[4915, 4930], 'wid_ini':4, 'title':'He I $\lambda$4922'}, 
-                    5412: { 'region':[5405, 5419], 'wid_ini':4, 'title':'He II $\lambda$5412'},
-                    5876: { 'region':[5865, 5888], 'wid_ini':4, 'title':'He I $\lambda$5876'},  
-                    5890: { 'region':[5881, 5905], 'wid_ini':3, 'title':'Na I $\lambda$5890'}, 
-                    6562: { 'region':[6542, 6583], 'wid_ini':5, 'title':'H$\alpha$'}, 
-                    6678: { 'region':[6668, 6690], 'wid_ini':4, 'title':'He I $\lambda$6678'}, 
-                    7774: { 'region':[7762, 7786], 'wid_ini':3, 'title':'O I $\lambda$7774'}, }
-    
+    lines_dic = setup_line_dictionary()
 
     print('these are the lines: ', lines)
 
-    # median   = []
-    # ww, ff             = [[] for i in range(len(lines))], [[] for i in range(len(lines))]
-    cen1, cen1_er      = [[] for i in range(len(lines))], [[] for i in range(len(lines))]
-    amp1, amp1_er      = [[] for i in range(len(lines))], [[] for i in range(len(lines))]
-    wid1, wid1_er      = [[] for i in range(len(lines))], [[] for i in range(len(lines))]
-    cen2, cen2_er      = [[] for i in range(len(lines))], [[] for i in range(len(lines))]
-    amp2, amp2_er      = [[] for i in range(len(lines))], [[] for i in range(len(lines))]
-    wid2, wid2_er      = [[] for i in range(len(lines))], [[] for i in range(len(lines))]
-    dely, sdev         = [[] for i in range(len(lines))], [[] for i in range(len(lines))]
-    results, comps     = [[] for i in range(len(lines))], [[] for i in range(len(lines))]
-    delta_cen, chisqr  = [[] for i in range(len(lines))], [[] for i in range(len(lines))]
+    (
+        cen1, cen1_er, amp1, amp1_er, wid1, wid1_er, 
+        cen2, cen2_er, amp2, amp2_er, wid2, wid2_er, 
+        dely, sdev, results, comps, delta_cen, chisqr
+    ) = initialize_fit_variables(lines)
 
-    print( '\n')
-    print( '*** Performing 1st fit ***')
-    print( '--------------------------')
+    with open(path + 'fit_values.csv', 'w', newline='') as csvfile:
+        writer = None
 
-    for i,line in enumerate(lines):
-        out_file = []
-        if SB2==True:
-            out_file = open(path+str(line)+'_stats_0.dat', 'w')
-        else:
-            out_file = open(path+str(line)+'_stats.dat', 'w')
-        if plots == True:
-            nplots = len(wavelengths)
-            ncols = int(np.sqrt(nplots)) 
-            nrows = nplots//ncols
-            if ncols*nrows < nplots:
-                nrows = nrows+1
-            # # print('number of panels =', len(wavelengths))
-            # # print('number of cols =', ncols)
-            # # print('number of rows =', nrows)
-            # # elif len(wave)%4 != 0:
-
-            fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(3*ncols,2*nrows), sharey=True, sharex=True)
-            fig.subplots_adjust(wspace=0.,hspace=0.)
-            axes = axes.flatten()
-        print('fitting line ', line)
-        j=0
-        for wave, flux, ferr, ax in zip(wavelengths, fluxes, f_errors, axes):
-            
-            # print('   epoch ', j)
-            ww = np.logical_and(wave > lines_dic[line]['region'][0], wave < lines_dic[line]['region'][1])
-            # sdev[i].append(np.std(flux[ww]))
-        # print('mean of std devs for all epochs of line ',line,' = ',np.mean(sdev[i]))
-        # print('median of std devs for all epochs of line ',line,' = ',np.median(sdev[i]))
-        # print('mode of std devs for all epochs of line ',line,' = ',stats.mode(sdev[i]))
-        # median.append(np.median(sdev[i]))
-        # fit1
-
-
-
-        
-        # for j in range(len(wave)):
-            # if line in Hlines:
-            #     ff[i].append(flux[ww] < np.mean(flux[ww])+10*median[i])
-            # else:
-            #     ff[i].append(flux[ww] < np.mean(flux[ww])+30*median[i])
-            # print('line', line, ' epoch', j, ' len(ff[i][j]):', len(ff[i][j]))
-            x_wave = wave[ww]
-            y_flux = flux[ww]
-            x_ymax = x_wave[y_flux.argmax()]
-            x_ymin = x_wave[y_flux.argmin()]
-            # print('x_ymax, x_ymin =', x_ymax, x_ymin)
-
-            cen_ini = line+shift
-            wid_ini = lines_dic[line]['wid_ini']
-
-            pars = Parameters()
-            gauss1 = Model(gaussian, prefix='g1_')
-            gauss2 = Model(gaussian, prefix='g2_')
-            loren1 = Model(lorentzian, prefix='l1_')
-            loren2 = Model(lorentzian, prefix='l2_')
-            nebem = Model(nebu, prefix='neb_')
-            nebem2 = Model(nebu, prefix='neb2_')
-            cont = models.LinearModel(prefix='continuum_')
-            pars.update(cont.make_params())
-            pars['continuum_slope'].set(0, vary=False)
-            pars['continuum_intercept'].set(1, min=0.9)
-            if line in Hlines:
-                pars.update(loren1.make_params())
-                pars['l1_amp'].set(1.2-y_flux.min(), min=0.01, max=2. )
-                # pars['l1_wid'].set(wid_ini+3, min=3, max=11)
-                pars['l1_wid'].set(wid_ini, min=1, max=11)
-                pars['l1_cen'].set(cen_ini, min=cen_ini-4, max=cen_ini+4)
-                mod = loren1 + cont
-                if line in neblines:
-                    pars.update(nebem.make_params())
-                    pars['neb_amp'].set(y_flux.max()-y_flux.min(), min=0.01)#, max=65)
-                    pars['neb_wid'].set(1, min=0.1, max=1)
-                    pars['neb_cen'].set(cen_ini-0.2)#, min=cen_ini-4, max=cen_ini+4)
-                    mod = loren1 + nebem + cont
-                    if line in doubem:
-                        pars.update(nebem2.make_params())
-                        pars['neb2_amp'].set(y_flux.max()-y_flux.min(), min=0.01)#, max=65)
-                        pars['neb2_wid'].set(1)#, min=0.1, max=4)
-                        pars['neb2_cen'].set(cen_ini-0.5)#, min=cen_ini-4, max=cen_ini+4)
-                        mod = loren1 + nebem + nebem2 + cont
-            if not line in Hlines:
-                if SB2==False:
-                    pars.update(gauss1.make_params())
-                    pars.add('g1_amp', value=1-y_flux.min(), min=0.05, max=0.6)
-                    pars.add('g1_cen', value=cen_ini, vary=True)
-
-                    if line==4553:
-                        pars.add('g1_wid', value=wid_ini-1.5, min=0.3, max=2.)
-                        pars.add('g1_cen', value=cen_ini, vary=True)
-                        mod = gauss1 + cont
-                    if line==5890:
-                        pars.add('g1_wid', value=wid_ini, min=0.1, max=4.)
-                        pars.update(gauss2.make_params())
-                        pars.add('g2_cen', value=cen_ini+6., vary=True)
-                        pars.add('g2_amp', 0.8*(1-y_flux.min()), min=0.05, max=0.5)
-                        pars.add('g2_wid', value=wid_ini-1.5, min=0.1, max=4.)
-                        mod = gauss1 + gauss2 + cont
-                    else:
-                        pars.add('g1_wid', value=wid_ini, min=0.5, max=10.)
-                        mod = gauss1 + cont
-                    if line in neblines:
-                        pars.update(nebem.make_params())
-                        pars['neb_cen'].set(cen_ini, min=cen_ini-1.5, max=cen_ini+1.5)
-                        pars['neb_wid'].set(1., min=0.05, max=1.8)
-                        if y_flux.max() < 1.2:
-                            pars['neb_amp'].set((1-y_flux.min())/2, min=0.001, max=0.5)
-                        else:
-                            pars['neb_amp'].set((y_flux.max()-y_flux.min())/1.1, min=0.05)#, max=65)
-                        mod = gauss1 + nebem + cont
-                        if line in doubem:
-                            pars.update(nebem2.make_params())
-                            pars['neb2_amp'].set(1-y_flux.min(), min=0.01, max=25)
-                            pars['neb2_wid'].set(0.5, min=0.05, max=5)
-                            pars['neb2_cen'].set(cen_ini-1, min=cen_ini-4-1, max=cen_ini+4-1)
-                            mod = gauss1 + nebem + nebem2 + cont
-                if SB2==True:
-                    if use_init_pars==True:
-                        pars.update(gauss1.make_params())
-                        pars.add('g1_amp', value=1-y_flux.min(), min=0.05, max=0.4)
-                        # pars.add('g1_cen', value=cen_ini-1., min=cen_ini-7, max=cen_ini+7)
-                        pars.add('g1_cen', value=cen_ini-2., vary=True)
-
-                        if line==4553:
-                            pars.add('g1_wid', value=wid_ini-1.5, min=0.3, max=2.)
-                            pars.add('g1_cen', value=cen_ini, vary=True)
-                        else:
-                            pars.add('g1_wid', value=wid_ini-0., min=0.5, max=4.)
-
-                        pars.update(gauss2.make_params())
-                        # pars.add('g2_cen', value=cen_ini+2, min=cen_ini-7, max=cen_ini+7)
-                        pars.add('g2_cen', value=cen_ini+2., vary=True)
-                        pars.add('g2_amp', 0.5*(1-y_flux.min()), min=0.05, max=0.3)
-                        # pars.add('g2_wid', value=wid_ini, min=2, max=6)
-                        if line==4553:
-                            pars.add('g2_wid', value=wid_ini-1.5, min=0.3, max=2.)
-                            pars.add('g2_cen', value=cen_ini+1.5, vary=True)
-                        else:
-                            pars.add('g2_wid', value=wid_ini-1., min=0.5, max=4.)
-                            # pars.add('g2_cen', value=cen_ini+2., min=cen_ini-5, max=cen_ini+5)
-                        mod = gauss1 + gauss2 + cont
-                    else:
-                        pars.update(gauss1.make_params())
-                        pars.add('g1_amp', value=1-y_flux.min(), min=0.05, max=0.4)
-                        # pars.add('g1_cen', value=cen_ini-1., min=cen_ini-7, max=cen_ini+7)
-                        pars.add('g1_cen', value=cen_ini-2.0, vary=True)
-                        if line==4553:
-                            pars.add('g1_wid', value=wid_ini-1.5, min=0.3, max=2.)
-                            pars.add('g1_cen', value=cen_ini-0.8, vary=True)
-                        else:
-                            pars.add('g1_wid', value=wid_ini-1.5, min=0.5, max=3.5)
-
-                        pars.update(gauss2.make_params())
-                        pars.add('g2_amp', 0.5*(1-y_flux.min()), min=0.05, max=0.3)
-                        # pars.add('g2_cen', value=cen_ini+2, min=cen_ini-7, max=cen_ini+7)
-                        pars.add('g2_cen', value=cen_ini+2.0, vary=True)
-                        # pars.add('g2_wid', value=wid_ini, min=2, max=6)
-                        if line==4553:
-                            pars.add('g2_wid', value=wid_ini-1.5, min=0.3, max=2.)
-                            pars.add('g2_cen', value=cen_ini+0.8, vary=True)
-                        else:
-                            pars.add('g2_wid', value=wid_ini-1.5, min=0.5, max=3.5)
-                            # pars.add('g2_cen', value=cen_ini+2., min=cen_ini-5, max=cen_ini+5)
-                        mod = gauss1 + gauss2 + cont
-                    if line in neblines:
-                        pars.update(nebem.make_params())
-                        pars['neb_cen'].set(cen_ini, min=cen_ini-1, max=cen_ini+1)
-                        pars['neb_wid'].set(1., min=0.05, max=1.6)
-                        if y_flux.max() < 1.2:
-                            pars['neb_amp'].set((1-y_flux.min())/2, min=0.001, max=0.5)
-                        else:
-                            pars['neb_amp'].set((y_flux.max()-y_flux.min())/1.1, min=0.05)#, max=65)
-                        mod = gauss1 + gauss2 + nebem + cont
-                        if line in doubem:
-                            pars.update(nebem2.make_params())
-                            pars['neb2_amp'].set(1-y_flux.min(), min=0.01, max=25)
-                            pars['neb2_wid'].set(0.5, min=0.05, max=5)
-                            pars['neb2_cen'].set(cen_ini-1.5, min=cen_ini-4-1, max=cen_ini+4-1)
-                            mod = gauss1 + gauss2 + nebem + nebem2 + cont
-            result = mod.fit(y_flux, pars, x=x_wave, weights=1/ferr[ww])
-            results[i].append(result)
-            chisqr[i].append(result.chisqr)
-            if line in neblines or SB2==True:
-                component = result.eval_components(result.params, x=x_wave)
-                comps[i].append(component)
-            else:
-                component = None
-                comps[i].append(component)
-            # for pname, par in pars.items():
-            #     print('line', line, ' epoch', j+1, pname, par)
-
-            out_file.write(names[j]+'\n')
-            out_file.write(result.fit_report()+'\n')
-
-            if not 'g2_cen' in result.params and not 'l1_cen' in result.params or line==5890:
-                cen1[i].append(result.params['g1_cen'].value)
-                cen1_er[i].append(result.params['g1_cen'].stderr)
-                amp1[i].append(result.params['g1_amp'].value)
-                amp1_er[i].append(result.params['g1_amp'].stderr)
-                wid1[i].append(result.params['g1_wid'].value)
-                wid1_er[i].append(result.params['g1_wid'].stderr)
-            if 'g2_cen' in result.params and line!=5890:
-                if result.params['g1_amp'].value > result.params['g2_amp'].value:
-                    cen1[i].append(result.params['g1_cen'].value)
-                    cen1_er[i].append(result.params['g1_cen'].stderr)
-                    amp1[i].append(result.params['g1_amp'].value)
-                    amp1_er[i].append(result.params['g1_amp'].stderr)
-                    wid1[i].append(result.params['g1_wid'].value)
-                    wid1_er[i].append(result.params['g1_wid'].stderr)
-                    cen2[i].append(result.params['g2_cen'].value)
-                    cen2_er[i].append(result.params['g2_cen'].stderr)
-                    amp2[i].append(result.params['g2_amp'].value)
-                    amp2_er[i].append(result.params['g2_amp'].stderr)
-                    wid2[i].append(result.params['g2_wid'].value)
-                    wid2_er[i].append(result.params['g2_wid'].stderr)
+        for i, line in enumerate(lines):
+            print('Fitting line ', line)
+            with open(path + str(line) + '_stats.txt', 'w') as out_file:
+                if plots:
+                        fig, axes = setup_fits_plots(wavelengths)
                 else:
-                    cen1[i].append(result.params['g2_cen'].value)
-                    cen1_er[i].append(result.params['g2_cen'].stderr)
-                    amp1[i].append(result.params['g2_amp'].value)
-                    amp1_er[i].append(result.params['g2_amp'].stderr)
-                    wid1[i].append(result.params['g2_wid'].value)
-                    wid1_er[i].append(result.params['g2_wid'].stderr)
-                    cen2[i].append(result.params['g1_cen'].value)
-                    cen2_er[i].append(result.params['g1_cen'].stderr)
-                    amp2[i].append(result.params['g1_amp'].value)
-                    amp2_er[i].append(result.params['g1_amp'].stderr)
-                    wid2[i].append(result.params['g1_wid'].value)
-                    wid2_er[i].append(result.params['g1_wid'].stderr)
-            if 'l1_cen' in result.params:
-                cen1[i].append(result.params['l1_cen'].value)
-                cen1_er[i].append(result.params['l1_cen'].stderr)
-                amp1[i].append(result.params['l1_amp'].value)
-                amp1_er[i].append(result.params['l1_amp'].stderr)
-                wid1[i].append(result.params['l1_wid'].value)
-                wid1_er[i].append(result.params['l1_wid'].stderr)
-            # if result.params['g1_cen'].stderr==None or result.params['g1_amp'].stderr==None:
-            if cen1_er[i][j]==None or amp1_er[i][j]==None:
-                print('errors computation failed for line ', line, 'epoch ', j+1)
-            # if result.params['g1_cen'].stderr != 0 and result.params['g1_cen'].stderr != None:
-            if cen1_er[i][j] != 0 and cen1_er[i][j] != None:
-                # dely[i].append(result.eval_uncertainty(sigma=3))
-                dely = result.eval_uncertainty(sigma=3)
-            else:
-                # dely[i].append(0)
-                dely = None
-            
+                    axes = [None] * len(wavelengths)
+                for wave, flux, ferr, name, ax in zip(wavelengths, fluxes, f_errors, names, axes):
+                    if SB2:
+                        result, x_wave, y_flux, wave_region = fit_sb2()
+                    else:
+                        result, x_wave, y_flux, wave_region = fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift)
+                    results[i].append(result)
+                    chisqr[i].append(result.chisqr)
+                    if line in neblines or SB2==True:
+                        component = result.eval_components(result.params, x=x_wave)
+                        comps[i].append(component)
+                    else:
+                        component = None
+                        comps[i].append(component)
+
+                    out_file.write(name+'\n')
+                    out_file.write('-' * len(name.strip()) + '\n')
+                    out_file.write(result.fit_report()+'\n\n')
+
+                    if 'g1_cen' in result.params:
+                        prefix = 'g1'
+                    elif 'l1_cen' in result.params:
+                        prefix = 'l1'
+                    else:
+                        raise ValueError("Unexpected fit type")
+
+                    results_dict = {
+                        'epoch': name,
+                        'line': line,
+                        'cen1': result.params[f'{prefix}_cen'].value,
+                        'cen1_er': result.params[f'{prefix}_cen'].stderr,
+                        'amp1': result.params[f'{prefix}_amp'].value,
+                        'amp1_er': result.params[f'{prefix}_amp'].stderr,
+                        'wid1': result.params[f'{prefix}_wid'].value,
+                        'wid1_er': result.params[f'{prefix}_wid'].stderr,
+                    }
+                    if SB2:
+                        if 'g2_cen' in result.params:
+                            prefix2 = 'g2'
+                        elif 'l2_cen' in result.params:
+                            prefix2 = 'l2'
+                        results_dict.update({
+                            'cen2': result.params[f'{prefix2}_cen'].value,
+                            'cen2_er': result.params[f'{prefix2}_cen'].stderr,
+                            'amp2': result.params[f'{prefix2}_amp'].value,
+                            'amp2_er': result.params[f'{prefix2}_amp'].stderr,
+                            'wid2': result.params[f'{prefix2}_wid'].value,
+                            'wid2_er': result.params[f'{prefix2}_wid'].stderr,
+                        })
+                    # If writer is None, this is the first dictionary, so get the fieldnames from its keys
+                    if writer is None:
+                        fieldnames = results_dict.keys()
+                        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                        writer.writeheader()
+                    writer.writerow(results_dict)
+
+                    if results_dict['cen1_er'] is None or results_dict['amp1_er'] is None:
+                        print('errors computation failed for line ', line, 'epoch ', j+1)
+                    if results_dict['cen1_er'] != 0 and results_dict['cen1_er'] is not None:
+                        dely = result.eval_uncertainty(sigma=3)
+                    else:
+                        dely = None
+
+                    '''
+                    Plotting 1st fits of the lines
+                    '''
+                    if plots:
+                        xx = np.linspace(min(x_wave), max(x_wave), 500)
+                        result_new = result.eval(x=xx)
+                        init_new = result.eval(params=result.init_params, x=xx)
+                        ax.plot(x_wave, y_flux, 'k-', lw=3, ms=4, zorder=1, label=str(name.replace('./','').replace('_',' ')))
+                        ax.plot(xx, init_new, '--', c='grey', zorder=5)
+                        ax.plot(xx, result_new, 'r-', lw=2, zorder=4)
+
+                        if component is not None:
+                            if line in Hlines:
+                                ax.plot(x_wave, component['continuum_']+component['l1_'], '--', zorder=3, c='limegreen', lw=2)#, label='spectral line')
+                            if SB2==True and not line in Hlines:
+                                ax.plot(x_wave, component['continuum_']+component['g1_'], '--', zorder=3, c='blue', lw=2)#, label='spectral line')
+                                ax.plot(x_wave, component['continuum_']+component['g2_'], '--', zorder=3, c='blue', lw=2)#, label='spectral line')
+                            if line in neblines:
+                                ax.plot(x_wave, component['continuum_']+component['neb_'], '--', zorder=3, c='orange', lw=2)#, label='nebular emision')
+                            if line in neblines and not line in Hlines and SB2==False:
+                                ax.plot(x_wave, component['continuum_']+component['g1_'], '--', zorder=3, c='limegreen', lw=2)#, label='spectral line')
+
+                        if dely is not None:
+                            ax.fill_between(x_wave, result.best_fit-dely, result.best_fit+dely, zorder=2, color="#ABABAB", alpha=0.5)
+
+                        # ax.legend(loc='upper center',fontsize=10, handlelength=0, handletextpad=0.4, borderaxespad=0., frameon=False)
+  
+                        ax.set_ylim(0.9*y_flux.min(), 1.1*y_flux.max())
+                if plots:        
+                    fig.supxlabel('Wavelength', size=22)
+                    fig.supylabel('Flux', size=22)
+                    # plt.tight_layout()
+                    if SB2==True:
+                        plt.savefig(path+str(line)+'_fits_0_.png', bbox_inches='tight', dpi=150)
+                    else:
+                        plt.savefig(path+str(line)+'_fits.png', bbox_inches='tight', dpi=150)
+                    #plt.show()
+                    plt.close()
         
-    #     for pname, par in pars.items():
-    #         out_pars.write(str(line)+','+str(par).replace('<Parameter', '').replace(']>', '')\
-    #             .replace('bounds=[', '').replace(':', ', ').replace('value=', '').replace('(fixed)', '').replace(' ', '')+'\n')
-    # out_pars.close()
-    # print(' ...fit done')
-    # sys.exit()
-    ########################################################################
-
-            '''
-            Plotting 1st fits of the lines
-            '''
-            if plots==True:
-                # print('\nPloting line fits...')
-                # for i,line in enumerate(lines):
-
-                # axes = trim_axs(axes, len(wave))
-                
-                # ax1 = fig.add_subplot(nrows,4,1)
-                # for ax, j in zip(axes, range(len(wave))):
-                #j = a*4+b
-                # plt.subplot(nrows+1, 4, j+1, sharex=ax1, sharey=ax1)
-                xx = np.linspace(min(wave[ww]), max(wave[ww]), 1000)
-                result_new = result.eval(x=xx)
-                init_new = result.eval(params=result.init_params, x=xx)
-                ax.plot(wave[ww], flux[ww], 'k-', lw=3, ms=4, zorder=1, label=str(names[j].replace('./','').replace('_',' ')))
-                ax.plot(xx, init_new, '--', c='grey', zorder=5)
-                ax.plot(xx, result_new, 'r-', lw=2, zorder=4)
-
-                if component is not None:
-                    if line in Hlines:
-                        ax.plot(wave[ww], component['continuum_']+component['l1_'], '--', zorder=3, c='limegreen', lw=2)#, label='spectral line')
-                    if SB2==True and not line in Hlines:
-                        ax.plot(wave[ww], component['continuum_']+component['g1_'], '--', zorder=3, c='blue', lw=2)#, label='spectral line')
-                        ax.plot(wave[ww], component['continuum_']+component['g2_'], '--', zorder=3, c='blue', lw=2)#, label='spectral line')
-                    if line in neblines:
-                        ax.plot(wave[ww], component['continuum_']+component['neb_'], '--', zorder=3, c='orange', lw=2)#, label='nebular emision')
-                    if line in neblines and not line in Hlines and SB2==False:
-                        ax.plot(wave[ww], component['continuum_']+component['g1_'], '--', zorder=3, c='limegreen', lw=2)#, label='spectral line')
-                        #plt.hlines(np.mean(y_flux)+median[i], lim_wav[i][0], lim_wav[i][1], color='magenta', linestyles='--',linewidth=1.)
-
-                if dely is not None:
-                    ax.fill_between(wave[ww], result.best_fit-dely, result.best_fit+dely, zorder=2, color="#ABABAB", alpha=0.5)
-                # if j < 25:
-                    # plt.axis('off')
-                    # ax.tick_params(axis='both', labelbottom=False)
-
-                ax.legend(loc='upper center',fontsize=10, handlelength=0, handletextpad=0.4, borderaxespad=0., frameon=False)
-                # plt.tick_params(which='both', width=0.5, labelsize=11)
-                #ax1.set(ylim=(min(y_flux)-0.2, max(y_flux)+0.2))
-                # if max(flux[ww])>1.3 or min(flux[ww])<0.4 or \
-                #     max(result.best_fit-dely)>1.3 or min(result.best_fit-dely)<0.4:
-                #     if line in Hlines:
-                #         ax.set(ylim=(0.5, 1.3))
-                #     elif line not in Hlines:
-                #         ax.set(ylim=(0.6, 1.2))
-                # if component is not None:
-                #     if line in neblines:
-                #         if max(flux[ww])>1.3 or min(flux[ww])<0.4 or \
-                #             max(result.best_fit-dely)>1.3 or min(result.best_fit-dely)<0.4 \
-                #             or max(1+component['neb_'])>1.3:
-                #             if line in Hlines:
-                #                 ax.set(ylim=(0.5, 1.3))
-                #             elif line not in Hlines:
-                #                 ax.set(ylim=(0.6, 1.2))
-                #     else:
-                #         if max(flux[ww])>1.3 or min(flux[ww])<0.4 or \
-                #             max(result.best_fit-dely)>1.3 or min(result.best_fit-dely)<0.4:
-                #             if line in Hlines:
-                #                 ax1.set(ylim=(0.5, 1.3))
-                #             elif line not in Hlines:
-                #                 ax1.set(ylim=(0.6, 1.2))
-                # x=0.05
-                # y0=-0.1 # for BBC 847
-                # y0=0.05
-                # y1=0.02
-                # if line==4026:
-                #     ax.set(ylim=(0.7-y0, 1.11+y1))
-                # # if i==1:
-                # #     ax1.set(ylim=(0.65, 1.5))
-                # if line==4144:
-                #     ax.set(ylim=(0.8-y0, 1.11+y1))
-                # if line==4102:
-                #     ax.set(ylim=(0.5, 1.4))
-                # if line==4340:
-                #     ax.set(ylim=(0.5, 1.9))
-                # if line==4388:
-                #     ax.set(ylim=(0.75-y0, 1.11+y1))
-                #     ax.set_xticks([4385,4395,4405])
-                # if line==4471:
-                #     ax.set(ylim=(0.75-y0, 1.11+y1))
-                #     ax.set_xticks([4465,4475,4485])
-                # if line==4553:
-                #     ax.set(ylim=(0.8+y0, 1.11+y1))
-                
-            j += 1
-        if plots==True:   
-            ax.set_ylim(0.9*y_flux.min(), 1.1*y_flux.max())
-            fig.supxlabel('Wavelength', size=22)
-            fig.supylabel('Flux', size=22)
-            # plt.tight_layout()
-            if SB2==True:
-                plt.savefig(path+str(line)+'_fits_0_.png', bbox_inches='tight', dpi=300)
-            else:
-                plt.savefig(path+str(line)+'_fits.png', bbox_inches='tight', dpi=300)
-            #plt.show()
-            plt.close()
-        
-        out_file.close()
+        # out_file.close()
     # sys.exit()
 
     #########################################################################
@@ -637,8 +555,8 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
             if mean_amp1[i]==None:
                 print('*** None values found in mean_amp1 for line',line)
             for j in range(len(wave)):
-                x_wave = wave[j][ww[i][j]][ff[i][j]]
-                y_flux = flux[j][ww[i][j]][ff[i][j]]
+                x_wave = wave[j][wave_region[i][j]][ff[i][j]]
+                y_flux = flux[j][wave_region[i][j]][ff[i][j]]
 
                 pars = Parameters()
                 gauss1 = Model(gaussian, prefix='g1_')
@@ -720,8 +638,8 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
 
                 # for pname, par in pars.items():
                 #     print('line', line, ' epoch', j+1, pname, par)
-                # print(len(results[0]), len(y_flux), len(x_wave), len(ferr), len(ww[0]), len(ff[0]))
-                results[i].append(mod.fit(y_flux, pars, x=x_wave, weights=1/ferr[ww]))
+                # print(len(results[0]), len(y_flux), len(x_wave), len(ferr), len(wave_region[0]), len(ff[0]))
+                results[i].append(mod.fit(y_flux, pars, x=x_wave, weights=1/ferr[wave_region]))
                 # print(results[i][j].fit_report())
                 out_file1.write(names[j]+'\n')
                 out_file1.write(results[i][j].fit_report()+'\n')
@@ -798,8 +716,8 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
             if mean_amp1[i]==None:
                 print('*** None values found in mean_amp1 for line',line)
             for j in range(len(wave)):
-                x_wave = wave[j][ww[i][j]][ff[i][j]]
-                y_flux = flux[j][ww[i][j]][ff[i][j]]
+                x_wave = wave[j][wave_region[i][j]][ff[i][j]]
+                y_flux = flux[j][wave_region[i][j]][ff[i][j]]
                 pars = Parameters()
                 gauss1 = Model(gaussian, prefix='g1_')
                 gauss2 = Model(gaussian, prefix='g2_')
@@ -869,8 +787,8 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
                             pars['neb_amp'].set((y_flux.max()-y_flux.min())/1.1, min=0.05)#, max=65)
                         mod = gauss1 + gauss2 + nebem + cont
 
-                #print(len(results[0]), len(y_flux), len(x_wave), len(ferr), len(ww[0]), len(ff[0]))
-                results[i].append(mod.fit(y_flux, pars, x=x_wave, weights=1/ferr[ww]))
+                #print(len(results[0]), len(y_flux), len(x_wave), len(ferr), len(wave_region[0]), len(ff[0]))
+                results[i].append(mod.fit(y_flux, pars, x=x_wave, weights=1/ferr[wave_region]))
                 chisqr[i].append(results[i][j].chisqr)
                 if line in neblines or SB2==True:
                     comps[i].append(results[i][j].eval_components(results[i][j].params, x=x_wave))
@@ -928,32 +846,32 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
             #     fig.subplots_adjust(left=0.07, right=0.98, top=0.97, bottom=0.05, wspace=0.,hspace=0.)
             #     ax1 = fig.add_subplot(nrows,4,1)
             #     for j in range(len(wave)):
-            #         x_wave = wave[j][ww[i][j]][ff[i][j]]
-            #         y_flux = flux[j][ww[i][j]][ff[i][j]]
+            #         x_wave = wave[j][wave_region[i][j]][ff[i][j]]
+            #         y_flux = flux[j][wave_region[i][j]][ff[i][j]]
             #         #j = a*4+b
             #         plt.subplot(nrows, 4, j+1, sharex=ax1, sharey=ax1)
-            #         plt.plot(wave[j][ww[i][j]][ff[i][j]], flux[j][ww[i][j]][ff[i][j]], 'k-', ms=4, label=str(names[j].replace('./','').replace('_',' ')))
-            #         plt.plot(wave[j][ww[i][j]][ff[i][j]], results[i][j].init_fit, '--', c='gray')
-            #         plt.plot(wave[j][ww[i][j]][ff[i][j]], results[i][j].best_fit, 'r-', lw=1.5)
+            #         plt.plot(wave[j][wave_region[i][j]][ff[i][j]], flux[j][wave_region[i][j]][ff[i][j]], 'k-', ms=4, label=str(names[j].replace('./','').replace('_',' ')))
+            #         plt.plot(wave[j][wave_region[i][j]][ff[i][j]], results[i][j].init_fit, '--', c='gray')
+            #         plt.plot(wave[j][wave_region[i][j]][ff[i][j]], results[i][j].best_fit, 'r-', lw=1.5)
             #
             #         if comps[i][j] != 0:
             #             if line in Hlines:
-            #                 plt.plot(wave[j][ww[i][j]][ff[i][j]], comps[i][j]['l1_'], '--', c='limegreen', lw=1)#, label='spectral line')
+            #                 plt.plot(wave[j][wave_region[i][j]][ff[i][j]], comps[i][j]['l1_'], '--', c='limegreen', lw=1)#, label='spectral line')
             #             if SB2==True:
-            #                 plt.plot(wave[j][ww[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['g1_'], '--', c='blue', lw=1)#, label='spectral line')
-            #                 plt.plot(wave[j][ww[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['g2_'], '--', c='blue', lw=1)#, label='spectral line')
+            #                 plt.plot(wave[j][wave_region[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['g1_'], '--', c='blue', lw=1)#, label='spectral line')
+            #                 plt.plot(wave[j][wave_region[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['g2_'], '--', c='blue', lw=1)#, label='spectral line')
             #             if line in neblines:
-            #                 plt.plot(wave[j][ww[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['neb_'], '--', c='orange', lw=1)#, label='nebular emision')
+            #                 plt.plot(wave[j][wave_region[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['neb_'], '--', c='orange', lw=1)#, label='nebular emision')
             #             if line in neblines and SB2==False:
-            #                 plt.plot(wave[j][ww[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['g1_'], '--', c='limegreen', lw=1)#, label='spectral line')
+            #                 plt.plot(wave[j][wave_region[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['g1_'], '--', c='limegreen', lw=1)#, label='spectral line')
             #             if doubem == True:
-            #                 plt.plot(wave[j][ww[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['neb2_'], '--', c='orange', lw=1)#, label='nebular emision')
+            #                 plt.plot(wave[j][wave_region[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['neb2_'], '--', c='orange', lw=1)#, label='nebular emision')
             #
             #         if line in neblines:
             #             plt.hlines( 1 + w[i]*np.std(y_flux), lim_wav[i][0], lim_wav[i][1], color='magenta', linestyles='--',linewidth=1.)
             #
             #         if dely[i] != 0:
-            #             plt.fill_between(wave[j][ww[i][j]][ff[i][j]], results[i][j].best_fit-dely[i][j], results[i][j].best_fit+dely[i][j], color="#ABABAB", alpha=0.5)
+            #             plt.fill_between(wave[j][wave_region[i][j]][ff[i][j]], results[i][j].best_fit-dely[i][j], results[i][j].best_fit+dely[i][j], color="#ABABAB", alpha=0.5)
             #         #if not j in range(0,28,4):
             #         if j < 24:
             #             #plt.axis('off')
@@ -981,23 +899,23 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
             # ax1 = fig.add_subplot(nrows,4,1)
             for ax, j in zip(axes, range(len(wave))):
                 # plt.subplot(nrows+1, 4, j+1, sharex=ax1, sharey=ax1)
-                ax.plot(wave[j][ww[i][j]][ff[i][j]], flux[j][ww[i][j]][ff[i][j]], 'k-', lw=3, ms=4, zorder=1, label=str(names[j].replace('./','').replace('_',' ')))
-                # ax.plot(wave[j][ww[i][j]][ff[i][j]], results[i][j].init_fit, '--', c='gray')
-                ax.plot(wave[j][ww[i][j]][ff[i][j]], results[i][j].best_fit, 'r-', lw=2, zorder=4)
+                ax.plot(wave[j][wave_region[i][j]][ff[i][j]], flux[j][wave_region[i][j]][ff[i][j]], 'k-', lw=3, ms=4, zorder=1, label=str(names[j].replace('./','').replace('_',' ')))
+                # ax.plot(wave[j][wave_region[i][j]][ff[i][j]], results[i][j].init_fit, '--', c='gray')
+                ax.plot(wave[j][wave_region[i][j]][ff[i][j]], results[i][j].best_fit, 'r-', lw=2, zorder=4)
 
                 if comps[i][j] != 0:
                     if line in Hlines:
-                        ax.plot(wave[j][ww[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['l1_'], '--', zorder=3, c='limegreen', lw=2)#, label='spectral line')
+                        ax.plot(wave[j][wave_region[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['l1_'], '--', zorder=3, c='limegreen', lw=2)#, label='spectral line')
                     if SB2==True:
-                        ax.plot(wave[j][ww[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['g1_'], '--', zorder=3,  c='blue', lw=2)#, label='spectral line')
-                        ax.plot(wave[j][ww[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['g2_'], '--', zorder=3,  c='blue', lw=2)#, label='spectral line')
+                        ax.plot(wave[j][wave_region[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['g1_'], '--', zorder=3,  c='blue', lw=2)#, label='spectral line')
+                        ax.plot(wave[j][wave_region[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['g2_'], '--', zorder=3,  c='blue', lw=2)#, label='spectral line')
                     if line in neblines:
-                        ax.plot(wave[j][ww[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['neb_'], '--', zorder=3,  c='orange', lw=2)#, label='nebular emision')
+                        ax.plot(wave[j][wave_region[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['neb_'], '--', zorder=3,  c='orange', lw=2)#, label='nebular emision')
                     if line in neblines and SB2==False:
-                        ax.plot(wave[j][ww[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['g1_'], '--', zorder=3,  c='limegreen', lw=2)#, label='spectral line')
+                        ax.plot(wave[j][wave_region[i][j]][ff[i][j]], comps[i][j]['continuum_']+comps[i][j]['g1_'], '--', zorder=3,  c='limegreen', lw=2)#, label='spectral line')
 
                 if dely[i] != 0:
-                    ax.fill_between(wave[j][ww[i][j]][ff[i][j]], results[i][j].best_fit-dely[i][j], results[i][j].best_fit+dely[i][j], zorder=2, color="#ABABAB", alpha=0.5)
+                    ax.fill_between(wave[j][wave_region[i][j]][ff[i][j]], results[i][j].best_fit-dely[i][j], results[i][j].best_fit+dely[i][j], zorder=2, color="#ABABAB", alpha=0.5)
                 if j < 25:
                     #plt.axis('off')
                     ax.tick_params(axis='both', labelbottom=False)
@@ -1005,7 +923,7 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
                 ax.legend(loc='upper center',fontsize=16, handlelength=0, handletextpad=0.4, borderaxespad=0., frameon=False)
                 # plt.tick_params(which='both', width=0.5, labelsize=11)
                 #ax1.set(ylim=(min(y_flux)-0.2, max(y_flux)+0.2))
-                if max(flux[j][ww[i][j]][ff[i][j]])>1.3 or min(flux[j][ww[i][j]][ff[i][j]])<0.4 or \
+                if max(flux[j][wave_region[i][j]][ff[i][j]])>1.3 or min(flux[j][wave_region[i][j]][ff[i][j]])<0.4 or \
                     max(results[i][j].best_fit-dely[i][j])>1.3 or min(results[i][j].best_fit-dely[i][j])<0.4:
                     if line in Hlines:
                         ax.set(ylim=(0.5, 1.3))
@@ -1013,7 +931,7 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
                         ax.set(ylim=(0.6, 1.2))
                 if comps[i][j] != 0:
                     if line in neblines:
-                        if max(flux[j][ww[i][j]][ff[i][j]])>1.3 or min(flux[j][ww[i][j]][ff[i][j]])<0.4 or \
+                        if max(flux[j][wave_region[i][j]][ff[i][j]])>1.3 or min(flux[j][wave_region[i][j]][ff[i][j]])<0.4 or \
                             max(results[i][j].best_fit-dely[i][j])>1.3 or min(results[i][j].best_fit-dely[i][j])<0.4 \
                             or max(1+comps[i][j]['neb_'])>1.3:
                             if line in Hlines:
@@ -1021,7 +939,7 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
                             elif line not in Hlines:
                                 ax.set(ylim=(0.6, 1.2))
                     # else:
-                    #     if max(flux[j][ww[i][j]][ff[i][j]])>1.3 or min(flux[j][ww[i][j]][ff[i][j]])<0.4 or \
+                    #     if max(flux[j][wave_region[i][j]][ff[i][j]])>1.3 or min(flux[j][wave_region[i][j]][ff[i][j]])<0.4 or \
                     #         max(results[i][j].best_fit-dely[i][j])>1.3 or min(results[i][j].best_fit-dely[i][j])<0.4:
                     #         if line in Hlines:
                     #             ax1.set(ylim=(0.5, 1.3))
@@ -1065,27 +983,27 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
 
     # df_OB = pd.read_csv('spectra/BBC_'+str(star).zfill(3)+'/JDs.dat', sep='\t', usecols=[0], header=None)
 
-    with open(path+'/fit_values.csv', 'w') as f:
-        w = csv.writer(f, delimiter=',')
-        if SB2==True:
-            w.writerow(['Epoch','line','cen1','cen1_er','amp1','amp1_er','wid1','wid1_er', \
-                        'cen2','cen2_er','amp2','amp2_er','wid2','wid2_er', 'chisqr'])
-        else:
-            w.writerow(['Epoch','line','cen1','cen1_er','amp1','amp1_er','wid1','wid1_er','chisqr'])
-        for i,line in enumerate(lines):
-            for j,name in enumerate(names):
-                if SB2==True:
-                    if fixboth == True:
-                        w.writerow([name, line, cen1b[i][j], cen1b_er[i][j], amp1[i][j], \
-                                    amp1_er[i][j], wid1[i][j], wid1_er[i][j], cen2b[i][j], cen2b_er[i][j], \
-                                    amp2[i][j], amp2_er[i][j], wid2[i][j], wid2_er[i][j], chisqr[i][j] ])
-                    else:
-                        w.writerow([name, line, cen1b[i][j], cen1b_er[i][j], amp1[i][j], \
-                                    amp1_er[i][j], wid1b[i][j], wid1b_er[i][j], cen2b[i][j], cen2b_er[i][j], \
-                                    amp2[i][j], amp2_er[i][j], wid2b[i][j], wid2b_er[i][j], chisqr[i][j] ])
-                else:
-                    w.writerow([name, line, cen1[i][j], cen1_er[i][j], amp1[i][j], \
-                                amp1_er[i][j], wid1[i][j], wid1_er[i][j], chisqr[i][j] ])
+    # with open(path+'/fit_values.csv', 'w') as f:
+    #     w = csv.writer(f, delimiter=',')
+    #     if SB2==True:
+    #         w.writerow(['Epoch','line','cen1','cen1_er','amp1','amp1_er','wid1','wid1_er', \
+    #                     'cen2','cen2_er','amp2','amp2_er','wid2','wid2_er', 'chisqr'])
+    #     else:
+    #         w.writerow(['Epoch','line','cen1','cen1_er','amp1','amp1_er','wid1','wid1_er','chisqr'])
+    #     for i,line in enumerate(lines):
+    #         for j,name in enumerate(names):
+    #             if SB2==True:
+    #                 if fixboth == True:
+    #                     w.writerow([name, line, cen1b[i][j], cen1b_er[i][j], amp1[i][j], \
+    #                                 amp1_er[i][j], wid1[i][j], wid1_er[i][j], cen2b[i][j], cen2b_er[i][j], \
+    #                                 amp2[i][j], amp2_er[i][j], wid2[i][j], wid2_er[i][j], chisqr[i][j] ])
+    #                 else:
+    #                     w.writerow([name, line, cen1b[i][j], cen1b_er[i][j], amp1[i][j], \
+    #                                 amp1_er[i][j], wid1b[i][j], wid1b_er[i][j], cen2b[i][j], cen2b_er[i][j], \
+    #                                 amp2[i][j], amp2_er[i][j], wid2b[i][j], wid2b_er[i][j], chisqr[i][j] ])
+    #             else:
+    #                 w.writerow([name, line, cen1[i][j], cen1_er[i][j], amp1[i][j], \
+    #                             amp1_er[i][j], wid1[i][j], wid1_er[i][j], chisqr[i][j] ])
     return path
 
 import copy
@@ -1344,7 +1262,7 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
     '''
     Writing stats to file rv_stats
     '''
-    out = open(path+'rv_stats.dat', 'w')
+    out = open(path+'rv_stats.txt', 'w')
     out.write(' ********************************\n')
     out.write('  Statistical analysis of errors \n')
     out.write(' ********************************\n')
@@ -1766,7 +1684,7 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
     #####################################################################
 
     '''
-    Writing RVs to file RVs.dat
+    Writing RVs to file RVs.txt
     '''
     # JDfile = 'JDs.dat'
     # JDfile = 'JDs+vfts.dat'
@@ -1784,11 +1702,11 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
     df_rv['mean_rv_er'] = wmean_rv1_er
     df_rv['sigma_rv'] = sigma_rv1
     #df_rv.to_csv(path+'RVs.dat', sep='\t', index=False)
-    with open(path+'RVs1.dat', 'w') as fo:
+    with open(path+'RVs1.txt', 'w') as fo:
         #fo.write(df_rv.to_string(formatters={'mean_rv':'{:.25f}'.format}, index=False))
         fo.write(df_rv.to_string(formatters={'HJD': '{:.8f}'.format}, index=False))
     if SB2==True:
-        df_rv2 = pd.read_csv(path+'JDs.dat', names = ['epoch', 'JD'], sep='\t')
+        df_rv2 = pd.read_csv(path+'JDs.txt', names = ['epoch', 'JD'], sep='\t')
         df_rv2 = df_rv2.replace({'BBC_':''}, regex=True).replace({'.fits':''}, regex=True)
         if not len(rm_OBs_idx)==0:
             df_rv2.drop(rm_OBs_idx, inplace=True)
@@ -1800,7 +1718,7 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
         df_rv2['mean_rv_er'] = wmean_rv2_er
         df_rv2['sigma_rv'] = sigma_rv2
         #df_rv.to_csv(path+'RVs.dat', sep='\t', index=False)
-        with open(path+'RVs1.dat', 'a') as fo:
+        with open(path+'RVs1.txt', 'a') as fo:
             #fo.write(df_rv.to_string(formatters={'mean_rv':'{:.25f}'.format}, index=False))
             fo.write('\n')
             fo.write('Secondary:\n')
@@ -2300,7 +2218,7 @@ def phase_rv_curve(df, periods, path, SB2=False, print_output=True, plots=True):
         fine_best_fit = interp_func(fine_phase)        
         # print('chi2 = ', res_sinu.chisqr)
         # print('Per = ', Per)
-        out_sinu = open(path+'LS/'+name+f'_sinu_stats_{Per}.dat', 'w')
+        out_sinu = open(path+'LS/'+name+f'_sinu_stats_{Per}.txt', 'w')
         out_sinu.write(name+'\n')
         out_sinu.write(res_sinu.fit_report()+'\n')
         out_sinu.close()
