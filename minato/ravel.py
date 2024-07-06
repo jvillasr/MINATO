@@ -1,13 +1,19 @@
 import csv
+import sys
+import copy
+import os
+import matplotlib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import StrMethodFormatter
 from lmfit import Model, Parameters, models
-import copy
-import os
 from datetime import date
 from iteration_utilities import duplicates, unique_everseen
-
+from astropy.io import fits
+from astropy.timeseries import LombScargle
+from scipy.signal import find_peaks
+from scipy.interpolate import interp1d
 
 def gaussian(x, amp, cen, wid):
     "1-d gaussian: gaussian(x, amp, cen, wid)"
@@ -31,12 +37,37 @@ def trim_axs(axs, N):
         ax.remove()
     return axs[:N]
 
-def SLfit(spectra_list, path, lines, plots=True, balmer=True, neblines=[4102, 4340], doubem=[], SB2=False, use_init_pars=False):
+def read_fits(fits_file):
+    with fits.open(fits_file) as hdul:
+        # hdul.info()
+        header = hdul[0].header
+        star_epoch = header['OBJECT']+'_'+ header['EPOCH_ID']
+        mjd = header['MJD_MID']
+        wave = hdul[1].data['WAVELENGTH']
+        flux = hdul[1].data['SCI_NORM']
+        ferr = hdul[1].data['SCI_NORM_ERR']
+        return wave, flux, ferr, star_epoch, mjd
 
-    
+def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, neblines=[4102, 4340], doubem=[], SB2=False, shift=0, use_init_pars=False):
+    '''
+    spectra_list
+    path
+    lines:        lines to be fitted
+    file_type
+    plots
+    balmer
+    neblines
+    doubem
+    SB2
+    shift:        wavelength shift to be applied for initial guess used for the fit
+    '''
+
+    if len(spectra_list) == 1:
+        print("\n   WARNING: There is only 1 epoch to compute RVs.")
+        return    
 
     # doubem = doubem[0]
-    Hlines = [4102, 4340]
+    Hlines = [4102, 4340, 6562]
     best_lines, best_lines_index = [], []
 
     # print( '\n********************************************************************************' )
@@ -46,22 +77,45 @@ def SLfit(spectra_list, path, lines, plots=True, balmer=True, neblines=[4102, 43
     print('*** SB2 set to: ', SB2, ' ***\n')
 
     filelist = spectra_list
-
+    # print(filelist)
     
 
-    wavelengths, fluxes, f_errors, names = [], [], [], []
+    wavelengths, fluxes, f_errors, names, jds = [], [], [], [], []
     for j,spec in enumerate(filelist):
-        names.append(spec.replace('.dat',''))
-        df = pd.read_csv(path + spec, sep='\t',header=None)
-        wavelengths.append(np.array(df[0]))
-        fluxes.append(np.array(df[1]))
-        try:
-            f_errors.append(np.array(df[2]))
-        except:
+        # print(j, spec)
+        if file_type in ['dat', 'txt', 'csv']:
+            names.append(spec.replace(f'.{file_type}',''))
+            # print()
+            df = pd.read_csv(path + spec, sep='\t',header=None)
+            # print(df)
+            wavelengths.append(np.array(df[0]))
+            fluxes.append(np.array(df[1]))
+            try:
+                f_errors.append(np.array(df[2]))
+            except:
 
-            f_errors.append(1/(np.array(df[1]))**2)
+                f_errors.append(1/(np.array(df[1]))**2)
+        elif file_type == 'fits':
+            wave, flux, ferr, star, mjd = read_fits(spec)
+            wavelengths.append(wave)
+            fluxes.append(flux)
+            f_errors.append(ferr)
+            names.append(star)
+            jds.append(mjd)
 
-    # print('Names of the files:', names)
+
+    print('Names of the files:', names)
+    star = names[0].split('_')[0]+'_'+names[0].split('_')[1]+'/'
+    print(star)
+    path = path.replace('FITS/', '')+star
+    print(path)
+    if not os.path.exists(path):
+        os.makedirs(path)
+    # sys.exit()
+    df_mjd = pd.DataFrame()
+    df_mjd['epoch'] = names
+    df_mjd['JD'] = jds
+    df_mjd.to_csv(path+'JDs.dat', index=False, header=False, sep='\t')
 
     lines_dic = {
                     3995: { 'region':[3990, 4005], 'wid_ini':2, 'title':'N II $\lambda$3995'},
@@ -70,7 +124,7 @@ def SLfit(spectra_list, path, lines, plots=True, balmer=True, neblines=[4102, 43
                     4102: { 'region':[4085, 4120], 'wid_ini':5, 'title':'H$\delta$'},
                     4121: { 'region':[4118, 4130], 'wid_ini':3, 'title':'He I $\lambda$4121'},
                     4128: { 'region':[4124, 4136], 'wid_ini':2, 'title':'Si II $\lambda$4128'},
-                    4132: { 'region':[4128, 4140], 'wid_ini':2, 'title':'Si II $\lambda$4132'},
+                    4131: { 'region':[4128, 4140], 'wid_ini':2, 'title':'Si II $\lambda$4131'},
                     4144: { 'region':[4135, 4160], 'wid_ini':4, 'title':'He I $\lambda$4144'},
                     4233: { 'region':[4229, 4241], 'wid_ini':2, 'title':'Fe II $\lambda$4233'},
                     4267: { 'region':[4263, 4275], 'wid_ini':2, 'title':'C II $\lambda$4267'},
@@ -78,9 +132,17 @@ def SLfit(spectra_list, path, lines, plots=True, balmer=True, neblines=[4102, 43
                     4388: { 'region':[4380, 4405], 'wid_ini':4, 'title':'He I $\lambda$4388'},
                     4471: { 'region':[4462, 4487], 'wid_ini':4, 'title':'He I $\lambda$4471'},
                     4481: { 'region':[4478, 4490], 'wid_ini':2, 'title':'Mg II $\lambda$4481'},
+                    4542: { 'region':[4537, 4552], 'wid_ini':3, 'title':'He II $\lambda$4542'},
                     4553: { 'region':[4547, 4562], 'wid_ini':3, 'title':'Si III $\lambda$4553'},
                     4861: { 'region':[4840, 4875], 'wid_ini':5, 'title':'H$\beta$'}, 
-                    4922: { 'region':[4915, 4930], 'wid_ini':4, 'title':'He I $\lambda$4922'}, }
+                    4922: { 'region':[4915, 4930], 'wid_ini':4, 'title':'He I $\lambda$4922'}, 
+                    5412: { 'region':[5405, 5419], 'wid_ini':4, 'title':'He II $\lambda$5412'},
+                    5876: { 'region':[5865, 5888], 'wid_ini':4, 'title':'He I $\lambda$5876'},  
+                    5890: { 'region':[5881, 5905], 'wid_ini':3, 'title':'Na I $\lambda$5890'}, 
+                    6562: { 'region':[6542, 6583], 'wid_ini':5, 'title':'H$\alpha$'}, 
+                    6678: { 'region':[6668, 6690], 'wid_ini':4, 'title':'He I $\lambda$6678'}, 
+                    7774: { 'region':[7762, 7786], 'wid_ini':3, 'title':'O I $\lambda$7774'}, }
+    
 
     print('these are the lines: ', lines)
 
@@ -107,13 +169,16 @@ def SLfit(spectra_list, path, lines, plots=True, balmer=True, neblines=[4102, 43
         else:
             out_file = open(path+str(line)+'_stats.dat', 'w')
         if plots == True:
-            ncols = int(np.sqrt(len(wavelengths))) - 1
-            nrows = len(wavelengths)//ncols + 1
+            nplots = len(wavelengths)
+            ncols = int(np.sqrt(nplots)) 
+            nrows = nplots//ncols
+            if ncols*nrows < nplots:
+                nrows = nrows+1
+            # # print('number of panels =', len(wavelengths))
+            # # print('number of cols =', ncols)
+            # # print('number of rows =', nrows)
+            # # elif len(wave)%4 != 0:
 
-            # print('number of panels =', len(wavelengths))
-            # print('number of cols =', ncols)
-            # print('number of rows =', nrows)
-            # elif len(wave)%4 != 0:
             fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(3*ncols,2*nrows), sharey=True, sharex=True)
             fig.subplots_adjust(wspace=0.,hspace=0.)
             axes = axes.flatten()
@@ -145,7 +210,7 @@ def SLfit(spectra_list, path, lines, plots=True, balmer=True, neblines=[4102, 43
             x_ymin = x_wave[y_flux.argmin()]
             # print('x_ymax, x_ymin =', x_ymax, x_ymin)
 
-            cen_ini = line+4
+            cen_ini = line+shift
             wid_ini = lines_dic[line]['wid_ini']
 
             pars = Parameters()
@@ -181,15 +246,23 @@ def SLfit(spectra_list, path, lines, plots=True, balmer=True, neblines=[4102, 43
             if not line in Hlines:
                 if SB2==False:
                     pars.update(gauss1.make_params())
-                    pars.add('g1_amp', value=1-y_flux.min(), min=0.05, max=0.4)
+                    pars.add('g1_amp', value=1-y_flux.min(), min=0.05, max=0.6)
                     pars.add('g1_cen', value=cen_ini, vary=True)
 
                     if line==4553:
                         pars.add('g1_wid', value=wid_ini-1.5, min=0.3, max=2.)
                         pars.add('g1_cen', value=cen_ini, vary=True)
+                        mod = gauss1 + cont
+                    if line==5890:
+                        pars.add('g1_wid', value=wid_ini, min=0.1, max=4.)
+                        pars.update(gauss2.make_params())
+                        pars.add('g2_cen', value=cen_ini+6., vary=True)
+                        pars.add('g2_amp', 0.8*(1-y_flux.min()), min=0.05, max=0.5)
+                        pars.add('g2_wid', value=wid_ini-1.5, min=0.1, max=4.)
+                        mod = gauss1 + gauss2 + cont
                     else:
-                        pars.add('g1_wid', value=wid_ini, min=0.5, max=7.)
-                    mod = gauss1 + cont
+                        pars.add('g1_wid', value=wid_ini, min=0.5, max=10.)
+                        mod = gauss1 + cont
                     if line in neblines:
                         pars.update(nebem.make_params())
                         pars['neb_cen'].set(cen_ini, min=cen_ini-1.5, max=cen_ini+1.5)
@@ -283,14 +356,14 @@ def SLfit(spectra_list, path, lines, plots=True, balmer=True, neblines=[4102, 43
             out_file.write(names[j]+'\n')
             out_file.write(result.fit_report()+'\n')
 
-            if not 'g2_cen' in result.params and not 'l1_cen' in result.params:
+            if not 'g2_cen' in result.params and not 'l1_cen' in result.params or line==5890:
                 cen1[i].append(result.params['g1_cen'].value)
                 cen1_er[i].append(result.params['g1_cen'].stderr)
                 amp1[i].append(result.params['g1_amp'].value)
                 amp1_er[i].append(result.params['g1_amp'].stderr)
                 wid1[i].append(result.params['g1_wid'].value)
                 wid1_er[i].append(result.params['g1_wid'].stderr)
-            if 'g2_cen' in result.params:
+            if 'g2_cen' in result.params and line!=5890:
                 if result.params['g1_amp'].value > result.params['g2_amp'].value:
                     cen1[i].append(result.params['g1_cen'].value)
                     cen1_er[i].append(result.params['g1_cen'].stderr)
@@ -357,9 +430,12 @@ def SLfit(spectra_list, path, lines, plots=True, balmer=True, neblines=[4102, 43
                 # for ax, j in zip(axes, range(len(wave))):
                 #j = a*4+b
                 # plt.subplot(nrows+1, 4, j+1, sharex=ax1, sharey=ax1)
+                xx = np.linspace(min(wave[ww]), max(wave[ww]), 1000)
+                result_new = result.eval(x=xx)
+                init_new = result.eval(params=result.init_params, x=xx)
                 ax.plot(wave[ww], flux[ww], 'k-', lw=3, ms=4, zorder=1, label=str(names[j].replace('./','').replace('_',' ')))
-                ax.plot(wave[ww], result.init_fit, '--', c='grey', zorder=5)
-                ax.plot(wave[ww], result.best_fit, 'r-', lw=2, zorder=4)
+                ax.plot(xx, init_new, '--', c='grey', zorder=5)
+                ax.plot(xx, result_new, 'r-', lw=2, zorder=4)
 
                 if component is not None:
                     if line in Hlines:
@@ -375,11 +451,11 @@ def SLfit(spectra_list, path, lines, plots=True, balmer=True, neblines=[4102, 43
 
                 if dely is not None:
                     ax.fill_between(wave[ww], result.best_fit-dely, result.best_fit+dely, zorder=2, color="#ABABAB", alpha=0.5)
-                if j < 25:
+                # if j < 25:
                     # plt.axis('off')
-                    ax.tick_params(axis='both', labelbottom=False)
+                    # ax.tick_params(axis='both', labelbottom=False)
 
-                ax.legend(loc='upper center',fontsize=16, handlelength=0, handletextpad=0.4, borderaxespad=0., frameon=False)
+                ax.legend(loc='upper center',fontsize=10, handlelength=0, handletextpad=0.4, borderaxespad=0., frameon=False)
                 # plt.tick_params(which='both', width=0.5, labelsize=11)
                 #ax1.set(ylim=(min(y_flux)-0.2, max(y_flux)+0.2))
                 # if max(flux[ww])>1.3 or min(flux[ww])<0.4 or \
@@ -429,14 +505,14 @@ def SLfit(spectra_list, path, lines, plots=True, balmer=True, neblines=[4102, 43
                 
             j += 1
         if plots==True:   
-            ax.set_ylim(0.95*y_flux.min(), 1.05*y_flux.max())
-            fig.supxlabel('Wavelength')
-            fig.supylabel('Flux')
-            plt.tight_layout()
+            ax.set_ylim(0.9*y_flux.min(), 1.1*y_flux.max())
+            fig.supxlabel('Wavelength', size=22)
+            fig.supylabel('Flux', size=22)
+            # plt.tight_layout()
             if SB2==True:
-                plt.savefig(path+str(line)+'_fits_0_.png')
+                plt.savefig(path+str(line)+'_fits_0_.png', bbox_inches='tight', dpi=300)
             else:
-                plt.savefig(path+str(line)+'_fits.png')
+                plt.savefig(path+str(line)+'_fits.png', bbox_inches='tight', dpi=300)
             #plt.show()
             plt.close()
         
@@ -1010,7 +1086,7 @@ def SLfit(spectra_list, path, lines, plots=True, balmer=True, neblines=[4102, 43
                 else:
                     w.writerow([name, line, cen1[i][j], cen1_er[i][j], amp1[i][j], \
                                 amp1_er[i][j], wid1[i][j], wid1_er[i][j], chisqr[i][j] ])
-
+    return path
 
 import copy
 from datetime import date
@@ -1053,6 +1129,10 @@ def weighted_mean(data, errors):
 def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, lines_ok_thrsld=2, epochs_ok_thrsld=2, \
         min_sep=2, print_output=True, random_eps=False, rndm_eps_n=29, rndm_eps_exc=[], plots=True, \
         err_type='wid', neps_table=False, eot_from_table=False, rm_epochs=True):
+    '''
+    
+    '''
+    
     import warnings
     warnings.filterwarnings("ignore", message="Font family ['serif'] not found. Falling back to DejaVu Sans.")
     warnings.filterwarnings("ignore", message="Mean of empty slice")
@@ -1074,7 +1154,7 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
     if print_output==True:
         print('*** SB2 set to: ', SB2, ' ***\n')
     # Reading data from fit_states.csv
-    
+    # print(path+fit_values)
     df_SLfit = pd.read_csv(path+fit_values)
 
     x1, dx1, y1, dy1, z1, dz1, lines, chi2, epoch = \
@@ -1157,15 +1237,20 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
                     lambda_shift2[i].append(x2[j])
                     lambda_shift2_er[i].append(dx2[j])
     nepochs = len(lambda_shift1[0])
-
+    # All wavelengths in air
     rv_dict =  {4009: [4009.2565, 0.00002], 4026: [4026.1914, 0.0010],
                 4102: [4101.734, 0.006],    4121: [4120.8154, 0.0012],
                 4128: [4128.07, 0.10],      4131: [4130.89, 0.10],
                 4144: [4143.761, 0.010],    4267: [4267.258, 0.007], 
-                4340: [4340.472, 0.006],
-                4388: [4387.9296, 0.0006],  4471: [4471.4802, 0.0015],
-                4481: [4481.130, 0.010],    4553: [4552.62, 0.10], 
-                4861: [4861.35, 0.05],    4922: [4921.9313, 0.0005]}
+                4340: [4340.472, 0.006],    4388: [4387.9296, 0.0006],  
+                4471: [4471.4802, 0.0015],  4481: [4481.130, 0.010],    
+                4542: [4541.591, 0.010],    4553: [4552.62, 0.10], 
+                4713: [4713.1457, 0.0006],      
+                4861: [4861.35, 0.05],      4922: [4921.9313, 0.0005],
+                5412: [5411.52, 0,10],      5876: [5875.621, 0.010],
+                5890: [5889.951, 0.00003],  6562: [6562.79, 0.030],
+                6678: [6678.151, 0.010],    7774: [7774.17, 0,10]
+                }
 
     lambda_r, lambda_r_er = [], []
     for line in lines:
@@ -1200,37 +1285,37 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
         print( '-------------------------------')
 
     # errors plots
-    bins=range(0,800,10)
-    if plots==True:
-        if not os.path.exists(path+'errors'):
-            os.makedirs(path+'errors')
-        for i in range(nlines):
-            fig, ax = plt.subplots(figsize=(8, 6))
-            fig.subplots_adjust(left=0.11, right=0.91, top=0.96, bottom=0.11)
-            y, x, _ = plt.hist(wid1_percer[i], bins=bins, histtype='stepfilled', density=False, linewidth=0.5)
-            plt.axvline(np.nanmean(wid1_percer[i]), c='orange', ls='--', label='mean='+str(f'{np.nanmean(wid1_percer[i]):.1f}'))
-            plt.axvline(np.nanmedian(wid1_percer[i]), c='blue', ls='--', label='median='+str(f'{np.nanmedian(wid1_percer[i]):.1f}'))
-            plt.legend()
-            plt.savefig(path+'errors/wid_histo_'+str(lines[i])+'.pdf')
-            plt.close()
-        for i in range(nlines):
-            fig, ax = plt.subplots(figsize=(8, 6))
-            fig.subplots_adjust(left=0.11, right=0.91, top=0.96, bottom=0.11)
-            y, x, _ = plt.hist(amp1_percer[i], bins=bins, histtype='stepfilled', density=False, linewidth=0.5)
-            plt.axvline(np.nanmean(amp1_percer[i]), c='orange', ls='--', label='mean='+str(f'{np.nanmean(amp1_percer[i]):.1f}'))
-            plt.axvline(np.nanmedian(amp1_percer[i]), c='blue', ls='--', label='median='+str(f'{np.nanmedian(amp1_percer[i]):.1f}'))
-            plt.legend()
-            plt.savefig(path+'errors/amp_histo_'+str(lines[i])+'.pdf')
-            plt.close()
-        for i in range(nlines):
-            fig, ax = plt.subplots(figsize=(8, 6))
-            fig.subplots_adjust(left=0.11, right=0.91, top=0.96, bottom=0.11)
-            y, x, _ = plt.hist(cen1_percer[i], bins=bins, histtype='stepfilled', density=False, linewidth=0.5)
-            plt.axvline(np.nanmean(cen1_percer[i]), c='orange', ls='--', label='mean='+str(f'{np.nanmean(cen1_percer[i]):.1f}'))
-            plt.axvline(np.nanmedian(cen1_percer[i]), c='blue', ls='--', label='median='+str(f'{np.nanmedian(cen1_percer[i]):.1f}'))
-            plt.legend()
-            plt.savefig(path+'errors/cen_histo_'+str(lines[i])+'.pdf')
-            plt.close()
+    # bins=range(0,800,10)
+    # if plots==True:
+    #     if not os.path.exists(path+'errors'):
+    #         os.makedirs(path+'errors')
+    #     for i in range(nlines):
+    #         fig, ax = plt.subplots(figsize=(8, 6))
+    #         fig.subplots_adjust(left=0.11, right=0.91, top=0.96, bottom=0.11)
+    #         y, x, _ = plt.hist(wid1_percer[i], bins=bins, histtype='stepfilled', density=False, linewidth=0.5)
+    #         plt.axvline(np.nanmean(wid1_percer[i]), c='orange', ls='--', label='mean='+str(f'{np.nanmean(wid1_percer[i]):.1f}'))
+    #         plt.axvline(np.nanmedian(wid1_percer[i]), c='blue', ls='--', label='median='+str(f'{np.nanmedian(wid1_percer[i]):.1f}'))
+    #         plt.legend()
+    #         plt.savefig(path+'errors/wid_histo_'+str(lines[i])+'.pdf')
+    #         plt.close()
+    #     for i in range(nlines):
+    #         fig, ax = plt.subplots(figsize=(8, 6))
+    #         fig.subplots_adjust(left=0.11, right=0.91, top=0.96, bottom=0.11)
+    #         y, x, _ = plt.hist(amp1_percer[i], bins=bins, histtype='stepfilled', density=False, linewidth=0.5)
+    #         plt.axvline(np.nanmean(amp1_percer[i]), c='orange', ls='--', label='mean='+str(f'{np.nanmean(amp1_percer[i]):.1f}'))
+    #         plt.axvline(np.nanmedian(amp1_percer[i]), c='blue', ls='--', label='median='+str(f'{np.nanmedian(amp1_percer[i]):.1f}'))
+    #         plt.legend()
+    #         plt.savefig(path+'errors/amp_histo_'+str(lines[i])+'.pdf')
+    #         plt.close()
+    #     for i in range(nlines):
+    #         fig, ax = plt.subplots(figsize=(8, 6))
+    #         fig.subplots_adjust(left=0.11, right=0.91, top=0.96, bottom=0.11)
+    #         y, x, _ = plt.hist(cen1_percer[i], bins=bins, histtype='stepfilled', density=False, linewidth=0.5)
+    #         plt.axvline(np.nanmean(cen1_percer[i]), c='orange', ls='--', label='mean='+str(f'{np.nanmean(cen1_percer[i]):.1f}'))
+    #         plt.axvline(np.nanmedian(cen1_percer[i]), c='blue', ls='--', label='median='+str(f'{np.nanmedian(cen1_percer[i]):.1f}'))
+    #         plt.legend()
+    #         plt.savefig(path+'errors/cen_histo_'+str(lines[i])+'.pdf')
+    #         plt.close()
 
     # print table with means and medians
     if print_output==True:
@@ -1523,7 +1608,7 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
                 if print_output==True:
                     print('   Applying outlier_killer to remove epochs')
                 err_type_dic={'wid':mean_wid1_er, 'rvs':mean_rvs1_er, 'cen':mean_cen1_er, 'amp':mean_amp1_er}
-                err_type = 'rvs'
+                err_type = 'wid'
                 for key, val in err_type_dic.items():
                     if val == err_type_dic[err_type]:
                         err_type_key=str(key)
@@ -1584,7 +1669,7 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
         print( '\n')
         print( '*** Calculating the RV weighted mean for each epoch  ***')
         print( '--------------------------------------------------------')
-    print(len(rvs1[0]))
+    # print(len(rvs1[0]))
     rv_list1 = list(map(list, zip(*rvs1))) # nlinesxnepochs (6x26) -> nepochsxnlines (26x6)
     rv_list1_er = list(map(list, zip(*rvs1_er)))
     if SB2==True:
@@ -1598,7 +1683,7 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
             if SB2==True:
                 del rv_list2[j]
                 del rv_list2_er[j]
-    print(rv_list1)
+    # print(rv_list1)
     # print(rv_list2)
     # print(rv_list2_er)
     sigma_rv1, sigma_rv2 = [], []
@@ -1686,8 +1771,8 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
     # JDfile = 'JDs.dat'
     # JDfile = 'JDs+vfts.dat'
     # df_rv = pd.read_csv(path+'JDs.dat', names = ['BBC_epoch', 'HJD'], sep='\t')
-    df_rv = pd.read_csv(JDfile, names = ['BBC_epoch', 'HJD'], sep='\s+')
-    print(df_rv)
+    df_rv = pd.read_csv(JDfile, names = ['epoch', 'JD'], sep='\s+')
+    # print(df_rv)
     df_rv = df_rv.replace({'BBC_':''}, regex=True).replace({'.fits':''}, regex=True)
     if not len(rm_OBs_idx)==0:
         df_rv.drop(rm_OBs_idx, inplace=True)
@@ -1703,7 +1788,7 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
         #fo.write(df_rv.to_string(formatters={'mean_rv':'{:.25f}'.format}, index=False))
         fo.write(df_rv.to_string(formatters={'HJD': '{:.8f}'.format}, index=False))
     if SB2==True:
-        df_rv2 = pd.read_csv(path+'JDs.dat', names = ['BBC_epoch', 'HJD'], sep='\t')
+        df_rv2 = pd.read_csv(path+'JDs.dat', names = ['epoch', 'JD'], sep='\t')
         df_rv2 = df_rv2.replace({'BBC_':''}, regex=True).replace({'.fits':''}, regex=True)
         if not len(rm_OBs_idx)==0:
             df_rv2.drop(rm_OBs_idx, inplace=True)
@@ -1720,21 +1805,34 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
             fo.write('\n')
             fo.write('Secondary:\n')
             fo.write(df_rv2.to_string(formatters={'HJD': '{:.8f}'.format}, index=False))
+    # print(f'SB2: {SB2}')
+    if SB2==True:
+        return df_rv2
+    else:
+        return df_rv
 
-def lomb_scargle(hjd, rv, rv_err, path, starname, probabilities = [0.5, 0.01, 0.001], SB2=False, rv2=False, rv2_err=False, print_output=False, plots=False, best_lines=False, min_sep=False):
+def lomb_scargle(df, path, probabilities = [0.5, 0.01, 0.001], SB2=False, rv2=False, rv2_err=False, print_output=False, plots=False, best_lines=False, min_sep=False):
+    '''
+    df: dataframe with the RVs, output from getrvs()
+    '''
     if not os.path.exists(path+'LS'):
         os.makedirs(path+'LS')
-    starname=str(starname)
+
+    hjd, rv, rv_err = df['JD'], df['mean_rv'], df['mean_rv_er']
+    starname = df['epoch'][0].split('_')[0]+'_'+df['epoch'][0].split('_')[1]
+    print('starname:', starname)
+    nepochs=len(hjd)
+
     lsout = open(path+'LS/ls_output.txt', 'w')
     lsout.write(' *************************\n')
-    lsout.write('   LS output for BBC '+starname+'\n')
+    lsout.write('   LS output for star '+starname+'\n')
     lsout.write(' *************************\n')
     lsout.write('\n')
-    nepochs=len(hjd)
+
     # probabilities = [0.5, 0.01, 0.001]
     # print(rv)
     #ls = LombScargle(df_rv['HJD'], df_rv['mean_rv'], df_rv['sigma_rv'])
-    print(type(rv_err), rv_err)
+    # print(type(rv_err), rv_err)
     if rv_err.any() == False:
         ls1 = LombScargle(hjd, rv, normalization='model')
     else:
@@ -1766,15 +1864,20 @@ def lomb_scargle(hjd, rv, rv_err, path, starname, probabilities = [0.5, 0.01, 0.
 
     max_freq1 = frequency1[np.argmax(power1)]
     # print('max_freq1 =', max_freq1)
-    if power1.max() > fal1[2]:
-        peaks_min_h = float(f'{fal1[1]:.3f}')
-    elif power1.max() <= fal1[2] and power1.max() > fal1[1]:
-        peaks_min_h = float(f'{0.8*fal1[1]:.3f}')
+
+    fal_50pc, fal_1pc, fal_01pc = fal1[0], fal1[1], fal1[2] 
+    if power1.max() > fal_01pc:
+        peaks_min_h = float(f'{fal_1pc:.3f}')
+    elif power1.max() <= fal_01pc and power1.max() > fal_1pc:
+        peaks_min_h = float(f'{0.6*fal_1pc:.3f}')
     else:
-        peaks_min_h = float(f'{0.6*fal1[1]:.3f}')
+        peaks_min_h = float(f'{fal_50pc:.3f}')
     # print(peaks_min_h)
-    peaks1a, _ = find_peaks(power1[:3000000], height=peaks_min_h, distance=50000)
-    peaks1b, _ = find_peaks(power1, height=peaks_min_h, distance=3000000)
+    
+    freq_index1 = np.argmin(np.abs(frequency1 - 1/5))
+    freq_index2 = np.argmin(np.abs(frequency1 - 1/1.1))
+    peaks1a, _ = find_peaks(power1[:freq_index1], height=peaks_min_h, distance=1000)
+    peaks1b, _ = find_peaks(power1[:freq_index2], height=peaks_min_h, distance=5000)
     # print(peaks1a)
     # print(peaks1b)
     peaks1 = np.unique(np.concatenate((peaks1a, peaks1b)))
@@ -2052,7 +2155,7 @@ def lomb_scargle(hjd, rv, rv_err, path, starname, probabilities = [0.5, 0.01, 0.
                     ax.get_yaxis().set_major_formatter(StrMethodFormatter('{x:.0f}'))
                 else:
                     ax.get_yaxis().set_major_formatter(StrMethodFormatter('{x:.1f}'))
-                plt.title('VFTS '+starname+' Periodogram $-$ Best Period: {0:.4f}'.format(best_period)+' d')
+                plt.title(starname+' Periodogram $-$ Best Period: {0:.4f}'.format(best_period)+' d')
                 if best_lines and min_sep:
                     if SB2==True:
                         labels = ['lines ='+str(best_lines), 'min sep ='+str(min_sep)]
@@ -2138,10 +2241,238 @@ def lomb_scargle(hjd, rv, rv_err, path, starname, probabilities = [0.5, 0.01, 0.
         ax.get_yaxis().set_major_formatter(StrMethodFormatter('{x:,.0f}'))
         plt.savefig(path+'LS/LS-fap-BBC_'+starname+'_frequencies.pdf')
         plt.close()
+
+        # Stack the arrays in columns
+        pow_spec = np.column_stack((frequency1, power1))
+        # Save the data to a text file
+        np.savetxt(path+'LS/power_spectrum.txt', pow_spec)
+
     if SB2==True:
         return [best_period1, best_period2, best_period3], [frequency1, frequency2, frequency3], [power1, power2, power3], [LS_power1, LS_power2, LS_power3], [fal1, fal2, fal3], [peaks1, peaks2, peaks3], sorted(peri1), peri2, indi, [fapper1, maxpower_maxfal, maxpower_maxfal2]
     else:
-        return [best_period1], [frequency1], [power1], [LS_power1], [fal1], [peaks1], sorted(peri1), indi, [fapper1, maxpower_maxfal, maxpower_maxfal2]
+        return [best_period1], [frequency1], [power1], [LS_power1], [fal1], [peaks1], sorted(peri1), ind, [fapper1, maxpower_maxfal, maxpower_maxfal2]
+
+def phase_rv_curve(df, periods, path, SB2=False, print_output=True, plots=True):
+
+    '''
+    Compute phases of the obsevations and models
+    '''
+    if print_output==True:
+        print( '\n*** Computing phases ***')
+        print( '------------------------')
+
+    hjd, rv, rv_err = df['JD'], df['mean_rv'], df['mean_rv_er']
+    name = df['epoch'][0].split('_')[0]+'_'+df['epoch'][0].split('_')[1]
+    # print('starname:', starname)
+
+    for Per in periods:
+        phase = [ x/Per % 1 for x in hjd]
+        ini = min(phase)
+        fin = max(phase)
+
+        df['phase'] = phase
+        df_phase1 = df.sort_values('phase', ascending=True).reset_index(drop=True)
+        df_phase2 = df_phase1.copy(deep=True)
+        for i in range(len(df_phase2)):
+            df_phase2.loc[i, 'phase']=df_phase1['phase'][i]+1
+        df_phase = pd.concat([df_phase1, df_phase2], ignore_index=True)
+        # Create a finer grid of phase values
+        fine_phase = np.linspace(df_phase['phase'].min(), df_phase['phase'].max(), 1000)
+
+        # Fitting a sinusoidal curve
+        sinumodel = Model(sinu)
+
+        phase_shift= [df_phase['phase'].iloc[i] for i,x in enumerate(df_phase['mean_rv']) if df_phase['mean_rv'].iloc[i]==max(df_phase['mean_rv'])][0]
+        pars = Parameters()
+        pars.add('A', value=(df_phase['mean_rv'].max()-df_phase['mean_rv'].min())/2 )
+        pars.add('w', value=2*np.pi)
+        pars.add('phi', value=(1-phase_shift+0.25)*2*np.pi)
+        pars.add('h', value=(df_phase['mean_rv'].max()-df_phase['mean_rv'].min())/2 +df_phase['mean_rv'].min())
+
+        res_sinu = sinumodel.fit(df_phase['mean_rv'], pars, x=df_phase['phase'], weights=1/df_phase['mean_rv_er'])
+        # Calculate the 3-sigma uncertainty
+        dely = 3 * res_sinu.params['A'].stderr
+        # dely0 = res_sinu.eval_uncertainty(sigma=3)
+        best_pars=res_sinu.best_values
+        init_pars=res_sinu.init_values
+        # Interpolate the best_fit values over the finer grid
+        interp_func = interp1d(df_phase['phase'], res_sinu.best_fit, kind='cubic')
+        fine_best_fit = interp_func(fine_phase)        
+        # print('chi2 = ', res_sinu.chisqr)
+        # print('Per = ', Per)
+        out_sinu = open(path+'LS/'+name+f'_sinu_stats_{Per}.dat', 'w')
+        out_sinu.write(name+'\n')
+        out_sinu.write(res_sinu.fit_report()+'\n')
+        out_sinu.close()
+
+        sinu_chi2 = res_sinu.chisqr
+        dely_dif = 2*dely
+        mean_dely = np.mean(dely_dif)
+        syst_RV = best_pars['h']
+        syst_RV_er = res_sinu.params['h'].stderr
+        # delta_RV = 2*best_pars['A']
+        # delta_RV_er = 2*res_sinu.params['A'].stderr
+
+        xx = np.linspace(df_phase['phase'].iloc[0], df_phase['phase'].iloc[-1], num=100, endpoint=True)
+        #spl3 = UnivariateSpline(df_phase['phase'], df_phase['mean_rv'], df_phase['sigma_rv'], s=5e20)
+        #diff = spl3(df_phase['phase']) - df_phase['mean_rv']
+        # if SB2==True:
+        #     for period2 in peri2:
+        #         if (Per>1.1 and Per<80 and np.abs(Per-period2)<0.5) or (Per>=80 and np.abs(Per-period2)<2):
+        #         # if f'{Per:.2f}'==f'{best_period2:.2f}':
+        #             # print(Per, ' - ', period2, ' = ', np.abs(Per-period2))
+        #             # phase = [ x/best_period2 % 1 for x in df_rv['HJD']]
+        #             # ini = min(phase)
+        #             # fin = max(phase)
+        #             df_rv2['phase'] = phase
+        #             df2_phase1 = df_rv2.sort_values('phase', ascending=True).reset_index(drop=True)
+        #             df2_phase2 = df2_phase1.copy(deep=True)
+
+        #             for i in range(len(df2_phase2)):
+        #                 df2_phase2.loc[i, 'phase']=df2_phase1['phase'][i]+1
+        #             df2_phase = pd.concat([df2_phase1, df2_phase2], ignore_index=True)
+        #             phase_shift2= [df2_phase['phase'].iloc[i] for i,x in enumerate(df2_phase['mean_rv']) if df2_phase['mean_rv'].iloc[i]==max(df2_phase['mean_rv'])][0]
+        #             pars = Parameters()
+        #             pars.add('A', value=(df2_phase['mean_rv'].max()-df2_phase['mean_rv'].min())/2 )
+        #             pars.add('w', value=2*np.pi)
+        #             pars.add('phi', value=(1-phase_shift2+0.25)*2*np.pi)
+        #             pars.add('h', value=(df2_phase['mean_rv'].max()-df2_phase['mean_rv'].min())/2 +df2_phase['mean_rv'].min())
+
+        #             res_sinu2 = sinumodel.fit(df2_phase['mean_rv'], pars, x=df2_phase['phase'], weights=1/df2_phase['mean_rv_er'])
+        #             #res_sinu = sinumodel.fit(df_phase['mean_rv'], x=df_phase['phase'], A=100, w=5, phi=0.2, h=250)
+        #             dely2 = res_sinu2.eval_uncertainty(sigma=3)
+        #             best_pars2=res_sinu2.best_values
+        #             init_pars2=res_sinu2.init_values
+        #             xx2 = np.linspace(df2_phase['phase'].iloc[0], df2_phase['phase'].iloc[-1], num=100, endpoint=True)
+        #             if Per == LS_P[0]:
+        #                 out_sinu2 = open(path+'LS/'+name_+'_sinu_stats2.dat', 'w')
+        #                 out_sinu2.write(name+'\n')
+        #                 out_sinu2.write(res_sinu2.fit_report()+'\n')
+        #                 out_sinu2.close()
+
+        '''
+        Plot the phased data, model and residuals
+        '''
+        if plots==True:
+            #print('ploting fit to phased data')
+            fig, ax = plt.subplots(nrows=2, ncols=1, figsize=(8, 6), sharex=True, gridspec_kw = {'height_ratios':[3, 1]})
+            fig.subplots_adjust(left=0.12, right=0.97, top=0.93, bottom=0.11, hspace=0.)
+
+            #ax[0].plot(xx, spl3(xx), 'g-',lw=6, label='Spline weighted', alpha=0.5)
+            ax[0].errorbar(df_phase['phase'], df_phase['mean_rv'], df_phase['mean_rv_er'], fmt='.k',ms=12, ecolor='gray', label='data')
+            # ax[0].plot(df_phase['phase'], res_sinu.init_fit, '--', c='gray', label='init')
+            #ax[0].plot(df_phase['phase'], res_sinu.best_fit, 'r-', lw=2, label='best-fit')
+            # ax[0].plot(xx, sinu(xx, init_pars['A'], init_pars['w'], init_pars['phi'], init_pars['h']), '--', c='gray', label='init')
+            ax[0].plot(xx, sinu(xx, best_pars['A'], best_pars['w'], best_pars['phi'], best_pars['h']), '-', c='darkorange', lw=2, label='best-fit')
+            # ax[0].fill_between(df_phase['phase'], res_sinu.best_fit-dely, res_sinu.best_fit+dely, color='gray', alpha=0.3, label='$3\sigma$ uncert.')#color="#ABABAB"
+            ax[0].fill_between(fine_phase, fine_best_fit-dely, fine_best_fit+dely, color='darkorange', alpha=0.2, label='$3\sigma$ uncert.')
+            #res_sinu.plot_fit(ax=ax[0], datafmt='ko', fitfmt='r-', initfmt='--', show_init=True)
+            res_sinu.plot_residuals(ax=ax[1], datafmt='ko')
+            #plt.plot(phase,diff,'ok', alpha=0.5)
+            # if SB2==True:
+            #     delta_per = []
+            #     for period2 in peri2:
+            #         delta_per.append(np.abs(Per-period2))
+            #     for k, dif in enumerate(delta_per):
+            #         if dif == min(delta_per) and peri2[k]>1.1 and Per>1.1:
+            #             print(f'{Per:.2f}', '=', f'{peri2[k]:.2f}')
+            #             ax[0].errorbar(df2_phase['phase'], df2_phase['mean_rv'], df2_phase['mean_rv_er'], fmt='.g',ms=12, ecolor='green', label='data2')
+            #             ax[0].plot(xx2, sinu(xx2, best_pars2['A'], best_pars2['w'], best_pars2['phi'], best_pars2['h']), 'b-', lw=2, label='best-fit2')
+            #             ax[0].fill_between(df2_phase['phase'], res_sinu2.best_fit-dely2, res_sinu2.best_fit+dely2, color='green', alpha=0.3, label='$3\sigma$ uncert.')#color="#ABABAB"
+            #             res_sinu2.plot_residuals(ax=ax[1], datafmt='go')
+
+            ax[0].set_title('P = '+str(f'{Per:.4f}')+'(d)')
+            ax[0].set(ylabel='Radial Velocity (km s$^{-1}$)')
+
+            ax[1].set(xlabel='Phase')
+            ax[1].set(ylabel='Residuals')
+            ax[0].legend(loc='best',markerscale=1., frameon=False)
+            plt.savefig(path+'LS/'+name+'_velcurve_P'+str(f'{Per:.4f}')+'.pdf')
+            plt.close()
+
+            # if Per == LS_P[0]:
+            # Plot for paper
+            fig, ax = plt.subplots(figsize=(8, 6))
+            fig.subplots_adjust(left=0.12, right=0.97, top=0.93, bottom=0.11)
+            ax.errorbar(df_phase['phase'], df_phase['mean_rv'], df_phase['mean_rv_er'], fmt='ok', ms=6, ecolor='black', label='data')
+            ax.plot(xx, sinu(xx, best_pars['A'], best_pars['w'], best_pars['phi'], best_pars['h']), 'r-', lw=2, label='best-fit')
+            # ax.plot(df_phase['phase'], res_sinu.init_fit, '--', c='gray', label='init')
+            plt.axhline(syst_RV, color='gray', linestyle=':',linewidth=1.5, label='systemic RV = {0:.2f}'.format(syst_RV))
+            # if SB2==True:
+            #     delta_per = []
+            #     for period2 in peri2:
+            #         delta_per.append(np.abs(Per-period2))
+            #     for k, dif in enumerate(delta_per):
+            #         if dif == min(delta_per):
+            #         # if Per == peri2[k]:
+            #             print(dif, min(delta_per))
+            #             print(f'{Per:.2f}', '=', f'{peri2[k]:.2f}')
+            #             ax.errorbar(df2_phase['phase'], df2_phase['mean_rv'], df2_phase['mean_rv_er'], fmt='sg', ms=6, ecolor='green', label='data2') # mfc='none',
+            #             ax.plot(xx2, sinu(xx2, best_pars2['A'], best_pars2['w'], best_pars2['phi'], best_pars2['h']), 'b--', lw=2, label='best-fit2')
+            # ax.set_title('P = '+str(f'{Per:.4f}')+'(d)',fontsize=22)
+            ax.set_title(name)
+
+            x1, x2 = ax.get_xlim()
+            y1, y2 = ax.get_ylim()
+            x_min = x1-(x2-x1)*0.05
+            x_max = x2+(x2-x1)*0.05
+            y_min = y1-(y2-y1)*0.1
+            y_max = y2+(y2-y1)*0.1
+
+            ax.set(xlim=(x_min, x_max), ylim=(y_min, y_max),
+                    ylabel='Radial Velocity (km s$^{-1}$)',
+                    xlabel='Orbital Phase')
+            # ax[0].yaxis.label.set_size(22)
+            # ax.legend(loc='best',numpoints=1,markerscale=1.,fontsize=12, handletextpad=0.5,borderaxespad=0.3, borderpad=0.8, frameon=False)
+            if SB2==True:
+                plt.savefig(path+'LS/'+name+'_paper_RV_curve_SB2.pdf')
+            else:
+                plt.savefig(path+'LS/'+name+'_paper_RV_curve_SB1.pdf')
+            plt.close()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
         # # sys.exit()
         # '''
@@ -2281,182 +2612,7 @@ def lomb_scargle(hjd, rv, rv_err, path, starname, probabilities = [0.5, 0.01, 0.
         # #     print('# P_err + plot time: ', t8-t7)
         # #####################################################################
 
-        # '''
-        # Compute phases of the obsevations and models
-        # '''
-        # if print_output==True:
-        #     print( '\n*** Computing phases ***')
-        #     print( '------------------------')
-        # name = filelist[0].replace(path+'data/','').replace('.dat','').replace('_OB01','').replace('_',' ')
-        # name_ = filelist[0].replace(path+'data/','').replace('.dat','').replace('_OB01','')
-        # # def rv_curve(hjd, rv1, allP, ):
-        # for Per in allP:
-        #     #phase = [ x/best_period % 1 for x in df_rv['HJD']]
-        #     if Per == LS_P[0]:
-        #         phase = [ x/LS_P[0] % 1 for x in df_rv['HJD']]
-        #     else:
-        #         phase = [ x/Per % 1 for x in df_rv['HJD']]
-        #     ini = min(phase)
-        #     fin = max(phase)
-
-        #     df_rv['phase'] = phase
-        #     df_phase1 = df_rv.sort_values('phase', ascending=True).reset_index(drop=True)
-        #     df_phase2 = df_phase1.copy(deep=True)
-        #     # print(df_phase1['phase'][0], df_phase2['phase'][0])
-        #     for i in range(len(df_phase2)):
-        #         df_phase2.loc[i, 'phase']=df_phase1['phase'][i]+1
-        #     #print(df_phase1['phase'], df_phase2['phase'])
-        #     df_phase = pd.concat([df_phase1, df_phase2], ignore_index=True)
-        #     # print( df_phase)
-
-        #     sinumodel = Model(sinu)
-
-        #     phase_shift= [df_phase['phase'].iloc[i] for i,x in enumerate(df_phase['mean_rv']) if df_phase['mean_rv'].iloc[i]==max(df_phase['mean_rv'])][0]
-        #     pars = Parameters()
-        #     pars.add('A', value=(df_phase['mean_rv'].max()-df_phase['mean_rv'].min())/2 )
-        #     pars.add('w', value=2*np.pi)
-        #     # pars.add('w', value=1)
-        #     pars.add('phi', value=(1-phase_shift+0.25)*2*np.pi)
-        #     pars.add('h', value=(df_phase['mean_rv'].max()-df_phase['mean_rv'].min())/2 +df_phase['mean_rv'].min())
-
-        #     res_sinu = sinumodel.fit(df_phase['mean_rv'], pars, x=df_phase['phase'], weights=1/df_phase['mean_rv_er'])
-        #     #res_sinu = sinumodel.fit(df_phase['mean_rv'], x=df_phase['phase'], A=100, w=5, phi=0.2, h=250)
-        #     dely = res_sinu.eval_uncertainty(sigma=3)
-        #     best_pars=res_sinu.best_values
-        #     init_pars=res_sinu.init_values
-        #     # print('chi2 = ', res_sinu.chisqr)
-        #     # print('Per = ', Per)
-        #     if Per == LS_P[0]:
-        #         # print(Per)
-        #         out_sinu = open(path+'LS/'+name_+'_sinu_stats.dat', 'w')
-        #         out_sinu.write(name+'\n')
-        #         out_sinu.write(res_sinu.fit_report()+'\n')
-        #         out_sinu.close()
-
-        #         sinu_chi2 = res_sinu.chisqr
-        #         # print(sinu_chi2)
-        #         dely_dif = 2*dely
-        #         mean_dely = np.mean(dely_dif)
-        #         syst_RV = best_pars['h']
-        #         syst_RV_er = res_sinu.params['h'].stderr
-        #         # delta_RV = 2*best_pars['A']
-        #         # delta_RV_er = 2*res_sinu.params['A'].stderr
-
-        #     xx = np.linspace(df_phase['phase'].iloc[0], df_phase['phase'].iloc[-1], num=100, endpoint=True)
-        #     #spl3 = UnivariateSpline(df_phase['phase'], df_phase['mean_rv'], df_phase['sigma_rv'], s=5e20)
-        #     #diff = spl3(df_phase['phase']) - df_phase['mean_rv']
-        #     if SB2==True:
-        #         for period2 in peri2:
-        #             if (Per>1.1 and Per<80 and np.abs(Per-period2)<0.5) or (Per>=80 and np.abs(Per-period2)<2):
-        #             # if f'{Per:.2f}'==f'{best_period2:.2f}':
-        #                 # print(Per, ' - ', period2, ' = ', np.abs(Per-period2))
-        #                 # phase = [ x/best_period2 % 1 for x in df_rv['HJD']]
-        #                 # ini = min(phase)
-        #                 # fin = max(phase)
-        #                 df_rv2['phase'] = phase
-        #                 df2_phase1 = df_rv2.sort_values('phase', ascending=True).reset_index(drop=True)
-        #                 df2_phase2 = df2_phase1.copy(deep=True)
-
-        #                 for i in range(len(df2_phase2)):
-        #                     df2_phase2.loc[i, 'phase']=df2_phase1['phase'][i]+1
-        #                 df2_phase = pd.concat([df2_phase1, df2_phase2], ignore_index=True)
-        #                 phase_shift2= [df2_phase['phase'].iloc[i] for i,x in enumerate(df2_phase['mean_rv']) if df2_phase['mean_rv'].iloc[i]==max(df2_phase['mean_rv'])][0]
-        #                 pars = Parameters()
-        #                 pars.add('A', value=(df2_phase['mean_rv'].max()-df2_phase['mean_rv'].min())/2 )
-        #                 pars.add('w', value=2*np.pi)
-        #                 pars.add('phi', value=(1-phase_shift2+0.25)*2*np.pi)
-        #                 pars.add('h', value=(df2_phase['mean_rv'].max()-df2_phase['mean_rv'].min())/2 +df2_phase['mean_rv'].min())
-
-        #                 res_sinu2 = sinumodel.fit(df2_phase['mean_rv'], pars, x=df2_phase['phase'], weights=1/df2_phase['mean_rv_er'])
-        #                 #res_sinu = sinumodel.fit(df_phase['mean_rv'], x=df_phase['phase'], A=100, w=5, phi=0.2, h=250)
-        #                 dely2 = res_sinu2.eval_uncertainty(sigma=3)
-        #                 best_pars2=res_sinu2.best_values
-        #                 init_pars2=res_sinu2.init_values
-        #                 xx2 = np.linspace(df2_phase['phase'].iloc[0], df2_phase['phase'].iloc[-1], num=100, endpoint=True)
-        #                 if Per == LS_P[0]:
-        #                     out_sinu2 = open(path+'LS/'+name_+'_sinu_stats2.dat', 'w')
-        #                     out_sinu2.write(name+'\n')
-        #                     out_sinu2.write(res_sinu2.fit_report()+'\n')
-        #                     out_sinu2.close()
-
-        #     '''
-        #     Plot the phased data, model and residuals
-        #     '''
-        #     if plots==True:
-        #         #print('ploting fit to phased data')
-        #         fig, ax = plt.subplots(nrows=2, ncols=1, figsize=(8, 6), sharex=True, gridspec_kw = {'height_ratios':[3, 1]})
-        #         fig.subplots_adjust(left=0.12, right=0.97, top=0.93, bottom=0.11, hspace=0.)
-
-        #         #ax[0].plot(xx, spl3(xx), 'g-',lw=6, label='Spline weighted', alpha=0.5)
-        #         ax[0].errorbar(df_phase['phase'], df_phase['mean_rv'], df_phase['mean_rv_er'], fmt='.k',ms=12, ecolor='gray', label='data')
-        #         # ax[0].plot(df_phase['phase'], res_sinu.init_fit, '--', c='gray', label='init')
-        #         #ax[0].plot(df_phase['phase'], res_sinu.best_fit, 'r-', lw=2, label='best-fit')
-        #         # ax[0].plot(xx, sinu(xx, init_pars['A'], init_pars['w'], init_pars['phi'], init_pars['h']), '--', c='gray', label='init')
-        #         ax[0].plot(xx, sinu(xx, best_pars['A'], best_pars['w'], best_pars['phi'], best_pars['h']), 'r-', lw=2, label='best-fit')
-        #         ax[0].fill_between(df_phase['phase'], res_sinu.best_fit-dely, res_sinu.best_fit+dely, color='gray', alpha=0.3, label='$3\sigma$ uncert.')#color="#ABABAB"
-        #         #res_sinu.plot_fit(ax=ax[0], datafmt='ko', fitfmt='r-', initfmt='--', show_init=True)
-        #         res_sinu.plot_residuals(ax=ax[1], datafmt='ko')
-        #         #plt.plot(phase,diff,'ok', alpha=0.5)
-        #         if SB2==True:
-        #             delta_per = []
-        #             for period2 in peri2:
-        #                 delta_per.append(np.abs(Per-period2))
-        #             for k, dif in enumerate(delta_per):
-        #                 if dif == min(delta_per) and peri2[k]>1.1 and Per>1.1:
-        #                     print(f'{Per:.2f}', '=', f'{peri2[k]:.2f}')
-        #                     ax[0].errorbar(df2_phase['phase'], df2_phase['mean_rv'], df2_phase['mean_rv_er'], fmt='.g',ms=12, ecolor='green', label='data2')
-        #                     ax[0].plot(xx2, sinu(xx2, best_pars2['A'], best_pars2['w'], best_pars2['phi'], best_pars2['h']), 'b-', lw=2, label='best-fit2')
-        #                     ax[0].fill_between(df2_phase['phase'], res_sinu2.best_fit-dely2, res_sinu2.best_fit+dely2, color='green', alpha=0.3, label='$3\sigma$ uncert.')#color="#ABABAB"
-        #                     res_sinu2.plot_residuals(ax=ax[1], datafmt='go')
-
-        #         ax[0].set_title('P = '+str(f'{Per:.4f}')+'(d)')
-        #         ax[0].set(ylabel='Radial Velocity (km s$^{-1}$)')
-
-        #         ax[1].set(xlabel='Phase')
-        #         ax[1].set(ylabel='Residuals')
-        #         ax[0].legend(loc='best',markerscale=1., frameon=False)
-        #         plt.savefig(path+'LS/'+name_+'_velcurve_P'+str(f'{Per:.4f}')+'.pdf')
-        #         plt.close()
-
-        #         if Per == LS_P[0]:
-        #         # Plot for paper
-        #             fig, ax = plt.subplots(figsize=(8, 6))
-        #             fig.subplots_adjust(left=0.12, right=0.97, top=0.93, bottom=0.11)
-        #             ax.errorbar(df_phase['phase'], df_phase['mean_rv'], df_phase['mean_rv_er'], fmt='ok', ms=6, ecolor='black', label='data')
-        #             ax.plot(xx, sinu(xx, best_pars['A'], best_pars['w'], best_pars['phi'], best_pars['h']), 'r-', lw=2, label='best-fit')
-        #             # ax.plot(df_phase['phase'], res_sinu.init_fit, '--', c='gray', label='init')
-        #             plt.axhline(syst_RV, color='gray', linestyle=':',linewidth=1.5, label='systemic RV = {0:.2f}'.format(syst_RV))
-        #             if SB2==True:
-        #                 delta_per = []
-        #                 for period2 in peri2:
-        #                     delta_per.append(np.abs(Per-period2))
-        #                 for k, dif in enumerate(delta_per):
-        #                     if dif == min(delta_per):
-        #                     # if Per == peri2[k]:
-        #                         print(dif, min(delta_per))
-        #                         print(f'{Per:.2f}', '=', f'{peri2[k]:.2f}')
-        #                         ax.errorbar(df2_phase['phase'], df2_phase['mean_rv'], df2_phase['mean_rv_er'], fmt='sg', ms=6, ecolor='green', label='data2') # mfc='none',
-        #                         ax.plot(xx2, sinu(xx2, best_pars2['A'], best_pars2['w'], best_pars2['phi'], best_pars2['h']), 'b--', lw=2, label='best-fit2')
-        #             # ax.set_title('P = '+str(f'{Per:.4f}')+'(d)',fontsize=22)
-        #             ax.set_title(name)
-
-        #             x1, x2 = ax.get_xlim()
-        #             y1, y2 = ax.get_ylim()
-        #             x_min = x1-(x2-x1)*0.05
-        #             x_max = x2+(x2-x1)*0.05
-        #             y_min = y1-(y2-y1)*0.1
-        #             y_max = y2+(y2-y1)*0.1
-
-        #             ax.set(xlim=(x_min, x_max), ylim=(y_min, y_max),
-        #                    ylabel='Radial Velocity (km s$^{-1}$)',
-        #                    xlabel='Orbital Phase')
-        #             # ax[0].yaxis.label.set_size(22)
-        #             # ax.legend(loc='best',numpoints=1,markerscale=1.,fontsize=12, handletextpad=0.5,borderaxespad=0.3, borderpad=0.8, frameon=False)
-        #             if SB2==True:
-        #                 plt.savefig(path+'LS/'+name_+'_paper_RV_curve_SB2.pdf')
-        #             else:
-        #                 plt.savefig(path+'LS/'+name_+'_paper_RV_curve_SB1.pdf')
-        #             plt.close()
+ 
 
         # '''
         # Plot RVs vs HJD
