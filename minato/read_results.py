@@ -53,6 +53,16 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
 
     """
     print(df.columns)
+    if 'TA' in df.columns and df['TA'].max() > 1000:
+        df['TA'] = df['TA'] / 1000
+    if 'TB' in df.columns and df['TB'].max() > 1000:
+        df['TB'] = df['TB'] / 1000
+    if 'gA' in df.columns and df['gA'].max() > 100:
+        df['gA'] = df['gA'] / 100
+    if 'gB' in df.columns and df['gB'].max() > 100:
+        df['gB'] = df['gB'] / 100
+
+
     if dof is None:
         dof = df.loc[0,'ndata']-len(df.columns)
     # dof = df.loc[0,'ndata']-4
@@ -226,26 +236,38 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
     marker_size = 14
     line_width = 3
 
-    labels= [ r'L_rat', r'He/H', r'$T_{\mathrm{eff}, A}$', r'$\log g_A$', 
-            r'$T_{\mathrm{eff}, B}$', r'$\log g_B$', r'$\varv \sin i_A$', r'$\varv\sin i_B$', r'$\xi_A$', r'$\xi_B' ]
+    column_labels = {
+        'lr': 'Light ratio',
+        'TA': r'$T_{\mathrm{eff}, A}$ [kK]',
+        'gA': r'$\log g_A$',
+        'mA': r'$\xi_A$ [km/s]',
+        'vA': r'$\varv \sin i_A$ [km/s]',
+        'TB': r'$T_{\mathrm{eff}, B}$ [kK]',
+        'gB': r'$\log g_B$',
+        'mB': r'$\xi_B$ [km/s]',
+        'vB': r'$\varv \sin i_B$ [km/s]',
+    }
 
-    x_labels = ['Light ratio', 'He/H', r'$T_{\mathrm{eff}, A}$ [kK]', r'$\log g_A$', r'$T_{\mathrm{eff}, B}$ [kK]', \
-            r'$\log g_B$', r'$\varv \sin i_A$ [km/s]', r'$\varv \sin i_B$ [km/s]', r'$\xi_A$ [km/s]', r'$\xi_B$ [km/s]' ]
+    # labels= [ r'L_rat', r'He/H', r'$T_{\mathrm{eff}, A}$', r'$\log g_A$', 
+    #         r'$T_{\mathrm{eff}, B}$', r'$\log g_B$', r'$\varv \sin i_A$', r'$\varv\sin i_B$', r'$\xi_A$', r'$\xi_B' ]
+
+    # x_labels = ['Light ratio', 'He/H', r'$T_{\mathrm{eff}, A}$ [kK]', r'$\log g_A$', r'$T_{\mathrm{eff}, B}$ [kK]', \
+    #         r'$\log g_B$', r'$\varv \sin i_A$ [km/s]', r'$\varv \sin i_B$ [km/s]', r'$\xi_A$ [km/s]', r'$\xi_B$ [km/s]' ]
     props = dict(boxstyle='round', facecolor='papayawhip', alpha=0.9)
     panels_id = ['a)', 'b)', 'c)', 'd)', 'e)', 'f)', 'g)', 'h)', 'i)', 'j)']
     yy = chi2 < chi2max
     
     
-    def filter_unique_parameters(pars, pars_min, results, fit_pars, labels, x_labels):
+    def filter_unique_parameters(pars, pars_min, results, fit_pars):#, labels, x_labels):
         # Filter out parameters that have only one unique value
         unique_pars = [par for par in pars if len(np.unique(par.values)) > 1]
         unique_pars_min = [minval for par, minval in zip(pars, pars_min) if len(np.unique(par.values)) > 1]
         unique_results = [result for par, result in zip(pars, results) if len(np.unique(par.values)) > 1]
         unique_fit_pars = [fit_par for par, fit_par in zip(pars, fit_pars) if len(np.unique(par.values)) > 1]
         # Update labels and xlabels to match unique_pars
-        labels = [label for par, label in zip(pars, labels) if len(np.unique(par.values)) > 1]
-        x_labels = [xlabel for par, xlabel in zip(pars, x_labels) if len(np.unique(par.values)) > 1]
-        return unique_pars, unique_pars_min, unique_results, unique_fit_pars, labels, x_labels
+        # labels = [label for par, label in zip(pars, labels) if len(np.unique(par.values)) > 1]
+        # x_labels = [xlabel for par, xlabel in zip(pars, x_labels) if len(np.unique(par.values)) > 1]
+        return unique_pars, unique_pars_min, unique_results, unique_fit_pars#, labels, x_labels
 
     def create_subplots(unique_pars):
         # Calculate the number of rows and columns needed
@@ -257,10 +279,11 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
         ax = axes.flatten()
         return fig, ax
 
-    def plot_data(ax, chi2, yy, conf_level, unique_fit_pars, fit_type, unique_pars, unique_pars_min, labels, x_labels):
+    def plot_data(ax, chi2, yy, conf_level, unique_fit_pars, fit_type, unique_pars, unique_pars_min):#, labels, x_labels):
         for i, par, minval in zip(range(len(unique_pars)), unique_pars, unique_pars_min):
             ax[i].plot(par[yy].values, chi2[yy].values, ls='None', marker='.', ms=marker_size, c='grey', alpha=0.3, zorder=0)
             ax[i].axhline(conf_level, color='crimson', lw=line_width, alpha=0.7, zorder=1)
+            label_base = column_labels.get(par.name, par.name)
             if minval[1] is not np.nan:
                 x_parab = np.linspace(minval[0][0], minval[0][-1], 1000)
                 if fit_type == 'parab':
@@ -280,19 +303,20 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
                 try:
                     par_val, par_ler, par_uer = get_interc(x_parab, y_parab, conf_level)
                     if i == 1:
-                        label = labels[i]+' = '+f'{par_val:.3f}'+r'$^{+'+f'{par_uer:.3f}'+'}'+r'_{-'+f'{par_ler:.3f}'+'}$'
+                        label = label_base+' = '+f'{par_val:.3f}'+r'$^{+'+f'{par_uer:.3f}'+'}'+r'_{-'+f'{par_ler:.3f}'+'}$'
                     else:
-                        label = labels[i]+' = '+f'{par_val:.2f}'+r'$^{+'+f'{par_uer:.2f}'+'}'+r'_{-'+f'{par_ler:.2f}'+'}$'
+                        label = label_base+' = '+f'{par_val:.2f}'+r'$^{+'+f'{par_uer:.2f}'+'}'+r'_{-'+f'{par_ler:.2f}'+'}$'
                     ax[i].text(0.5, 0.8, label, fontsize=tick_label_size, horizontalalignment='center', transform = ax[i].transAxes, bbox=props)
                 except Exception as e:
                     print(par.name, 'computing interceptions failed')
                     print("Error:", str(e))
                 # ax[i].plot(minval[0], minval[1], 'orange', lw=2, alpha=.75, zorder=3)
                 # pass
-            ax[i].set_xlabel(x_labels[i], fontsize=label_size)
+            ax[i].set_xlabel(label_base, fontsize=label_size)
             if i in [0, 2, 4, 6]:
                 ax[i].set_ylabel(r'$\chi^2$', fontsize=label_size)
             xrange = minval[0][-1] - minval[0][0]
+            # xrange = minval_scaled[-1] - minval_scaled[0]
             ax[i].set_xlim(minval[0][0] - 0.2*xrange, minval[0][-1] + 0.2*xrange)
             ax[i].tick_params(axis='x', labelsize=tick_label_size)
             ax[i].tick_params(axis='y', labelsize=tick_label_size)
@@ -307,9 +331,10 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
         plt.show()
         plt.close()
 
-    unique_pars, unique_pars_min, unique_results, unique_fit_pars, labels, x_labels = filter_unique_parameters(pars, pars_min, results, fit_pars, labels, x_labels)
+    # unique_pars, unique_pars_min, unique_results, unique_fit_pars, labels, x_labels = filter_unique_parameters(pars, pars_min, results, fit_pars, labels, x_labels)
+    unique_pars, unique_pars_min, unique_results, unique_fit_pars = filter_unique_parameters(pars, pars_min, results, fit_pars)
     fig, ax = create_subplots(unique_pars)
-    plot_data(ax, chi2, yy, conf_level, unique_fit_pars, fit_type, unique_pars, unique_pars_min, labels, x_labels)
+    plot_data(ax, chi2, yy, conf_level, unique_fit_pars, fit_type, unique_pars, unique_pars_min)#, labels, x_labels)
 
 
 def interp_models(parameter, chi2_array):
