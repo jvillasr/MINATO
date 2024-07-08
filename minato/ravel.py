@@ -54,7 +54,7 @@ def read_fits(fits_file):
         return wave, flux, ferr, star_epoch, mjd
 
 def read_spectra(filelist, path, file_type):
-    wavelengths, fluxes, f_errors, names, jds = [], [], [], [], []
+    wavelengths, fluxes, f_errors, names = [], [], [], []
     for spec in filelist:
         if file_type in ['dat', 'txt', 'csv']:
             names.append(spec.replace(f'.{file_type}', ''))
@@ -65,7 +65,10 @@ def read_spectra(filelist, path, file_type):
                 f_errors.append(np.array(df[2]))
             except:
                 f_errors.append(1 / (np.array(df[1])) ** 2)
+            jds = None
+            return wavelengths, fluxes, f_errors, names, jds
         elif file_type == 'fits':
+            jds = []
             wave, flux, ferr, star, mjd = read_fits(spec)
             wavelengths.append(wave)
             fluxes.append(flux)
@@ -79,10 +82,11 @@ def setup_star_directory_and_save_jds(names, jds, path):
     path = path.replace('FITS/', '') + star
     if not os.path.exists(path):
         os.makedirs(path)
-    df_mjd = pd.DataFrame()
-    df_mjd['epoch'] = names
-    df_mjd['JD'] = jds
-    df_mjd.to_csv(path + 'JDs.txt', index=False, header=False, sep='\t')
+    if jds:    
+        df_mjd = pd.DataFrame()
+        df_mjd['epoch'] = names
+        df_mjd['JD'] = jds
+        df_mjd.to_csv(path + 'JDs.txt', index=False, header=False, sep='\t')
     return path
 
 def setup_line_dictionary():
