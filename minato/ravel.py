@@ -54,7 +54,7 @@ def read_fits(fits_file):
         return wave, flux, ferr, star_epoch, mjd
 
 def read_spectra(filelist, path, file_type):
-    wavelengths, fluxes, f_errors, names = [], [], [], []
+    wavelengths, fluxes, f_errors, names, jds = [], [], [], [], []
     for spec in filelist:
         if file_type in ['dat', 'txt', 'csv']:
             names.append(spec.replace(f'.{file_type}', ''))
@@ -68,7 +68,7 @@ def read_spectra(filelist, path, file_type):
             jds = None
             return wavelengths, fluxes, f_errors, names, jds
         elif file_type == 'fits':
-            jds = []
+            
             wave, flux, ferr, star, mjd = read_fits(spec)
             wavelengths.append(wave)
             fluxes.append(flux)
@@ -83,6 +83,7 @@ def setup_star_directory_and_save_jds(names, jds, path):
     if not os.path.exists(path):
         os.makedirs(path)
     if jds:    
+        print(jds)
         df_mjd = pd.DataFrame()
         df_mjd['epoch'] = names
         df_mjd['JD'] = jds
