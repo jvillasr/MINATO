@@ -81,9 +81,11 @@ def read_spectra(filelist, path, file_type):
             jds.append(mjd)
     return wavelengths, fluxes, f_errors, names, jds
 
-def setup_star_directory_and_save_jds(names, jds, path):
+def setup_star_directory_and_save_jds(names, jds, path, SB2):
     star = names[0].split('_')[0] + '_' + names[0].split('_')[1] + '/'
     path = path.replace('FITS/', '') + star
+    if SB2==True:
+        path = path + '_SB2/'
     if not os.path.exists(path):
         os.makedirs(path)
     if jds:    
@@ -273,15 +275,16 @@ def fit_sb2_probmod(line, wavelengths, fluxes, f_errors, lines_dic, Hlines, nebl
     # Initial guess for the central wavelength and width
     cen_ini = line+shift
     wid_ini = lines_dic[line]['wid_ini']
-    # amp_ini = 0.9 - min([flux.min() for flux in y_fluxes])
+    amp_ini = 0.9 - min([flux.min() for flux in y_fluxes])
     
     def sb2_model(wavelengths=None, fluxes=None):
 
         n_epoch, n_wavelength = fluxes.shape
 
         #spectral window
-        # cen = cen_ini
-        cen = npro.param("cen", (wavelengths[0].max() + wavelengths[0].min())/2)
+        cen = npro.param("cen", (cen_ini))
+        # delta_cen = npro.param("delta_cen", (wavelengths[0].max() - wavelengths[0].min()) / 8)
+        # cen = npro.param("cen", (wavelengths[0].max() + wavelengths[0].min())/2)
         delta_cen = npro.param("delta_cen", (wavelengths[0].max() - wavelengths[0].min()))
         # print('centre =', cen, '+/-', delta_cen)
 
@@ -291,6 +294,8 @@ def fit_sb2_probmod(line, wavelengths, fluxes, f_errors, lines_dic, Hlines, nebl
         amp2 = npro.sample('amp2', dist.Uniform(0, 1))
         wid1 = npro.sample('wid1', dist.Uniform(0.5, 10))
         wid2 = npro.sample('wid2', dist.Uniform(0.5, 10))
+        # print(f'amp1_ini = {amp_ini} +/- {amp_ini*0.2}')
+        # print(f'amp2_ini = {amp_ini*0.6} +/- {amp_ini*0.6*0.2}')
         # amp1 = npro.sample('amp1', dist.Normal(amp_ini, amp_ini*0.2))
         # amp2 = npro.sample('amp2', dist.Normal(amp_ini*0.6, amp_ini*0.6*0.2))
         # wid1 = npro.sample('wid1', dist.Normal(wid_ini, wid_ini*0.2))
@@ -341,10 +346,12 @@ def fit_sb2_probmod(line, wavelengths, fluxes, f_errors, lines_dic, Hlines, nebl
     n_lines = 100
     n_epochs = len(x_waves)
     for epoch, ax in zip(range(n_epochs), axes.ravel()):
-        ax.plot(x_waves[epoch], trace['pred'][-n_lines:, epoch, :].T, rasterized=True, color='C4', alpha=0.1)
+        ax.plot(x_waves[epoch], trace['pred'][-n_lines:, epoch, :].T, rasterized=True, color='C2', alpha=0.1)
         ax.plot(x_waves[epoch], trace['pred_1'][-n_lines:, epoch, :].T, rasterized=True, color='C0', alpha=0.1)
         ax.plot(x_waves[epoch], trace['pred_2'][-n_lines:, epoch, :].T, rasterized=True, color='C1', alpha=0.1)
-        ax.plot(x_waves[epoch], y_fluxes[epoch], color='k', lw=0.5)
+        ax.plot(x_waves[epoch], y_fluxes[epoch], color='k', lw=1, alpha=0.8)
+        
+        
     plt.savefig(path+str(line)+'_fits_SB2_.png', bbox_inches='tight', dpi=150)
     plt.close()
 
@@ -533,7 +540,7 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
     
     wavelengths, fluxes, f_errors, names, jds = read_spectra(spectra_list, path, file_type)
 
-    path = setup_star_directory_and_save_jds(names, jds, path)
+    path = setup_star_directory_and_save_jds(names, jds, path, SB2)
 
     lines_dic = setup_line_dictionary()
 
@@ -582,7 +589,7 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
                 #     plt.savefig(path+str(line)+'_fits_SB2_.png', bbox_inches='tight', dpi=150)
                 #     plt.close()
             else:
-                for wave, flux, ferr, name, ax in zip(wavelengths, fluxes, f_errors, names, axes):
+                for j, (wave, flux, ferr, name, ax) in enumerate(zip(wavelengths, fluxes, f_errors, names, axes)):
                     result, x_wave, y_flux, wave_region = fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift)
                     
                     results[i].append(result)
@@ -614,6 +621,7 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
                         'amp1_er': result.params[f'{prefix}_amp'].stderr,
                         'wid1': result.params[f'{prefix}_wid'].value,
                         'wid1_er': result.params[f'{prefix}_wid'].stderr,
+                        'chisqr': result.chisqr
                     }
                     if results_dict['cen1_er'] is None or results_dict['amp1_er'] is None:
                         print('errors computation failed for line ', line, 'epoch ', j+1)
@@ -669,10 +677,6 @@ def SLfit(spectra_list, path, lines, file_type='fits', plots=True, balmer=True, 
                     plt.close()
 
     return path
-
-import copy
-from datetime import date
-from iteration_utilities import duplicates, unique_everseen
 
 def sinu(x, A, w, phi, h):
     "Sinusoidal: sinu(data, amp, freq, phase, height)"
@@ -739,14 +743,15 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
     # print(path+fit_values)
     df_SLfit = pd.read_csv(path+fit_values)
 
-    x1, dx1, y1, dy1, z1, dz1, lines, chi2, epoch = \
+    x1, dx1, y1, dy1, z1, dz1, lines, epoch = \
                                                 df_SLfit['cen1'], df_SLfit['cen1_er'], df_SLfit['amp1'], \
                                                 df_SLfit['amp1_er'], df_SLfit['wid1'], df_SLfit['wid1_er'], \
-                                                df_SLfit['line'], df_SLfit['chisqr'], df_SLfit['Epoch']
+                                                df_SLfit['line'], df_SLfit['epoch']
     if SB2==True:
         x2, dx2, y2, dy2, z2, dz2 = df_SLfit['cen2'], df_SLfit['cen2_er'], df_SLfit['amp2'], \
-                                    df_SLfit['amp2_er'], df_SLfit['wid2'], df_SLfit['wid2_er'], \
-
+                                    df_SLfit['amp2_er'], df_SLfit['wid2'], df_SLfit['wid2_er']
+    else:
+        chi2 = df_SLfit['chisqr']
     lines = sorted(list(unique_everseen(duplicates(lines))))
     print('lines from gfit table:', lines)
     if print_output==True:
@@ -945,7 +950,7 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
         out.write('   '+str(lines[i])+': '+str(f'{np.nanmedian(amp1_percer[i]):7.3f}')+' '+str(f'{np.nanmedian(wid1_percer[i]):7.3f}')+'  '+str(f'{np.nanmedian(cen1_percer[i]):5.3f}')+'  |  '+\
                                             str(f'{np.nanmedian(amp2_percer[i]):7.3f}')+' '+str(f'{np.nanmedian(wid2_percer[i]):7.3f}')+'  '+str(f'{np.nanmedian(cen2_percer[i]):5.3f}')+'\n')
     '''
-    Selecting the linestyle
+    Selecting the line-rejection type
     '''
     if not use_lines:
         if print_output==True:
@@ -1006,124 +1011,125 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
 
     # sys.exit()
     if SB2==True:
-        if print_output==True:
-            print( '\n')
-            print( '*** Choosing best epochs for SB2 analysis ***')
-            print( '---------------------------------------------')
+        if rm_epochs:
+            if print_output==True:
+                print( '\n')
+                print( '*** Choosing best epochs for SB2 analysis ***')
+                print( '---------------------------------------------')
 
-        # selecting epochs with larger separation between components
-        delta_cen, best_OBs = [[] for i in range(nlines)], [[] for i in range(nlines)]
+            # selecting epochs with larger separation between components
+            delta_cen, best_OBs = [[] for i in range(nlines)], [[] for i in range(nlines)]
 
-        if not min_sep:
-            min_sep = df_Bstars['min_sep'][star_ind]
-        # min_sep = 1.5 # higher = relaxed
-        print('min_sep: ', min_sep)
-        for i, k in zip(range(nlines), best_lines_index):
-            for j in range(nepochs):
-                # print(best_lines[i], 'epoch', j+1, abs(lambda_shift1[i][j]-lambda_shift2[i][j]))
-                delta_cen[i].append(abs(lambda_shift1[k][j]-lambda_shift2[k][j]))
-        for i, k in zip(range(nlines), best_lines_index):
-            for j in range(nepochs):
-                # print('lines =', best_lines[i])
-                # print('lambda_shift1 =', lambda_shift1[k][j])
-                # print('lambda_shift2 =', lambda_shift2[k][j])
-                # print('abs(lambda_shift1[k][j]-lambda_shift2[k][j]) =', abs(lambda_shift1[k][j]-lambda_shift2[k][j]) )
-                # print('mean(delta_cen) =', np.mean(delta_cen[i]) )
-                # print('mean(delta_cen) - min_sep =', np.mean(delta_cen[i]) -min_sep)
-                if abs(lambda_shift1[k][j]-lambda_shift2[k][j]) > np.mean(delta_cen[i])-min_sep:
-                    best_OBs[i].append(j)
-        # sys.exit()
-        common_OB = set(best_OBs[0])
-        for OB in best_OBs[1:]:
-            common_OB.intersection_update(OB)
-        common_OB = list(common_OB)
-        wrong_OB = [x for x in range(nepochs) if not x in common_OB]
-        if print_output==True:
-            # print('   mean(Delta')
-            print('   Epochs with components separation >', [f'{np.mean(x)-min_sep:.3f}' for x in delta_cen])
-            print('  ', [x+1 for x in common_OB])
-            print('   removed epochs: '+str([x+1 for x in wrong_OB]))
-        out.write(' Epochs with components separation > '+ f'{np.mean(delta_cen[i])-min_sep:.3f}'+':'+'\n')
-        out.write('   '+str([x+1 for x in common_OB])+'\n')
-        out.write('   removed epochs: '+str([x+1 for x in wrong_OB])+'\n')
-        out.write('\n')
+            if not min_sep:
+                min_sep = df_Bstars['min_sep'][star_ind]
+            # min_sep = 1.5 # higher = relaxed
+            print('min_sep: ', min_sep)
+            for i, k in zip(range(nlines), best_lines_index):
+                for j in range(nepochs):
+                    # print(best_lines[i], 'epoch', j+1, abs(lambda_shift1[i][j]-lambda_shift2[i][j]))
+                    delta_cen[i].append(abs(lambda_shift1[k][j]-lambda_shift2[k][j]))
+            for i, k in zip(range(nlines), best_lines_index):
+                for j in range(nepochs):
+                    # print('lines =', best_lines[i])
+                    # print('lambda_shift1 =', lambda_shift1[k][j])
+                    # print('lambda_shift2 =', lambda_shift2[k][j])
+                    # print('abs(lambda_shift1[k][j]-lambda_shift2[k][j]) =', abs(lambda_shift1[k][j]-lambda_shift2[k][j]) )
+                    # print('mean(delta_cen) =', np.mean(delta_cen[i]) )
+                    # print('mean(delta_cen) - min_sep =', np.mean(delta_cen[i]) -min_sep)
+                    if abs(lambda_shift1[k][j]-lambda_shift2[k][j]) > np.mean(delta_cen[i])-min_sep:
+                        best_OBs[i].append(j)
+            # sys.exit()
+            common_OB = set(best_OBs[0])
+            for OB in best_OBs[1:]:
+                common_OB.intersection_update(OB)
+            common_OB = list(common_OB)
+            wrong_OB = [x for x in range(nepochs) if not x in common_OB]
+            if print_output==True:
+                # print('   mean(Delta')
+                print('   Epochs with components separation >', [f'{np.mean(x)-min_sep:.3f}' for x in delta_cen])
+                print('  ', [x+1 for x in common_OB])
+                print('   removed epochs: '+str([x+1 for x in wrong_OB]))
+            out.write(' Epochs with components separation > '+ f'{np.mean(delta_cen[i])-min_sep:.3f}'+':'+'\n')
+            out.write('   '+str([x+1 for x in common_OB])+'\n')
+            out.write('   removed epochs: '+str([x+1 for x in wrong_OB])+'\n')
+            out.write('\n')
 
-        # removing epochs with inverted components
-        # print('wrong_OB:', wrong_OB)
-        for j in common_OB:
-            temp_OB =[]
-            for i in best_lines_index:
-                # if j==20:
-                #     print(lines[i], 'epoch', j+1, lambda_shift1[i][j], lambda_shift2[i][j], lambda_shift1[i][j]-lambda_shift2[i][j])
-                temp_OB.append(lambda_shift1[i][j]-lambda_shift2[i][j])
-            if not all(x>0 for x in temp_OB) and not all(x<0 for x in temp_OB):
-                wrong_OB.append(j)
-        # print('wrong_OB:', wrong_OB)
-        oldOBs = copy.deepcopy(common_OB)
-        for j in range(len(common_OB)-1, -1, -1):
-            if common_OB[j] in wrong_OB:
-                del common_OB[j]
-        if print_output==True:
-            print('   --------')
-            print('   Removing epochs with inverted components:')
-            print('   Best epochs:', [x+1 for x in common_OB])
-            print('   removed epochs:'+str([x+1 for x in oldOBs if x not in common_OB]))
-        out.write(' Removing epochs with inverted components:'+'\n')
-        out.write('   removed epochs:'+str([x+1 for x in oldOBs if x not in common_OB])+'\n')
-        out.write('   Best epochs:'+str([x+1 for x in common_OB])+'\n')
-        out.write('\n')
+            # removing epochs with inverted components
+            # print('wrong_OB:', wrong_OB)
+            for j in common_OB:
+                temp_OB =[]
+                for i in best_lines_index:
+                    # if j==20:
+                    #     print(lines[i], 'epoch', j+1, lambda_shift1[i][j], lambda_shift2[i][j], lambda_shift1[i][j]-lambda_shift2[i][j])
+                    temp_OB.append(lambda_shift1[i][j]-lambda_shift2[i][j])
+                if not all(x>0 for x in temp_OB) and not all(x<0 for x in temp_OB):
+                    wrong_OB.append(j)
+            # print('wrong_OB:', wrong_OB)
+            oldOBs = copy.deepcopy(common_OB)
+            for j in range(len(common_OB)-1, -1, -1):
+                if common_OB[j] in wrong_OB:
+                    del common_OB[j]
+            if print_output==True:
+                print('   --------')
+                print('   Removing epochs with inverted components:')
+                print('   Best epochs:', [x+1 for x in common_OB])
+                print('   removed epochs:'+str([x+1 for x in oldOBs if x not in common_OB]))
+            out.write(' Removing epochs with inverted components:'+'\n')
+            out.write('   removed epochs:'+str([x+1 for x in oldOBs if x not in common_OB])+'\n')
+            out.write('   Best epochs:'+str([x+1 for x in common_OB])+'\n')
+            out.write('\n')
 
-        # removing bad/noisy epochs
-        mean_amp1_er, mean_cen1_er = [], []
-        if print_output==True:
-            print('   --------')
-            print('   Removing epochs with large errors:')
-        out.write(' Removing epochs with large errors:'+'\n')
-        for j in common_OB:
-            temp_wid1, temp_cen1 = [], []
-            for i in best_lines_index:
-                #print(lines[i], 'epoch', j+1, wid1_percer[i][j])
-            #    temp_wid1.append(wid1_percer[i][j])
-            # if all(np.isnan(x)==False for x in temp_wid1):
-            #    print('     epoch', j+1, 'mean(wid1_percer)', np.nanmean(temp_wid1))
-            #    mean_amp1_er.append(np.nanmean(temp_wid1))
-            # else:
-            #    print('     epoch', j+1, 'mean(wid1_percer)', 'nan')
-            #    mean_amp1_er.append(np.nan)
-                temp_cen1.append(lambda_shift1_er[i][j])
-            if all(np.isnan(x)==False for x in temp_cen1):
-                # if print_output==True:
-                #     print('     epoch', j+1, 'mean(cen1_percer)', np.nanmean(temp_cen1))
-                out.write('   epoch '+str(f'{j+1:2}')+' mean(cen1_percer) = '+str(f'{np.nanmean(temp_cen1):.3f}')+'\n')
-                mean_cen1_er.append(np.nanmean(temp_cen1))
-            else:
-                # if print_output==True:
-                #     print('     epoch', j+1, 'mean(cen1_percer)', 'nan')
-                out.write('   epoch '+str(f'{j+1:2}')+' mean(cen1_percer) = '+'nan'+'\n')
-                mean_cen1_er.append(np.nan)
+            # removing bad/noisy epochs
+            mean_amp1_er, mean_cen1_er = [], []
+            if print_output==True:
+                print('   --------')
+                print('   Removing epochs with large errors:')
+            out.write(' Removing epochs with large errors:'+'\n')
+            for j in common_OB:
+                temp_wid1, temp_cen1 = [], []
+                for i in best_lines_index:
+                    #print(lines[i], 'epoch', j+1, wid1_percer[i][j])
+                #    temp_wid1.append(wid1_percer[i][j])
+                # if all(np.isnan(x)==False for x in temp_wid1):
+                #    print('     epoch', j+1, 'mean(wid1_percer)', np.nanmean(temp_wid1))
+                #    mean_amp1_er.append(np.nanmean(temp_wid1))
+                # else:
+                #    print('     epoch', j+1, 'mean(wid1_percer)', 'nan')
+                #    mean_amp1_er.append(np.nan)
+                    temp_cen1.append(lambda_shift1_er[i][j])
+                if all(np.isnan(x)==False for x in temp_cen1):
+                    # if print_output==True:
+                    #     print('     epoch', j+1, 'mean(cen1_percer)', np.nanmean(temp_cen1))
+                    out.write('   epoch '+str(f'{j+1:2}')+' mean(cen1_percer) = '+str(f'{np.nanmean(temp_cen1):.3f}')+'\n')
+                    mean_cen1_er.append(np.nanmean(temp_cen1))
+                else:
+                    # if print_output==True:
+                    #     print('     epoch', j+1, 'mean(cen1_percer)', 'nan')
+                    out.write('   epoch '+str(f'{j+1:2}')+' mean(cen1_percer) = '+'nan'+'\n')
+                    mean_cen1_er.append(np.nan)
 
-        if print_output==True:
-            print('   Applying outlier_killer to remove epochs')
-        # err_type_dic={'wid':mean_wid1_er, 'rvs':mean_rvs1_er, 'cen':mean_cen1_er, 'amp':mean_amp1_er}
-        err_type_dic={'cen':mean_cen1_er}
-        err_type='cen'
-        # err_type = df_Bstars['ep_outlier_killer'][star_ind]
-        # for key, val in err_type_dic.items():
-        #     if val == err_type_dic[err_type]:
-        #         err_type_key=str(key)
-        rm_OBs_idx = outlier_killer(err_type_dic[err_type], epochs_ok_thrsld, print_output=False)[1]
+            if print_output==True:
+                print('   Applying outlier_killer to remove epochs')
+            # err_type_dic={'wid':mean_wid1_er, 'rvs':mean_rvs1_er, 'cen':mean_cen1_er, 'amp':mean_amp1_er}
+            err_type_dic={'cen':mean_cen1_er}
+            err_type='cen'
+            # err_type = df_Bstars['ep_outlier_killer'][star_ind]
+            # for key, val in err_type_dic.items():
+            #     if val == err_type_dic[err_type]:
+            #         err_type_key=str(key)
+            rm_OBs_idx = outlier_killer(err_type_dic[err_type], epochs_ok_thrsld, print_output=False)[1]
 
-        # print('rm_OBs_idx:', rm_OBs_idx)
-        if print_output==True:
-            print('   epochs removed: '+str([common_OB[x]+1 for x in rm_OBs_idx]))
-        out.write('   epochs removed: '+str([common_OB[x]+1 for x in rm_OBs_idx])+'\n')
-        out.write('\n')
-        for i in reversed(rm_OBs_idx):
-            wrong_OB.append(common_OB[i])
-            del common_OB[i]
-        best_OBs = common_OB
-        # best_OBs0 = [2, 3, 4, 5, 6, 7, 8, 9, 11, 15, 16, 17, 18, 19, 25, 26, 28]
-        # best_OBs = [x-1 for x in best_OBs0]
+            # print('rm_OBs_idx:', rm_OBs_idx)
+            if print_output==True:
+                print('   epochs removed: '+str([common_OB[x]+1 for x in rm_OBs_idx]))
+            out.write('   epochs removed: '+str([common_OB[x]+1 for x in rm_OBs_idx])+'\n')
+            out.write('\n')
+            for i in reversed(rm_OBs_idx):
+                wrong_OB.append(common_OB[i])
+                del common_OB[i]
+            best_OBs = common_OB
+            # best_OBs0 = [2, 3, 4, 5, 6, 7, 8, 9, 11, 15, 16, 17, 18, 19, 25, 26, 28]
+            # best_OBs = [x-1 for x in best_OBs0]
 
     else: # if SB2==False
         '''
@@ -1228,8 +1234,9 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
     # best_OBs = [x-1 for x in best_OBs0]
 
     nepochs_0 = copy.deepcopy(nepochs)
-    nepochs = len(best_OBs)
-    rm_OBs_idx = sorted(wrong_OB)
+    if rm_epochs:
+        nepochs = len(best_OBs)
+        rm_OBs_idx = sorted(wrong_OB)
     # rm_OBs_idx = [8, 9, 10, 11, 12, 13, 17, 21, 23, 26, 27]
     # rm_OBs_idx = [7, 10, 12, 13, 14, 16, 20, 23, 24, 26, 29]
     # rm_OBs_idx = [x-1 for x in rm_OBs_idx]
@@ -1237,9 +1244,11 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
     # print('wrong_OB', rm_OBs_idx)
     if print_output==True:
         print('   ------------------')
-        print('   Final best epochs:', [x+1 for x in best_OBs])
+        if rm_epochs:
+            print('   Final best epochs:', [x+1 for x in best_OBs])
         print('   Number of epochs:', nepochs)
-    out.write(' Final best epochs: '+str([x+1 for x in best_OBs])+'\n')
+    if rm_epochs:    
+        out.write(' Final best epochs: '+str([x+1 for x in best_OBs])+'\n')
     out.write(' Number of epochs: '+str(nepochs)+'\n')
     out.write('\n')
 
@@ -1258,13 +1267,14 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
         rv_list2 = list(map(list, zip(*rvs2))) # nlinesxnepochs (6x26) -> nepochsxnlines (26x6)
         rv_list2_er = list(map(list, zip(*rvs2_er)))
     # removing bad epochs from the list of radial velocities
-    for j in range(nepochs_0-1, -1, -1):
-        if not j in best_OBs:
-            del rv_list1[j]
-            del rv_list1_er[j]
-            if SB2==True:
-                del rv_list2[j]
-                del rv_list2_er[j]
+    if rm_epochs:
+        for j in range(nepochs_0-1, -1, -1):
+            if not j in best_OBs:
+                del rv_list1[j]
+                del rv_list1_er[j]
+                if SB2==True:
+                    del rv_list2[j]
+                    del rv_list2_er[j]
     # print(rv_list1)
     # print(rv_list2)
     # print(rv_list2_er)
@@ -1350,38 +1360,40 @@ def getrvs(fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, li
     '''
     Writing RVs to file RVs.txt
     '''
-    # JDfile = 'JDs.dat'
-    # JDfile = 'JDs+vfts.dat'
-    # df_rv = pd.read_csv(path+'JDs.dat', names = ['BBC_epoch', 'HJD'], sep='\t')
+    # JDfile = 'JDs.txt'
+    # JDfile = 'JDs+vfts.txt'
+    # df_rv = pd.read_csv(path+'JDs.txt', names = ['BBC_epoch', 'HJD'], sep='\t')
     df_rv = pd.read_csv(JDfile, names = ['epoch', 'JD'], sep='\s+')
     # print(df_rv)
     df_rv = df_rv.replace({'BBC_':''}, regex=True).replace({'.fits':''}, regex=True)
-    if not len(rm_OBs_idx)==0:
-        df_rv.drop(rm_OBs_idx, inplace=True)
-        df_rv.reset_index(inplace=True)
+    if rm_epochs:
+        if not len(rm_OBs_idx)==0:
+            df_rv.drop(rm_OBs_idx, inplace=True)
+            df_rv.reset_index(inplace=True)
     for i in range(nlines):
         df_rv['rv_'+str(best_lines[i])] = rvs1[i]
         df_rv['rv_'+str(best_lines[i])+'_er'] = rvs1_er[i]
     df_rv['mean_rv'] = wmean_rv1
     df_rv['mean_rv_er'] = wmean_rv1_er
     df_rv['sigma_rv'] = sigma_rv1
-    #df_rv.to_csv(path+'RVs.dat', sep='\t', index=False)
+    #df_rv.to_csv(path+'RVs.txt', sep='\t', index=False)
     with open(path+'RVs1.txt', 'w') as fo:
         #fo.write(df_rv.to_string(formatters={'mean_rv':'{:.25f}'.format}, index=False))
         fo.write(df_rv.to_string(formatters={'HJD': '{:.8f}'.format}, index=False))
     if SB2==True:
         df_rv2 = pd.read_csv(path+'JDs.txt', names = ['epoch', 'JD'], sep='\t')
         df_rv2 = df_rv2.replace({'BBC_':''}, regex=True).replace({'.fits':''}, regex=True)
-        if not len(rm_OBs_idx)==0:
-            df_rv2.drop(rm_OBs_idx, inplace=True)
-            df_rv2.reset_index(inplace=True)
+        if rm_epochs:
+            if not len(rm_OBs_idx)==0:
+                df_rv2.drop(rm_OBs_idx, inplace=True)
+                df_rv2.reset_index(inplace=True)
         for i in range(nlines):
             df_rv2['rv_'+str(best_lines[i])] = rvs2[i]
             df_rv2['rv_'+str(best_lines[i])+'_er'] = rvs2_er[i]
         df_rv2['mean_rv'] = wmean_rv2
         df_rv2['mean_rv_er'] = wmean_rv2_er
         df_rv2['sigma_rv'] = sigma_rv2
-        #df_rv.to_csv(path+'RVs.dat', sep='\t', index=False)
+        #df_rv.to_csv(path+'RVs.txt', sep='\t', index=False)
         with open(path+'RVs1.txt', 'a') as fo:
             #fo.write(df_rv.to_string(formatters={'mean_rv':'{:.25f}'.format}, index=False))
             fo.write('\n')
@@ -1898,39 +1910,39 @@ def phase_rv_curve(df, periods, path, SB2=False, print_output=True, plots=True):
         xx = np.linspace(df_phase['phase'].iloc[0], df_phase['phase'].iloc[-1], num=100, endpoint=True)
         #spl3 = UnivariateSpline(df_phase['phase'], df_phase['mean_rv'], df_phase['sigma_rv'], s=5e20)
         #diff = spl3(df_phase['phase']) - df_phase['mean_rv']
-        # if SB2==True:
-        #     for period2 in peri2:
-        #         if (Per>1.1 and Per<80 and np.abs(Per-period2)<0.5) or (Per>=80 and np.abs(Per-period2)<2):
-        #         # if f'{Per:.2f}'==f'{best_period2:.2f}':
-        #             # print(Per, ' - ', period2, ' = ', np.abs(Per-period2))
-        #             # phase = [ x/best_period2 % 1 for x in df_rv['HJD']]
-        #             # ini = min(phase)
-        #             # fin = max(phase)
-        #             df_rv2['phase'] = phase
-        #             df2_phase1 = df_rv2.sort_values('phase', ascending=True).reset_index(drop=True)
-        #             df2_phase2 = df2_phase1.copy(deep=True)
+        if SB2==True:
+            # for period2 in peri2:
+            #     if (Per>1.1 and Per<80 and np.abs(Per-period2)<0.5) or (Per>=80 and np.abs(Per-period2)<2):
+                # if f'{Per:.2f}'==f'{best_period2:.2f}':
+                    # print(Per, ' - ', period2, ' = ', np.abs(Per-period2))
+                    # phase = [ x/best_period2 % 1 for x in df_rv['HJD']]
+                    # ini = min(phase)
+                    # fin = max(phase)
+            df['phase'] = phase
+            df2_phase1 = df.sort_values('phase', ascending=True).reset_index(drop=True)
+            df2_phase2 = df2_phase1.copy(deep=True)
 
-        #             for i in range(len(df2_phase2)):
-        #                 df2_phase2.loc[i, 'phase']=df2_phase1['phase'][i]+1
-        #             df2_phase = pd.concat([df2_phase1, df2_phase2], ignore_index=True)
-        #             phase_shift2= [df2_phase['phase'].iloc[i] for i,x in enumerate(df2_phase['mean_rv']) if df2_phase['mean_rv'].iloc[i]==max(df2_phase['mean_rv'])][0]
-        #             pars = Parameters()
-        #             pars.add('A', value=(df2_phase['mean_rv'].max()-df2_phase['mean_rv'].min())/2 )
-        #             pars.add('w', value=2*np.pi)
-        #             pars.add('phi', value=(1-phase_shift2+0.25)*2*np.pi)
-        #             pars.add('h', value=(df2_phase['mean_rv'].max()-df2_phase['mean_rv'].min())/2 +df2_phase['mean_rv'].min())
+            for i in range(len(df2_phase2)):
+                df2_phase2.loc[i, 'phase']=df2_phase1['phase'][i]+1
+            df2_phase = pd.concat([df2_phase1, df2_phase2], ignore_index=True)
+            phase_shift2= [df2_phase['phase'].iloc[i] for i,x in enumerate(df2_phase['mean_rv']) if df2_phase['mean_rv'].iloc[i]==max(df2_phase['mean_rv'])][0]
+            pars = Parameters()
+            pars.add('A', value=(df2_phase['mean_rv'].max()-df2_phase['mean_rv'].min())/2 )
+            pars.add('w', value=2*np.pi)
+            pars.add('phi', value=(1-phase_shift2+0.25)*2*np.pi)
+            pars.add('h', value=(df2_phase['mean_rv'].max()-df2_phase['mean_rv'].min())/2 +df2_phase['mean_rv'].min())
 
-        #             res_sinu2 = sinumodel.fit(df2_phase['mean_rv'], pars, x=df2_phase['phase'], weights=1/df2_phase['mean_rv_er'])
-        #             #res_sinu = sinumodel.fit(df_phase['mean_rv'], x=df_phase['phase'], A=100, w=5, phi=0.2, h=250)
-        #             dely2 = res_sinu2.eval_uncertainty(sigma=3)
-        #             best_pars2=res_sinu2.best_values
-        #             init_pars2=res_sinu2.init_values
-        #             xx2 = np.linspace(df2_phase['phase'].iloc[0], df2_phase['phase'].iloc[-1], num=100, endpoint=True)
-        #             if Per == LS_P[0]:
-        #                 out_sinu2 = open(path+'LS/'+name_+'_sinu_stats2.dat', 'w')
-        #                 out_sinu2.write(name+'\n')
-        #                 out_sinu2.write(res_sinu2.fit_report()+'\n')
-        #                 out_sinu2.close()
+            res_sinu2 = sinumodel.fit(df2_phase['mean_rv'], pars, x=df2_phase['phase'], weights=1/df2_phase['mean_rv_er'])
+            #res_sinu = sinumodel.fit(df_phase['mean_rv'], x=df_phase['phase'], A=100, w=5, phi=0.2, h=250)
+            dely2 = res_sinu2.eval_uncertainty(sigma=3)
+            best_pars2=res_sinu2.best_values
+            init_pars2=res_sinu2.init_values
+            xx2 = np.linspace(df2_phase['phase'].iloc[0], df2_phase['phase'].iloc[-1], num=100, endpoint=True)
+            # if Per == LS_P[0]:
+            out_sinu2 = open(path+'LS/'+name+'_sinu_stats2.txt', 'w')
+            out_sinu2.write(name+'\n')
+            out_sinu2.write(res_sinu2.fit_report()+'\n')
+            out_sinu2.close()
 
         '''
         Plot the phased data, model and residuals
@@ -1951,17 +1963,17 @@ def phase_rv_curve(df, periods, path, SB2=False, print_output=True, plots=True):
             #res_sinu.plot_fit(ax=ax[0], datafmt='ko', fitfmt='r-', initfmt='--', show_init=True)
             res_sinu.plot_residuals(ax=ax[1], datafmt='ko')
             #plt.plot(phase,diff,'ok', alpha=0.5)
-            # if SB2==True:
-            #     delta_per = []
-            #     for period2 in peri2:
-            #         delta_per.append(np.abs(Per-period2))
-            #     for k, dif in enumerate(delta_per):
-            #         if dif == min(delta_per) and peri2[k]>1.1 and Per>1.1:
-            #             print(f'{Per:.2f}', '=', f'{peri2[k]:.2f}')
-            #             ax[0].errorbar(df2_phase['phase'], df2_phase['mean_rv'], df2_phase['mean_rv_er'], fmt='.g',ms=12, ecolor='green', label='data2')
-            #             ax[0].plot(xx2, sinu(xx2, best_pars2['A'], best_pars2['w'], best_pars2['phi'], best_pars2['h']), 'b-', lw=2, label='best-fit2')
-            #             ax[0].fill_between(df2_phase['phase'], res_sinu2.best_fit-dely2, res_sinu2.best_fit+dely2, color='green', alpha=0.3, label='$3\sigma$ uncert.')#color="#ABABAB"
-            #             res_sinu2.plot_residuals(ax=ax[1], datafmt='go')
+            if SB2==True:
+                # delta_per = []
+                # for period2 in peri2:
+                #     delta_per.append(np.abs(Per-period2))
+                # for k, dif in enumerate(delta_per):
+                #     if dif == min(delta_per) and peri2[k]>1.1 and Per>1.1:
+                #         print(f'{Per:.2f}', '=', f'{peri2[k]:.2f}')
+                ax[0].errorbar(df2_phase['phase'], df2_phase['mean_rv'], df2_phase['mean_rv_er'], fmt='.g',ms=12, ecolor='green', label='data2')
+                ax[0].plot(xx2, sinu(xx2, best_pars2['A'], best_pars2['w'], best_pars2['phi'], best_pars2['h']), 'b-', lw=2, label='best-fit2')
+                # ax[0].fill_between(df2_phase['phase'], res_sinu2.best_fit-dely2, res_sinu2.best_fit+dely2, color='green', alpha=0.3, label='$3\sigma$ uncert.')#color="#ABABAB"
+                res_sinu2.plot_residuals(ax=ax[1], datafmt='go')
 
             ax[0].set_title('P = '+str(f'{Per:.4f}')+'(d)')
             ax[0].set(ylabel='Radial Velocity (km s$^{-1}$)')
@@ -2112,7 +2124,7 @@ def phase_rv_curve(df, periods, path, SB2=False, print_output=True, plots=True):
         #     # flim = np.logical_and(frequency1 > 0.0025, frequency1 < 0.0031)
         #     results = mod.fit(power1, pars, x=frequency1)
         #     # results = mod.fit(power1[flim], pars, x=frequency1[flim])
-        #     out_file = open(path+'LS/freqfit_stats.dat', 'w')
+        #     out_file = open(path+'LS/freqfit_stats.txt', 'w')
         #     out_file.write(results.fit_report()+'\n')
         #     out_file.close()
         #     # print(results.fit_report())
@@ -2143,7 +2155,7 @@ def phase_rv_curve(df, periods, path, SB2=False, print_output=True, plots=True):
         #         # flim = np.logical_and(frequency1 > 0.0025, frequency1 < 0.0031)
         #         results2 = mod.fit(power2, pars, x=frequency2)
         #         # results = mod.fit(power1[flim], pars, x=frequency1[flim])
-        #         out_file2 = open(path+'LS/freqfit_stats_SB2.dat', 'w')
+        #         out_file2 = open(path+'LS/freqfit_stats_SB2.txt', 'w')
         #         out_file2.write(results2.fit_report()+'\n')
         #         out_file2.close()
         #         # print(results.fit_report())
