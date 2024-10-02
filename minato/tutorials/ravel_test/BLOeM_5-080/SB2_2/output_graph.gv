@@ -1,0 +1,42 @@
+digraph {
+	"logσ_ε" [label="logσ_ε" fillcolor=white shape=ellipse style=filled]
+	"ε" [label="ε" fillcolor=white shape=ellipse style=filled]
+	"fλ" [label="fλ" fillcolor=grey shape=ellipse style=filled]
+	"λ0" [label="λ0" fillcolor=white shape=plain style=filled]
+	"Δv" [label="Δv" fillcolor=white shape=plain style=filled]
+	"σ_Δv" [label="σ_Δv" fillcolor=white shape=plain style=filled]
+	subgraph "cluster_k=1..2" {
+		label="k=1..2" labeljust=r labelloc=b
+		"Δv_τk" [label="Δv_τk" fillcolor=white shape=ellipse style=filled]
+		"𝛼_kλ" [label="𝛼_kλ" fillcolor=white shape=ellipse style=filled]
+		"σ_kλ" [label="σ_kλ" fillcolor=white shape=ellipse style=filled]
+		"λ_kλ" [label="λ_kλ" fillcolor=white shape=ellipse style="filled,dashed"]
+		"C_λk" [label="C_λk" fillcolor=white shape=ellipse style="filled,dashed"]
+		"fλ_pred" [label="fλ_pred" fillcolor=white shape=ellipse style="filled,dashed"]
+		subgraph "cluster_λ=1..4" {
+			label="λ=1..4" labeljust=r labelloc=b
+			"𝛼_kλ" [label="𝛼_kλ" fillcolor=white shape=ellipse style=filled]
+			"σ_kλ" [label="σ_kλ" fillcolor=white shape=ellipse style=filled]
+			"λ_kλ" [label="λ_kλ" fillcolor=white shape=ellipse style="filled,dashed"]
+			"C_λk" [label="C_λk" fillcolor=white shape=ellipse style="filled,dashed"]
+			"fλ_pred" [label="fλ_pred" fillcolor=white shape=ellipse style="filled,dashed"]
+			subgraph "cluster_τ=1..9" {
+				label="τ=1..9" labeljust=r labelloc=b
+				"C_λk" [label="C_λk" fillcolor=white shape=ellipse style="filled,dashed"]
+				"fλ_pred" [label="fλ_pred" fillcolor=white shape=ellipse style="filled,dashed"]
+			}
+		}
+	}
+	"logσ_ε" -> "ε"
+	"Δv_τk" -> "C_λk"
+	"𝛼_kλ" -> "C_λk"
+	"σ_kλ" -> "C_λk"
+	"λ_kλ" -> "C_λk"
+	"ε" -> "fλ_pred"
+	"C_λk" -> "fλ_pred"
+	"fλ_pred" -> "fλ"
+	"Δv" -> "Δv_τk"
+	"σ_Δv" -> "Δv_τk"
+	"λ0" -> "λ_kλ"
+	distribution_description_node [label="logσ_ε ~ Uniform\lε ~ Normal\lΔv_τk ~ Uniform\l𝛼_kλ ~ Uniform\lσ_kλ ~ Uniform\lλ_kλ ~ Deterministic\lC_λk ~ Deterministic\lfλ_pred ~ Deterministic\lfλ ~ Normal\l" shape=plaintext]
+}

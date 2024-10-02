@@ -1,0 +1,61 @@
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 31
+    # data points      = 540
+    # variables        = 23
+    chi-square         = 285.603632
+    reduced chi-square = 0.55242482
+    Akaike info crit   = -297.960663
+    Bayesian info crit = -199.254573
+##  Warning: uncertainties could not be estimated:
+    amp1:    at initial value
+    amp1:    at boundary
+    wid1:    at initial value
+    wid1:    at boundary
+    amp2:    at initial value
+    amp2:    at boundary
+    wid2:    at initial value
+    wid2:    at boundary
+    cont:    at initial value
+    cen1_1:  at initial value
+    cen2_1:  at initial value
+    cen1_2:  at initial value
+    cen2_2:  at initial value
+    cen1_3:  at initial value
+    cen2_3:  at initial value
+    cen1_4:  at initial value
+    cen2_4:  at initial value
+    cen1_5:  at initial value
+    cen2_5:  at initial value
+    cen1_6:  at initial value
+    cen2_6:  at initial value
+    cen1_7:  at initial value
+    cen2_7:  at initial value
+    cen1_8:  at initial value
+    cen2_8:  at initial value
+    cen1_9:  at initial value
+    cen2_9:  at initial value
+[[Variables]]
+    amp1:    0.05000000 (init = 0.05)
+    wid1:    0.50000000 (init = 0.5)
+    amp2:    0.05000000 (init = 0.05)
+    wid2:    0.50000000 (init = 0.5)
+    cont:    1.00336258 (init = 1.003363)
+    cen1_1:  4483.16734 (init = 4483.167)
+    cen2_1:  4481.21510 (init = 4481.215)
+    cen1_2:  4485.64450 (init = 4485.644)
+    cen2_2:  4481.06493 (init = 4481.065)
+    cen1_3:  4480.91451 (init = 4480.915)
+    cen2_3:  4487.95464 (init = 4487.955)
+    cen1_4:  4480.93871 (init = 4480.939)
+    cen2_4:  4478.07655 (init = 4478.077)
+    cen1_5:  4478.17910 (init = 4478.179)
+    cen2_5:  4482.96095 (init = 4482.961)
+    cen1_6:  4481.92689 (init = 4481.927)
+    cen2_6:  4483.11955 (init = 4483.12)
+    cen1_7:  4484.58969 (init = 4484.59)
+    cen2_7:  4493.10315 (init = 4493.103)
+    cen1_8:  4485.06251 (init = 4485.063)
+    cen2_8:  4482.34361 (init = 4482.344)
+    cen1_9:  4486.74056 (init = 4486.741)
+    cen2_9:  4487.52436 (init = 4487.524)

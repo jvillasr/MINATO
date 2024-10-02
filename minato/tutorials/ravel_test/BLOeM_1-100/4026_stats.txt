@@ -1,0 +1,25 @@
+BLOeM_1-100_09
+--------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 51
+    # data points      = 130
+    # variables        = 4
+    chi-square         = 69.8605669
+    reduced chi-square = 0.55444894
+    Akaike info crit   = -72.7343026
+    Bayesian info crit = -61.2641648
+    R-squared          = 0.89538645
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  1.01061434 +/- 0.00216415 (0.21%) (init = 1)
+    g1_amp:               0.23553889 +/- 0.00994749 (4.22%) (init = 0.4417577)
+    g1_cen:               4028.16970 +/- 0.05461040 (0.00%) (init = 4029)
+    g1_wid:               2.94721730 +/- 0.13177534 (4.47%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5231
+    C(continuum_intercept, g1_wid) = +0.3076
+    C(continuum_intercept, g1_amp) = +0.1366
+

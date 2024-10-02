@@ -1,0 +1,26 @@
+ ***************************************
+   LS output for star BLOeM_8-057
+ ***************************************
+
+ these are the false alarm levels: 3.673  53.833  179.267  
+ FAP of the highest peak         : 0.64700
+ FAP of the highest peak x100    : 64.70000
+
+ Best frequency                  :  2.423
+ ****************************************************
+ Best Period                     :  0.41275539 days
+ ****************************************************
+ Best Period from secondary      :  0.41289928 days
+ Period from |RV1-RV2|           :  0.92883472 days correct period = P1 or 0.20637769513403914
+ Other periods:
+   peaks                         : 
+   frequencies                   : 
+   periods                       : 
+ from secondary:
+   peaks                         : 
+   frequencies                   : 
+   periods                       : 
+ Classification index            :  4
+ maxpower                        :  2.37
+ fal1                            :  179.27
+ maxpower_maxfal                 :  0.01
