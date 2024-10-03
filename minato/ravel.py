@@ -259,13 +259,12 @@ def fit_sb2(line, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, sh
 
     return result, x_waves, y_fluxes
 
-def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, shift, path, K=2):
+def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, K=2):
     '''
     Probabilistic model for SB2 line profile fitting. It uses Numpyro for Bayesian inference, 
     sampling from the posterior distribution of the model parameters using MCMC with the NUTS algorithm. 
     The model includes plates for vectorized computations over epochs and wavelengths. 
     '''
-    c_kms = c.to('km/s').value   
     n_lines = len(lines)
     n_epochs = len(wavelengths)
     print('Number of lines:', n_lines)
@@ -284,7 +283,6 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
     for i, line in enumerate(lines):
         region_start, region_end = lines_dic[line]['region']
-
         x_waves = []
         y_fluxes = []
         y_errors = []
@@ -315,30 +313,22 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     y_errors = jnp.array(y_errors_interp)
 
     # Initial guess for the central wavelength
-    # cen_ini = jnp.array([line+shift for line in lines])
     cen_ini = jnp.array([lines_dic[line]['centre'][0] for line in lines])
 
-    def model2(λ=None, fλ=None, σ_fλ=None, K=K, shift=shift, is_hline=None):
-        nλ, nτ, ndata = λ.shape
+    def sb2_model(λ=None, fλ=None, σ_fλ=None, K=K, is_hline=None):
+        c_kms = c.to('km/s').value   
+        # Get the number of lines, epochs, and wavelengths points
+        nlines, nepochs, ndata = λ.shape
 
-        # spectral window
-        λ0 = npro.param("λ0", cen_ini)
-        dλ0 = [lines_dic[line]['region'] for line in lines]
-        dλ0 = jnp.array([k1 - k0 for k0, k1 in dλ0])
+        # Setting central rest wavelength (λ_rest) for each line
+        λ_rest = npro.param("λ_rest", cen_ini)
+        λ_rest = λ_rest[None, :, None]   # Shape (1, nlines, 1)
 
-        # Expand λ0 and dλ0 to shape (1, nτ, nλ)
-        λ0 = λ0[None, :, None]                
-        dλ0 = dλ0[None, :, None]
-
-        # Compute lower and upper bounds
-        lower = (λ0 - 0.2 * dλ0) + shift
-        upper = (λ0 + 0.2 * dλ0) + shift
-
-        # prior on Δv
+        # prior on velocity shift
         Δv = npro.param('Δv', 0)
         σ_Δv = npro.param('σ_Δv', 500)
 
-        # Continuum
+        # Continuum level ε with uncertainty
         logσ_ε = npro.sample('logσ_ε', dist.Uniform(-5, 0))
         σ_ε = jnp.exp(logσ_ε)
         ε = npro.sample('ε', dist.Normal(1.0, σ_ε))
@@ -347,71 +337,63 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         #Ak_0 = [.5] * 2 + [0.1] * (K - 2)
 
         with npro.plate(f"k=1..{K}", K, dim=-3): # Component plate
-            # Sample the velocity shift per component (and epoch?)
-            Δv_τk = npro.sample("Δv_τk", dist.Uniform(Δv, σ_Δv), sample_shape=(nτ,))
-            Δv_τk_expanded = Δv_τk[:, :, :, jnp.newaxis]  
+            # Sample velocity shifts for each component and epoch
+            Δv_τk = npro.sample("Δv_τk", dist.Uniform(Δv, σ_Δv), sample_shape=(nepochs,))
+            Δv_τk_expanded = Δv_τk[:, :, :, jnp.newaxis]             # Shape: (K, 1, nepochs, 1)
 
-            with npro.plate(f'λ=1..{nλ}', nλ, dim=-2): # Lines plate
-                Ak = npro.sample('𝛼_kλ', dist.Uniform(0.05, 0.5))
-                Ak = Ak[:, :, :, jnp.newaxis]
-                σk = npro.sample('σ_kλ', dist.Uniform(0.5, 3))
-                σk = σk[:, :, :, jnp.newaxis]
+            with npro.plate(f'λ=1..{nlines}', nlines, dim=-2): # Lines plate
+                # Sample the amplitude and width for each component and line
+                amp = npro.sample('𝛼_kλ', dist.Uniform(0.05, 0.5))
+                amp = amp[:, :, :, jnp.newaxis]                      # Shape: (K, nlines, 1, 1)
+                wid = npro.sample('σ_kλ', dist.Uniform(0.5, 3))
+                wid = wid[:, :, :, jnp.newaxis]                      # Shape: (K, nlines, 1, 1)
 
-                # Sample the line center
-                # λ_kλ = npro.sample("λ_kλ", dist.Uniform(lower, upper))
-                λ_kλ = npro.deterministic("λ_kλ", λ0)
-                λ_kλ_expanded = λ_kλ[:, :, :, jnp.newaxis]   #
+                # Making λ_rest a deterministic variable
+                λ0 = npro.deterministic("λ0", λ_rest)
+                λ0 = λ0[:, :, :, jnp.newaxis]                        # Shape: (1, nlines, 1, 1)
 
-                λ_expanded = λ[jnp.newaxis, :, :, :]
-                μ = λ_kλ_expanded * (1 + Δv_τk_expanded / c_kms)
+                # Compute the shifted wavelengths
+                μ = λ0 * (1 + Δv_τk_expanded / c_kms)
 
-                # Expand is_hline for broadcasting
-                is_hline_expanded = is_hline[None, :, None, None]  # Shape: (1, nτ, 1, 1)
+                # Expand wavelength and is_hline for broadcasting
+                λ = λ[jnp.newaxis, :, :, :]                          # Shape: (1, nlines, nepochs, ndata)                
+                is_hline = is_hline[None, :, None, None]             # Shape: (1, nlines, 1, 1)
 
                 # Compute both profiles
-                gaussian_profile = gaussian(λ_expanded, Ak, μ, σk)
-                lorentzian_profile = lorentzian(λ_expanded, Ak, μ, σk)
+                gaussian_profile = gaussian(λ, amp, μ, wid)
+                lorentzian_profile = lorentzian(λ, amp, μ, wid)
 
-                with npro.plate(f'τ=1..{nτ}', nτ, dim=-1): # Epoch plate
+                with npro.plate(f'τ=1..{nepochs}', nepochs, dim=-1): # Epoch plate
 
                     # Select the appropriate profile
-                    comp = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
+                    comp = jnp.where(is_hline, lorentzian_profile, gaussian_profile)
 
                     Ck = npro.deterministic("C_λk", comp)
                     fλ_pred = npro.deterministic("fλ_pred", ε + Ck.sum(axis=0))
         
         npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
 
-    rendered_model = npro.render_model(model2, model_args=(x_waves, y_fluxes, y_errors), model_kwargs={'K':K, 'is_hline': is_hline},
-                 render_distributions=True, render_params=True)
-    rendered_model.render(filename=path+'output_graph.gv', format='png')
-
+    # rendered_model = npro.render_model(model2, model_args=(x_waves, y_fluxes, y_errors), model_kwargs={'K':K, 'is_hline': is_hline},
+    #              render_distributions=True, render_params=True)
+    # rendered_model.render(filename=path+'output_graph.gv', format='png')
 
     rng_key = random.PRNGKey(0)
     # model_init = initialize_model(rng_key, sb2_model, model_args=(x_waves, y_fluxes, y_errors))
-
-    # kernel = NUTS(sb2_model)
-    kernel = NUTS(model2)
+    kernel = NUTS(sb2_model)
     mcmc = MCMC(kernel, num_warmup=500, num_samples=500)
-    # mcmc.run(rng_key, wavelengths=jnp.array(x_waves), fluxes=jnp.array(y_fluxes), f_errors=jnp.array(y_errors))
     mcmc.run(rng_key, λ=jnp.array(x_waves), fλ=jnp.array(y_fluxes), σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline)
-    # mcmc.run(rng_key, λ=jnp.array(x_waves), fλ=jnp.array(y_fluxes), σ_fλ=jnp.array(y_errors), is_hline=is_hline, t=jnp.array(time))
     mcmc.print_summary()
     trace = mcmc.get_samples()
-
-    print(trace.keys())
-    for key in trace:
-        print(f"{key}: {trace[key].shape}")
-
+    # print(trace.keys())
+    # for key in trace:
+    #     print(f"{key}: {trace[key].shape}")
 
     n_sol = 100
-
     for idx, line in enumerate(lines): 
         fig, axes = setup_fits_plots(wavelengths)
         for epoch_idx, (epoch, ax) in enumerate(zip(range(n_epochs), axes.ravel())):
             # Extract the posterior samples for the total prediction
             fλ_pred_samples = trace['fλ_pred'][-n_sol:, idx, epoch, :]  # Shape: (n_sol, ndata)
-            
             # Extract the posterior samples for the continuum
             continuum_pred_samples = trace['ε'][-n_sol:, None]
             # Extract the posterior samples for each component
@@ -426,11 +408,6 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
             # Plot the observed data without label
             ax.plot(x_waves[idx][epoch], y_fluxes[idx][epoch], color='k', lw=1, alpha=0.8)
             
-            # Plot vertical lines at the line center for each component
-            # for comp in range(2):
-            #     λ_kλ = trace['λ_kλ'][-1, comp, idx, 0]
-            #     ax.axvline(x=λ_kλ, color='C{}'.format(comp), linestyle='--')
-
         # Create custom legend entries
         custom_lines = [
             Line2D([0], [0], color='C2', alpha=0.5, lw=2),
@@ -441,7 +418,6 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         axes[0].legend(custom_lines, ['Total Prediction', 'Component 1', 'Component 2', 'Observed Data'], fontsize=10)
         fig.supxlabel('Wavelength [\AA]', size=22)
         fig.supylabel('Flux', size=22)  
-        # plt.tight_layout()
         plt.savefig(path + f'{line}_fits_SB2_.png', bbox_inches='tight', dpi=150)
         plt.close()
 
@@ -1345,7 +1321,7 @@ def lomb_scargle(df, path, probabilities = [0.5, 0.01, 0.001], SB2=False, print_
     '''
     df: dataframe with the RVs, output from getrvs()
     '''
-    print(df)
+    # print(df)
     if not os.path.exists(path+'LS'):
         os.makedirs(path+'LS')
 
