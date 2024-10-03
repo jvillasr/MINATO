@@ -667,7 +667,7 @@ def SLfit(spectra_list, path, lines, K=2, file_type='fits', plots=True, balmer=T
         # else:
         #     axes = [None] * len(wavelengths)
         if SB2:
-            result, x_wave, y_flux = fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, shift, path, K=K)   
+            result, x_wave, y_flux = fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, K=K)   
             # result, x_wave, y_flux = fit_sb2(line, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, shift, axes, path)
             # writer = sb2_results_to_file(result, wavelengths, names, line, writer, csvfile)
             # writer = mcmc_results_to_file(result, names, line, writer, csvfile)
@@ -1614,7 +1614,7 @@ def lomb_scargle(df, path, probabilities = [0.5, 0.01, 0.001], SB2=False, print_
                 if np.isfinite(power1.max()):
                     ax.set(ylim=(-0.03*power.max(), power.max()+0.1*power.max()))
                 plt.xscale('log')
-                if power1[peaks1] and (power1[peaks1].max() < maxpower):
+                if power1[peaks1].size > 0 and (power1[peaks1].max() < maxpower):
                     ax.set(ylim=(0-0.01*power1[peaks1].max(), power1[peaks1].max()+0.2*power1[peaks1].max()))
                 tickLabels = map(str, bins)
                 ax.set_xticks(bins)
