@@ -23,6 +23,10 @@ from numpyro.infer import MCMC, NUTS
 from numpyro.infer.util import initialize_model
 from jax import numpy as jnp
 from jax import random
+import multiprocessing
+
+# Set the number of devices to the number of available CPUs
+npro.set_host_device_count(multiprocessing.cpu_count())
 
 pd.set_option('display.max_rows', 1000)
 pd.set_option('display.max_columns', 1000)
@@ -315,7 +319,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # Initial guess for the central wavelength
     cen_ini = jnp.array([lines_dic[line]['centre'][0] for line in lines])
 
-    def sb2_model(λ=None, fλ=None, σ_fλ=None, K=K, is_hline=None):
+    def sb2_model(λ=None, fλ=None, σ_fλ=None, K=K, is_hline=None, shift_kms=200):
         c_kms = c.to('km/s').value   
         # Get the number of lines, epochs, and wavelengths points
         nlines, nepochs, ndata = λ.shape
@@ -325,8 +329,20 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         λ_rest = λ_rest[None, :, None]   # Shape (1, nlines, 1)
 
         # prior on velocity shift
-        Δv = npro.param('Δv', 0)
-        σ_Δv = npro.param('σ_Δv', 500)
+        Δv_min = npro.param('Δv_min', 0)
+        Δv_max = npro.param('Δv_max', 300+shift_kms)
+        Δv = npro.param('Δv', shift_kms)
+        σ_Δv = npro.param('σ_Δv', 200)
+
+        # Define LogNormal priors for amplitudes
+        # Component 1: mean amplitude ~ 0.4, Component 2: mean amplitude ~ 0.1
+        # To set mu and sigma for LogNormal, we use:
+        # mean = exp(mu + 0.5 * sigma^2)
+        # Assuming sigma = 0.1 for both components for tight constraints
+        amp_mu = jnp.log(jnp.array([0.4, 0.1])) - 0.5 * (0.1 ** 2)
+        amp_sigma = jnp.array([0.1, 0.1])
+        print('amp_mu.shape: ', amp_mu.shape)
+        print('amp_sigma.shape: ', amp_sigma.shape)
 
         # Continuum level ε with uncertainty
         logσ_ε = npro.sample('logσ_ε', dist.Uniform(-5, 0))
@@ -338,26 +354,34 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
         with npro.plate(f"k=1..{K}", K, dim=-3): # Component plate
             # Sample velocity shifts for each component and epoch
-            Δv_τk = npro.sample("Δv_τk", dist.Uniform(Δv, σ_Δv), sample_shape=(nepochs,))
-            Δv_τk_expanded = Δv_τk[:, :, :, jnp.newaxis]             # Shape: (K, 1, nepochs, 1)
+            # Δv_τk = npro.sample("Δv_τk", dist.Uniform(Δv_min, Δv_max), sample_shape=(nepochs,))
+            Δv_τk = npro.sample("Δv_τk", dist.Normal(Δv, σ_Δv), sample_shape=(nepochs,))
+            Δv_τk_expanded = Δv_τk[:, :, jnp.newaxis, :, jnp.newaxis]             # Shape: (K, 1, amp_constrains, nepochs, 1)
 
             with npro.plate(f'λ=1..{nlines}', nlines, dim=-2): # Lines plate
                 # Sample the amplitude and width for each component and line
-                amp = npro.sample('𝛼_kλ', dist.Uniform(0.05, 0.5))
-                amp = amp[:, :, :, jnp.newaxis]                      # Shape: (K, nlines, 1, 1)
-                wid = npro.sample('σ_kλ', dist.Uniform(0.5, 3))
-                wid = wid[:, :, :, jnp.newaxis]                      # Shape: (K, nlines, 1, 1)
+                # amp = npro.sample('𝛼_kλ', dist.Uniform(0.05, 0.5))
+                # Sample the amplitude using LogNormal to ensure positivity
+                print('amp_mu.shape: ', amp_mu[:, None].shape)
+                print('amp_sigma.shape: ', amp_sigma[:, None].shape)
+                amp = npro.sample('𝛼_kλ', dist.LogNormal(amp_mu, amp_sigma))
+                print('amp.shape: ', amp.shape)
+                amp = amp[:, :, :, jnp.newaxis, jnp.newaxis]         # Shape: (K, nlines, amp_constrains, 1, 1)
+                print('amp.shape: ', amp.shape)
+                wid = npro.sample('σ_kλ', dist.Uniform(0.5, 6))
+                # wid = npro.sample('σ_kλ', dist.Normal(4, 1))
+                wid = wid[:, :, :, jnp.newaxis, jnp.newaxis]         # Shape: (K, nlines, amp_constrains, 1, 1)
 
                 # Making λ_rest a deterministic variable
                 λ0 = npro.deterministic("λ0", λ_rest)
-                λ0 = λ0[:, :, :, jnp.newaxis]                        # Shape: (1, nlines, 1, 1)
+                λ0 = λ0[:, :, :, jnp.newaxis, jnp.newaxis]           # Shape: (1, nlines, amp_constrains, 1, 1)
 
                 # Compute the shifted wavelengths
                 μ = λ0 * (1 + Δv_τk_expanded / c_kms)
 
                 # Expand wavelength and is_hline for broadcasting
-                λ = λ[jnp.newaxis, :, :, :]                          # Shape: (1, nlines, nepochs, ndata)                
-                is_hline = is_hline[None, :, None, None]             # Shape: (1, nlines, 1, 1)
+                λ = λ[jnp.newaxis, :, jnp.newaxis, :, :]             # Shape: (1, nlines, amp_constrains, nepochs, ndata)                
+                is_hline = is_hline[None, :, None, None, None]       # Shape: (1, nlines, amp_constrains, 1, 1)
 
                 # Compute both profiles
                 gaussian_profile = gaussian(λ, amp, μ, wid)
@@ -369,8 +393,15 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
                     comp = jnp.where(is_hline, lorentzian_profile, gaussian_profile)
 
                     Ck = npro.deterministic("C_λk", comp)
+                    print('Ck.shape: ', Ck.shape)
                     fλ_pred = npro.deterministic("fλ_pred", ε + Ck.sum(axis=0))
-        
+                    print('fλ_pred.shape: ', fλ_pred.shape)
+        print('fλ_pred.shape: ', fλ_pred.shape)
+        print('fλ.shape: ', fλ.shape)
+        print('σ_fλ.shape: ', σ_fλ.shape)
+        # Reshape fλ and σ_fλ to match the shape of fλ_pred
+        fλ = fλ[:, jnp.newaxis, :, :]  # Shape: (nlines, amp_constrains, nepochs, ndata)
+        σ_fλ = σ_fλ[:, jnp.newaxis, :, :]  # Shape: (nlines, amp_constrains, nepochs, ndata)
         npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
 
     # rendered_model = npro.render_model(model2, model_args=(x_waves, y_fluxes, y_errors), model_kwargs={'K':K, 'is_hline': is_hline},
@@ -388,6 +419,11 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # for key in trace:
     #     print(f"{key}: {trace[key].shape}")
 
+    def rv_shift_wavelength(λ_emitted, v):
+        c_kms = c.to('km/s').value  
+        λ_observed = λ_emitted * (1 + (v / c_kms))
+        return λ_observed
+
     n_sol = 100
     for idx, line in enumerate(lines): 
         fig, axes = setup_fits_plots(wavelengths)
@@ -397,6 +433,10 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
             # Extract the posterior samples for the continuum
             continuum_pred_samples = trace['ε'][-n_sol:, None]
             # Extract the posterior samples for each component
+            print('trace[C_λk].shape: ', trace['C_λk'].shape)
+            print('trace[C_λk].shape: ', trace['C_λk'][-n_sol:, 0, idx, epoch, :].shape)
+            print('trace[C_λk].shape: ', trace['C_λk'][-n_sol:, 0, idx, :, epoch, :].shape)
+            print('continuum_pred_samples.shape: ', continuum_pred_samples.shape)
             fλ_pred_comp1_samples = continuum_pred_samples + trace['C_λk'][-n_sol:, 0, idx, epoch, :]
             fλ_pred_comp2_samples = continuum_pred_samples + trace['C_λk'][-n_sol:, 1, idx, epoch, :]
             
@@ -407,6 +447,12 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
             # Plot the observed data without label
             ax.plot(x_waves[idx][epoch], y_fluxes[idx][epoch], color='k', lw=1, alpha=0.8)
+
+            # Plot vertical line at the central wavelength
+            shift=200
+            ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift), color='r', linestyle='--', lw=1)
+            ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift-200), color='orange', linestyle='--', lw=1)
+            ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift+200), color='orange', linestyle='--', lw=1)
             
         # Create custom legend entries
         custom_lines = [
@@ -613,7 +659,7 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile):
 
 
 
-def SLfit(spectra_list, path, lines, K=2, file_type='fits', plots=True, balmer=True, neblines=[4102, 4340], doubem=[], SB2=False, shift=0, use_init_pars=False):
+def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', plots=True, balmer=True, neblines=[4102, 4340], doubem=[], SB2=False, shift=0, use_init_pars=False):
     '''
     spectra_list
     path
@@ -640,9 +686,9 @@ def SLfit(spectra_list, path, lines, K=2, file_type='fits', plots=True, balmer=T
 
     print('*** SB2 set to: ', SB2, ' ***\n')
     
-    wavelengths, fluxes, f_errors, names, jds = read_spectra(spectra_list, path, file_type)
+    wavelengths, fluxes, f_errors, names, jds = read_spectra(spectra_list, data_path, file_type)
 
-    path = setup_star_directory_and_save_jds(names, jds, path, SB2)
+    path = setup_star_directory_and_save_jds(names, jds, save_path, SB2)
 
     lines_dic = setup_line_dictionary()
 
@@ -1303,7 +1349,7 @@ def get_peaks(power, frequency, fal_50pc, fal_1pc, fal_01pc, minP=1.1):
 
     return freq_peaks, peri_peaks, peaks
 
-def run_LS(hjd, rv, rv_err=None, probabilities = [0.5, 0.01, 0.001], method='bootstrap', P_ini=0.4, P_end=1000, samples_per_peak=2000):
+def run_LS(hjd, rv, rv_err=None, probabilities = [0.5, 0.01, 0.001], method='bootstrap', P_ini=0.6, P_end=500, samples_per_peak=5000):
     if rv_err is None:
     # if rv_err.any() == False:
         ls = LombScargle(hjd, rv, normalization='model')
@@ -1908,5 +1954,3 @@ def phase_rv_curve(time, rv1, rv1_er=None, rv2=None, rv2_er=None, period=None, p
     else:
         result = fit_sinusoidal_probmod(phase_expanded, rv1_expanded, rv1_err_expanded)
         return result, phase_expanded, rv1_expanded, rv1_err_expanded
-
-    
