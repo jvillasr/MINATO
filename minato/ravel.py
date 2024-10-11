@@ -319,7 +319,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # Initial guess for the central wavelength
     cen_ini = jnp.array([lines_dic[line]['centre'][0] for line in lines])
 
-    def sb2_model(λ=None, fλ=None, σ_fλ=None, K=K, is_hline=None, shift_kms=200):
+    def sb2_model(λ=None, fλ=None, σ_fλ=None, K=K, is_hline=None, shift_kms=0):
         c_kms = c.to('km/s').value   
         # Get the number of lines, epochs, and wavelengths points
         nlines, nepochs, ndata = λ.shape
@@ -619,7 +619,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
     kernel = NUTS(sb2_model)
     mcmc = MCMC(kernel, num_warmup=500, num_samples=500)
-    mcmc.run(rng_key, λ=jnp.array(x_waves), fλ=jnp.array(y_fluxes), σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline)
+    mcmc.run(rng_key, λ=jnp.array(x_waves), fλ=jnp.array(y_fluxes), σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline, shift_kms=200)
     mcmc.print_summary()
     trace = mcmc.get_samples()
     # print(trace.keys())
