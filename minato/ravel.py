@@ -19,7 +19,7 @@ from scipy.signal import find_peaks
 from scipy.interpolate import interp1d
 import numpyro as npro
 import numpyro.distributions as dist
-from numpyro.infer import MCMC, NUTS
+from numpyro.infer import MCMC, NUTS, Predictive
 from numpyro.infer.util import initialize_model
 from jax import numpy as jnp
 from jax import random
@@ -89,7 +89,7 @@ def setup_star_directory_and_save_jds(names, jds, path, SB2):
     star = names[0].split('_')[0] + '_' + names[0].split('_')[1] + '/'
     path = path.replace('FITS/', '') + star
     if SB2==True:
-        path = path + 'SB2_2/'
+        path = path + 'SB2/'
     if not os.path.exists(path):
         os.makedirs(path)
     if jds:    
@@ -324,84 +324,163 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         # Get the number of lines, epochs, and wavelengths points
         nlines, nepochs, ndata = λ.shape
 
+        # Continuum level ε with uncertainty
+        # logσ_ε = npro.sample('logσ_ε', dist.Uniform(-5, 0))
+        # σ_ε = jnp.exp(logσ_ε)
+        # ε = npro.sample('ε', dist.Normal(1.0, σ_ε))
+        # Continuum level ε with uncertainty using TruncatedNormal
+        logσ_ε = npro.sample('logσ_ε', dist.Uniform(-5, 0))
+        σ_ε = jnp.exp(logσ_ε)
+        epsilon_lower = 0.7  # Set based on physical constraints
+        epsilon_upper = 1.2  # Set based on physical constraints
+        ε = npro.sample('ε', dist.TruncatedNormal(loc=1.0, scale=σ_ε, low=epsilon_lower, high=epsilon_upper))
+
         # Setting central rest wavelength (λ_rest) for each line
+        # λ_rest = npro.param("λ_rest", cen_ini)
+        # λ_rest = λ_rest[None, :, None]   # Shape (1, nlines, 1)
+
+        # Rest wavelength for each line
         λ_rest = npro.param("λ_rest", cen_ini)
-        λ_rest = λ_rest[None, :, None]   # Shape (1, nlines, 1)
+        λ0 = λ_rest  # Shape: (nlines,)
 
         # prior on velocity shift
-        Δv_min = npro.param('Δv_min', 0)
-        Δv_max = npro.param('Δv_max', 300+shift_kms)
-        Δv = npro.param('Δv', shift_kms)
-        σ_Δv = npro.param('σ_Δv', 200)
+        Δv_min = 0
+        Δv_max = 300+shift_kms
+        Δv = shift_kms
+        Δv_means = jnp.array([shift_kms-50, shift_kms+50]).reshape(K, 1, 1)
+        σ_Δv = 50
+        # Δv_prior = shift_kms * jnp.array([-1, 1])  # Shape: (K,)
+        # σ_Δv = 200 * jnp.ones(K)                    # Shape: (K,)
+        # Δv = npro.param('Δv', Δv_prior)             # Shape: (K,)
+        # σ_Δv = npro.param('σ_Δv', σ_Δv)             # Shape: (K,)
+
+        # Δv = npro.param('Δv', shift_kms * jnp.ones(K))    # Shape: (2,)
+        # σ_Δv = npro.param('σ_Δv', 200 * jnp.ones(K))      # Shape: (2,)
+        # print('\n------------------------------------')
+        # print('Initial shapes of variables:')
+        # print('Δv.shape: ', Δv.shape)
 
         # Define LogNormal priors for amplitudes
         # Component 1: mean amplitude ~ 0.4, Component 2: mean amplitude ~ 0.1
         # To set mu and sigma for LogNormal, we use:
         # mean = exp(mu + 0.5 * sigma^2)
         # Assuming sigma = 0.1 for both components for tight constraints
-        amp_mu = jnp.log(jnp.array([0.4, 0.1])) - 0.5 * (0.1 ** 2)
-        amp_sigma = jnp.array([0.1, 0.1])
+        amp_mu = jnp.log(jnp.array([0.2, 0.05])) - 0.5 * (0.1 ** 2)
+        amp_sigma = jnp.array([0.05, 0.05])
+        # Using Uniform priors for amplitudes
+        amp1_min = 0.05
+        amp2_min = 0.01
+        amp1_max = 0.3
         print('amp_mu.shape: ', amp_mu.shape)
-        print('amp_sigma.shape: ', amp_sigma.shape)
+        print('amp_sigma.shape: ', amp_sigma.shape, '\n')
+        wid1_min = 0.5
+        wid1_max = 5.0
+        wid2_min = 0.5  # Ensure this is greater than wid1_min
+        wid2_max = 6.0
 
-        # Continuum level ε with uncertainty
-        logσ_ε = npro.sample('logσ_ε', dist.Uniform(-5, 0))
-        σ_ε = jnp.exp(logσ_ε)
-        ε = npro.sample('ε', dist.Normal(1.0, σ_ε))
+        # with npro.plate(f"k=1..{K}", K, dim=-3): # Component plate
+        print('Δv = ', Δv)
+        print('Δv_means = ', Δv_means)
+        print('σ_Δv = ', σ_Δv)
+        # Δv_τk = npro.sample("Δv_τk", dist.Normal(Δv, σ_Δv), sample_shape=(nepochs,))
 
-        #amplitude prior
-        #Ak_0 = [.5] * 2 + [0.1] * (K - 2)
-
-        with npro.plate(f"k=1..{K}", K, dim=-3): # Component plate
-            # Sample velocity shifts for each component and epoch
+        with npro.plate(f'τ=1..{nepochs}', nepochs, dim=-1):
+            Δv_τk = npro.sample("Δv_τk", dist.Normal(loc=Δv_means, scale=σ_Δv))
             # Δv_τk = npro.sample("Δv_τk", dist.Uniform(Δv_min, Δv_max), sample_shape=(nepochs,))
-            Δv_τk = npro.sample("Δv_τk", dist.Normal(Δv, σ_Δv), sample_shape=(nepochs,))
-            Δv_τk_expanded = Δv_τk[:, :, jnp.newaxis, :, jnp.newaxis]             # Shape: (K, 1, amp_constrains, nepochs, 1)
+            # print('Δv_τk: ', Δv_τk[0, 1, :])
+            # Δv_τk = Δv_τk.T[:, None, :]
+            print('Δv_τk.shape: ', Δv_τk.shape)
+        # with npro.plate(f"k=1..{K}", K, dim=-3):
+        #     Δv_τk = npro.sample("Δv_τk", dist.Normal(Δv[:, None], σ_Δv[:, None]), sample_shape=(nepochs,))
+        #     print('Δv_τk.shape: ', Δv_τk.shape)
 
-            with npro.plate(f'λ=1..{nlines}', nlines, dim=-2): # Lines plate
-                # Sample the amplitude and width for each component and line
-                # amp = npro.sample('𝛼_kλ', dist.Uniform(0.05, 0.5))
-                # Sample the amplitude using LogNormal to ensure positivity
-                print('amp_mu.shape: ', amp_mu[:, None].shape)
-                print('amp_sigma.shape: ', amp_sigma[:, None].shape)
-                amp = npro.sample('𝛼_kλ', dist.LogNormal(amp_mu, amp_sigma))
-                print('amp.shape: ', amp.shape)
-                amp = amp[:, :, :, jnp.newaxis, jnp.newaxis]         # Shape: (K, nlines, amp_constrains, 1, 1)
-                print('amp.shape: ', amp.shape)
-                wid = npro.sample('σ_kλ', dist.Uniform(0.5, 6))
-                # wid = npro.sample('σ_kλ', dist.Normal(4, 1))
-                wid = wid[:, :, :, jnp.newaxis, jnp.newaxis]         # Shape: (K, nlines, amp_constrains, 1, 1)
+        with npro.plate(f'λ=1..{nlines}', nlines, dim=-2): # Lines plate
+            print('\n------------------------------------')
+            print('Shapes of variables inside the lines plate:')
+            # Sample amplitude per line
+            # amp = npro.sample('𝛼_kλ', dist.LogNormal(amp_mu, amp_sigma))  # Shape: ()
+            amp0 = npro.sample('amp0', dist.Uniform(amp1_min, amp1_max))
+            amp1 = npro.sample('amp1', dist.Uniform(amp2_min, 0.9*amp0))
+            print('amp0.shape: ', amp0.shape)
+            print('amp1.shape: ', amp1.shape)
+            amp = jnp.stack([amp0, amp1], axis=-3)  # Shape: (2,)
+            amp = amp[:, :, :, None]
+            print('amp.shape: ', amp.shape)
 
-                # Making λ_rest a deterministic variable
-                λ0 = npro.deterministic("λ0", λ_rest)
-                λ0 = λ0[:, :, :, jnp.newaxis, jnp.newaxis]           # Shape: (1, nlines, amp_constrains, 1, 1)
+            # with npro.plate(f"k=1..{K}", K, dim=-3): # Component plate
+            # wid1 = npro.sample('wid0', dist.Uniform(wid1_min, wid1_max))
+            # wid2 = npro.sample('wid1', dist.Uniform(wid2_min, wid2_max))
+            # wid = jnp.stack([wid0, wid1], axis=-3)
+            # wid = npro.sample('σ_kλ', dist.Normal(4, 1))
+            # wid = npro.sample('σ_kλ', dist.Uniform(0.5, 4))  # Shape: ()
+            
+            # Sample wid1 from its uniform distribution
+            wid1 = npro.sample('wid1', dist.Uniform(wid1_min, wid1_max))
+            
+            # Sample delta_wid from a uniform distribution ensuring wid2 > wid1
+            delta_wid_min = 0.1  # Minimum separation between wid1 and wid2
+            delta_wid_max = 5.0  # Maximum separation
+            delta_wid = npro.sample('delta_wid', dist.Uniform(delta_wid_min, delta_wid_max))
+            
+            # Define wid2 as wid1 plus the sampled delta
+            wid2 = wid1 + delta_wid
+            
+            # Stack wid1 and wid2
+            wid = jnp.stack([wid1, wid2], axis=-3)  # Shape: (2, nlines)
+            wid = wid[:, :, :, None]
+            print('wid.shape: ', wid.shape)
 
-                # Compute the shifted wavelengths
-                μ = λ0 * (1 + Δv_τk_expanded / c_kms)
+                # Δv_τk = npro.sample("Δv_τk", dist.Normal(Δv, σ_Δv), sample_shape=(nepochs,))
+                # print('Δv_τk.shape: ', Δv_τk.shape)
 
-                # Expand wavelength and is_hline for broadcasting
-                λ = λ[jnp.newaxis, :, jnp.newaxis, :, :]             # Shape: (1, nlines, amp_constrains, nepochs, ndata)                
-                is_hline = is_hline[None, :, None, None, None]       # Shape: (1, nlines, amp_constrains, 1, 1)
+                # with npro.plate(f'τ=1..{nepochs}', nepochs, dim=-1):  # Epochs plate
+                    # Sample velocity shifts for each component and epoch
+                    # print('\n------------------------------------')
+                    # print('Shapes of variables inside the epoch plate:')
+                    # Δv_τk = npro.sample("Δv_τk", dist.Uniform(Δv_min, Δv_max), sample_shape=(nepochs,))
+                    # Δv_τk = npro.sample("Δv_τk", dist.Normal(Δv, σ_Δv), sample_shape=(K, nepochs))
+                    # Δv_τk_expanded = Δv_τk[:, :, jnp.newaxis, :, jnp.newaxis]             # Shape: (K, 1, amp_constrains, nepochs, 1)
+                    # Sample Δv_τk per component and epoch
+                    # Δv_τk = npro.sample("Δv_τk", dist.Normal(Δv_k, σ_Δv_k))  # Shape: ()
+                    # print('Δv_τk.shape: ', Δv_τk.shape)
 
-                # Compute both profiles
-                gaussian_profile = gaussian(λ, amp, μ, wid)
-                lorentzian_profile = lorentzian(λ, amp, μ, wid)
 
-                with npro.plate(f'τ=1..{nepochs}', nepochs, dim=-1): # Epoch plate
+        # Making λ_rest a deterministic variable
+        λ0 = npro.deterministic("λ0", λ_rest)
+        print('λ0.shape (λ_rest): ', λ0.shape)
+        λ0 = λ0[None, :, None]           # Shape: (1, nlines, amp_constrains, 1, 1)
+        print('λ0.shape after reshape: ', λ0.shape)
 
-                    # Select the appropriate profile
-                    comp = jnp.where(is_hline, lorentzian_profile, gaussian_profile)
+        # Compute the shifted wavelengths
+        μ = λ0 * (1 + Δv_τk / c_kms)
+        print('μ.shape: ', μ.shape)
+        # μ = μ.transpose(2, 1, 0)  # New shape: (components, lines, epochs, 1)
+        μ = μ[:, :, :,  None]  # Shape: (K, nlines, nepochs, 1)
+        # print('μ.shape after transpose and reshape: ', μ.shape)
 
-                    Ck = npro.deterministic("C_λk", comp)
-                    print('Ck.shape: ', Ck.shape)
-                    fλ_pred = npro.deterministic("fλ_pred", ε + Ck.sum(axis=0))
-                    print('fλ_pred.shape: ', fλ_pred.shape)
+        # Expand wavelength and is_hline for broadcasting
+        print('λ.shape: ', λ.shape)
+        # λ = λ.transpose(1, 0, 2)
+        λ = λ[None, :, :, :]             # Shape: (1, nlines, amp_constrains, nepochs, ndata)                
+        print('λ.shape after reshape: ', λ.shape)
+        print('is_hline.shape: ', is_hline.shape)
+        is_hline = is_hline[None, :, None, None]       # Shape: (1, nlines, amp_constrains, 1, 1)
+
+        # Compute both profiles
+        gaussian_profile = gaussian(λ, amp, μ, wid)
+        lorentzian_profile = lorentzian(λ, amp, μ, wid)
+
+        # with npro.plate(f'τ=1..{nepochs}', nepochs):#, dim=-1): # Epoch plate
+
+        # Select the appropriate profile
+        comp = jnp.where(is_hline, lorentzian_profile, gaussian_profile)
+
+        Ck = npro.deterministic("C_λk", comp)
+        print('\nCk.shape: ', Ck.shape)
+        fλ_pred = npro.deterministic("fλ_pred", ε + Ck.sum(axis=0))
         print('fλ_pred.shape: ', fλ_pred.shape)
-        print('fλ.shape: ', fλ.shape)
+        # print('fλ.shape: ', fλ.shape)
         print('σ_fλ.shape: ', σ_fλ.shape)
-        # Reshape fλ and σ_fλ to match the shape of fλ_pred
-        fλ = fλ[:, jnp.newaxis, :, :]  # Shape: (nlines, amp_constrains, nepochs, ndata)
-        σ_fλ = σ_fλ[:, jnp.newaxis, :, :]  # Shape: (nlines, amp_constrains, nepochs, ndata)
         npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
 
     # rendered_model = npro.render_model(model2, model_args=(x_waves, y_fluxes, y_errors), model_kwargs={'K':K, 'is_hline': is_hline},
@@ -410,6 +489,134 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
     rng_key = random.PRNGKey(0)
     # model_init = initialize_model(rng_key, sb2_model, model_args=(x_waves, y_fluxes, y_errors))
+
+    ######################## Testing
+    Δv_prior_hist=False
+    fλ_pred_plot=False
+    print('Starting prior predictive sampling...')
+    # Define the number of samples you want to generate
+    num_prior_samples = 100
+
+    # Create a Predictive object for prior predictive sampling
+    # prior_predictive = Predictive(sb2_model, num_samples=num_prior_samples, return_sites=["Δv_τk"])
+    prior_predictive = Predictive(sb2_model, num_samples=num_prior_samples)
+
+    # Sample from the prior
+    λ=jnp.array(x_waves)
+    prior_samples = prior_predictive(rng_key, λ=jnp.array(x_waves), σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline, shift_kms=200)
+
+    # Extract Δv_τk samples
+    print('prior_samples.keys(): ', prior_samples.keys())
+    print('prior_samples[Δv_τk].shape: ', prior_samples['Δv_τk'].shape)
+    delta_v_tau_k_samples = prior_samples['Δv_τk']  # Shape: (num_prior_samples, K, nepochs)
+
+    # Plot RV distributions
+    if Δv_prior_hist==True:
+        plt.figure(figsize=(6, 6))
+        for k in range(K):
+            plt.hist(delta_v_tau_k_samples[:, k, :].flatten(), bins=30, alpha=0.5, label=f'Component {k+1}')
+        plt.title('Prior Predictive Distribution of deltav')
+        plt.xlabel('deltav (km/s)')
+        plt.ylabel('Frequency')
+        plt.legend()
+        plt.show()
+
+        # Plot amp distributions
+        plt.figure(figsize=(6, 6))
+        # for k in range(K):
+        plt.hist(prior_samples['amp0'][:, :].flatten(), bins=30, alpha=0.5, label=f'Component 1')
+        plt.hist(prior_samples['amp1'][:, :].flatten(), bins=30, alpha=0.5, label=f'Component 2')
+        plt.title('Prior Predictive Distribution of Amplitude')
+        plt.xlabel('Amplitude')
+        plt.ylabel('Frequency')
+        plt.legend()
+        plt.show()
+
+    # sys.exit()
+
+    # Extract the generated spectra
+    prior_predictive = Predictive(sb2_model, num_samples=num_prior_samples)
+    prior_samples = prior_predictive(rng_key, λ=jnp.array(x_waves), σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline, shift_kms=200)
+    fλ_prior_samples = prior_samples['fλ']  # Shape: (num_prior_samples, nlines, nepochs, ndata)
+    Δv_τk_prior_samples = prior_samples['Δv_τk']  # Shape: (num_prior_samples, K, nepochs)
+
+    # Choose a sample to plot
+    if fλ_pred_plot==True:
+        plt.figure(figsize=(6, 6))
+        plt.title(f"Line {1}, Epoch {4}")
+        plt.xlabel("Wavelength")
+        plt.ylabel("Flux")
+        # sample_idx = 0  # You can loop over samples or choose a random index
+        for sample_idx in range(10):
+            # Extract the data for the selected sample
+            fλ_sample = fλ_prior_samples[sample_idx]  # Shape: (nlines, nepochs, ndata)
+            Δv_τk_sample = Δv_τk_prior_samples[sample_idx]  # Shape: (K, nepochs)
+
+            # Plot the spectra for each epoch and line
+            nlines, nepochs, ndata = fλ_sample.shape
+
+            # for line_idx in range(nlines):
+            for line_idx in [1]:
+                # for epoch_idx in range(nepochs):
+                for epoch_idx in [4]:
+
+
+                    # Extract wavelength and flux for this line and epoch
+                    λ_plot = λ[line_idx, epoch_idx, :]  # Shape: (ndata,)
+                    fλ_plot = fλ_sample[line_idx, epoch_idx, :]  # Shape: (ndata,)
+
+                    # Plot the generated spectrum
+                    plt.plot(λ_plot, fλ_plot+sample_idx*0.1, label='Generated Spectrum', alpha=0.4)
+
+                    plt.plot(x_waves[line_idx][epoch_idx], y_fluxes[line_idx][epoch_idx], color='r', lw=1, alpha=1.)
+
+                    # Optionally, plot the true rest wavelength
+                    λ0_line = cen_ini[line_idx]
+                    plt.axvline(λ0_line, color='gray', linestyle='--', label='Rest Wavelength')
+
+                    # Compute and plot the shifted wavelengths for each component
+                    # c_kms = c.to('km/s').value 
+                    # for k in range(K):
+                    #     Δv_τk = Δv_τk_sample[k, epoch_idx]
+                    #     μ = λ0_line * (1 + Δv_τk / c_kms)
+                    #     plt.axvline(μ, color=f'C{k}', linestyle=':', label=f'Component {k} Shifted Wavelength')
+        # plt.ylim(0.4, 1.1)
+        # plt.legend()
+        plt.show()
+
+
+    # # Plot multiple prior samples for a specific line and epoch
+    # line_idx = 1
+    # epoch_idx = 4
+
+    # plt.figure(figsize=(10, 6))
+    # plt.title(f"Line {line_idx}, Epoch {epoch_idx}")
+    # plt.xlabel("Wavelength")
+    # plt.ylabel("Flux")
+
+    # λ_plot = λ[line_idx, epoch_idx, :]  # Shape: (ndata,)
+
+    # for sample_idx in range(num_prior_samples):
+    #     fλ_plot = fλ_prior_samples[sample_idx, line_idx, epoch_idx, :]  # Shape: (ndata,)
+    #     plt.plot(λ_plot, fλ_plot, alpha=0.3)
+
+    # plt.show()
+
+    # plt.figure()
+    # print('Δv_τk_prior_samples.shape: ', Δv_τk_prior_samples.shape)
+    # for k in range(K):
+    #     Δv_samples = Δv_τk_prior_samples[:, k, line_idx, epoch_idx]  # Shape: (num_prior_samples,)
+    #     # Plot a histogram of the sampled Δv values
+    #     plt.hist(Δv_samples, bins=np.arange(-400, 800, 50), alpha=0.7)
+    # plt.title(f"Histogram of deltav for Component {k}, Epoch {epoch_idx}")
+    # plt.xlabel("deltav (km/s)")
+    # plt.ylabel("Frequency")
+    # plt.show()
+
+    ######################## End testing
+
+
+
     kernel = NUTS(sb2_model)
     mcmc = MCMC(kernel, num_warmup=500, num_samples=500)
     mcmc.run(rng_key, λ=jnp.array(x_waves), fλ=jnp.array(y_fluxes), σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline)
@@ -418,6 +625,27 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # print(trace.keys())
     # for key in trace:
     #     print(f"{key}: {trace[key].shape}")
+
+    ######################## Examining Posterior Distributions of All Parameters
+
+    # # Extract amplitude samples
+    # posterior_samples = mcmc.get_samples()
+    # amp1_samples = posterior_samples['amp0']  # Shape: (num_samples, K, nlines)
+    # amp2_samples = posterior_samples['amp1']  # Shape: (num_samples, K, nlines)
+    # print('amp1_samples.shape: ', amp1_samples.shape)
+    # print('amp2_samples.shape: ', amp2_samples.shape)
+    # # Plot histograms for each component's amplitude
+    # plt.figure(figsize=(8, 6))
+    # # for k in range(K):
+    # plt.hist(amp1_samples[:, 1, 0], bins=30, alpha=0.5, label=f'Component {k+1}')
+    # plt.hist(amp2_samples[:, 1, 0], bins=30, alpha=0.5, label=f'Component {k+1}')
+    # plt.title('Posterior Distributions of Amplitudes')
+    # plt.xlabel('Amplitude')
+    # plt.ylabel('Frequency')
+    # plt.legend()
+    # plt.show()
+
+    ######################## End Posterior analysis
 
     def rv_shift_wavelength(λ_emitted, v):
         c_kms = c.to('km/s').value  
@@ -429,14 +657,15 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         fig, axes = setup_fits_plots(wavelengths)
         for epoch_idx, (epoch, ax) in enumerate(zip(range(n_epochs), axes.ravel())):
             # Extract the posterior samples for the total prediction
+            print('trace[fλ_pred].shape: ', trace['fλ_pred'].shape)
             fλ_pred_samples = trace['fλ_pred'][-n_sol:, idx, epoch, :]  # Shape: (n_sol, ndata)
+            print('fλ_pred_samples.shape: ', fλ_pred_samples.shape)
             # Extract the posterior samples for the continuum
             continuum_pred_samples = trace['ε'][-n_sol:, None]
             # Extract the posterior samples for each component
             print('trace[C_λk].shape: ', trace['C_λk'].shape)
             print('trace[C_λk].shape: ', trace['C_λk'][-n_sol:, 0, idx, epoch, :].shape)
-            print('trace[C_λk].shape: ', trace['C_λk'][-n_sol:, 0, idx, :, epoch, :].shape)
-            print('continuum_pred_samples.shape: ', continuum_pred_samples.shape)
+            print('continuum_pred_samples.shape: ', continuum_pred_samples.shape, '\n')
             fλ_pred_comp1_samples = continuum_pred_samples + trace['C_λk'][-n_sol:, 0, idx, epoch, :]
             fλ_pred_comp2_samples = continuum_pred_samples + trace['C_λk'][-n_sol:, 1, idx, epoch, :]
             
@@ -449,10 +678,10 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
             ax.plot(x_waves[idx][epoch], y_fluxes[idx][epoch], color='k', lw=1, alpha=0.8)
 
             # Plot vertical line at the central wavelength
-            shift=200
-            ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift), color='r', linestyle='--', lw=1)
-            ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift-200), color='orange', linestyle='--', lw=1)
-            ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift+200), color='orange', linestyle='--', lw=1)
+            # shift=200
+            # ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift), color='r', linestyle='--', lw=1)
+            # ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift-200), color='orange', linestyle='--', lw=1)
+            # ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift+200), color='orange', linestyle='--', lw=1)
             
         # Create custom legend entries
         custom_lines = [
@@ -641,8 +870,9 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile):
             results_dict['MJD'] = jds[j]
 
             # Add the RV and its uncertainty to the dictionary
-            results_dict['mean_rv'] = np.mean(trace['Δv_τk'][:, i, 0, j])
-            results_dict['mean_rv_er'] = np.std(trace['Δv_τk'][:, i, 0, j])
+            print('trace[Δv_τk].shape: ', trace['Δv_τk'].shape)
+            results_dict['mean_rv'] = np.mean(trace['Δv_τk'][:, i, :, j])
+            results_dict['mean_rv_er'] = np.std(trace['Δv_τk'][:, i, :, j])
 
             # Add the component to the dictionary
             results_dict['comp'] = i + 1  # +1 because components are 1-based
@@ -1349,7 +1579,7 @@ def get_peaks(power, frequency, fal_50pc, fal_1pc, fal_01pc, minP=1.1):
 
     return freq_peaks, peri_peaks, peaks
 
-def run_LS(hjd, rv, rv_err=None, probabilities = [0.5, 0.01, 0.001], method='bootstrap', P_ini=0.6, P_end=500, samples_per_peak=5000):
+def run_LS(hjd, rv, rv_err=None, probabilities = [0.5, 0.01, 0.001], method='bootstrap', P_ini=1.2, P_end=500, samples_per_peak=5000):
     if rv_err is None:
     # if rv_err.any() == False:
         ls = LombScargle(hjd, rv, normalization='model')
@@ -1363,7 +1593,7 @@ def run_LS(hjd, rv, rv_err=None, probabilities = [0.5, 0.01, 0.001], method='boo
 
     return frequency, power, fap, fal
 
-def lomb_scargle(df, path, probabilities = [0.5, 0.01, 0.001], SB2=False, print_output=True, plots=True, best_lines=False, Pfold=True):
+def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=False, Pfold=True):
     '''
     df: dataframe with the RVs, output from getrvs()
     '''
