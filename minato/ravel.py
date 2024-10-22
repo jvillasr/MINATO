@@ -24,6 +24,7 @@ from numpyro.infer.util import initialize_model
 from jax import numpy as jnp
 from jax import random
 import multiprocessing
+# import arviz as az
 
 # Set the number of devices to the number of available CPUs
 npro.set_host_device_count(multiprocessing.cpu_count())
@@ -104,14 +105,14 @@ def setup_line_dictionary():
         3995: { 'region':[3990, 4005], 'centre':None, 'wid_ini':2, 'title':'N II $\lambda$3995'},
         4009: { 'region':[4005, 4018], 'centre':[4009.2565, 0.00002], 'wid_ini':3, 'title':'He I $\lambda$4009'},
         4026: { 'region':[4017, 4043], 'centre':[4026.1914, 0.0010], 'wid_ini':3, 'title':'He I $\lambda$4026'},
-        4102: { 'region':[4085, 4120], 'centre':[4101.734, 0.006], 'wid_ini':5, 'title':'H$\delta$'},
+        4102: { 'region':[4085, 4120], 'centre':[4101.734, 0.006], 'wid_ini':6, 'title':'H$\delta$'},
         4121: { 'region':[4118, 4130], 'centre':[4120.8154, 0.0012], 'wid_ini':3, 'title':'He I $\lambda$4121'},
         4128: { 'region':[4124, 4136], 'centre':[4128.07, 0.10], 'wid_ini':2, 'title':'Si II $\lambda$4128'},
         4131: { 'region':[4128, 4140], 'centre':[4130.89, 0.10], 'wid_ini':2, 'title':'Si II $\lambda$4131'},
         4144: { 'region':[4135, 4160], 'centre':[4143.761, 0.010], 'wid_ini':3, 'title':'He I $\lambda$4144'},
         4233: { 'region':[4229, 4241], 'centre':None, 'wid_ini':2, 'title':'Fe II $\lambda$4233'},
         4267: { 'region':[4263, 4275], 'centre':[4267.258, 0.007], 'wid_ini':2, 'title':'C II $\lambda$4267'},
-        4340: { 'region':[4320, 4360], 'centre':[4340.472, 0.006], 'wid_ini':6, 'title':'H$\gamma$'},
+        4340: { 'region':[4320, 4360], 'centre':[4340.472, 0.006], 'wid_ini':7, 'title':'H$\gamma$'},
         4388: { 'region':[4380, 4405], 'centre':[4387.9296, 0.0006], 'wid_ini':3, 'title':'He I $\lambda$4388'},
         4471: { 'region':[4462, 4487], 'centre':[4471.4802, 0.0015], 'wid_ini':3, 'title':'He I $\lambda$4471'},
         4481: { 'region':[4478, 4490], 'centre':[4481.130, 0.010], 'wid_ini':2, 'title':'Mg II $\lambda$4481'},
@@ -122,7 +123,7 @@ def setup_line_dictionary():
         5412: { 'region':[5405, 5419], 'centre':[5411.52, 0,10], 'wid_ini':4, 'title':'He II $\lambda$5412'},
         5876: { 'region':[5865, 5888], 'centre':[5875.621, 0.010], 'wid_ini':4, 'title':'He I $\lambda$5876'},  
         5890: { 'region':[5881, 5905], 'centre':[5889.951, 0.00003], 'wid_ini':3, 'title':'Na I $\lambda$5890'}, 
-        6562: { 'region':[6542, 6583], 'centre':[6562.79, 0.030], 'wid_ini':5, 'title':'H$\alpha$'}, 
+        6562: { 'region':[6542, 6583], 'centre':[6562.79, 0.030], 'wid_ini':6, 'title':'H$\alpha$'}, 
         6678: { 'region':[6668, 6690], 'centre':[6678.151, 0.010], 'wid_ini':4, 'title':'He I $\lambda$6678'}, 
         7774: { 'region':[7762, 7786], 'centre':[7774.17, 0,10], 'wid_ini':3, 'title':'O I $\lambda$7774'}
     }
@@ -150,7 +151,7 @@ def setup_fits_plots(wavelengths):
     nrows = nplots // ncols
     if ncols * nrows < nplots:
         nrows += 1
-    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(4 * ncols, 3 * nrows), sharey=True, sharex=True)
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(4 * ncols/1.2, 3 * nrows/1.2), sharey=True, sharex=True)
     fig.subplots_adjust(wspace=0., hspace=0.)
     axes = axes.flatten()
     return fig, axes
@@ -319,7 +320,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # Initial guess for the central wavelength
     cen_ini = jnp.array([lines_dic[line]['centre'][0] for line in lines])
 
-    def sb2_model(λ=None, fλ=None, σ_fλ=None, K=K, is_hline=None, shift_kms=0):
+    def sb2_model(λ=None, fλ=None, σ_fλ=None, K=K, is_hline=None, shift_kms=0, Δv_means=None):
         c_kms = c.to('km/s').value   
         # Get the number of lines, epochs, and wavelengths points
         nlines, nepochs, ndata = λ.shape
@@ -344,10 +345,10 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         λ0 = λ_rest  # Shape: (nlines,)
 
         # prior on velocity shift
-        Δv_min = 0
-        Δv_max = 300+shift_kms
-        Δv = shift_kms
-        Δv_means = jnp.array([shift_kms-50, shift_kms+50]).reshape(K, 1, 1)
+        Δv_min = jnp.array([shift_kms-250, shift_kms-250]).reshape(K, 1, 1)
+        Δv_max = jnp.array([shift_kms+250, shift_kms+250]).reshape(K, 1, 1)
+        # Δv = shift_kms
+        # Δv_means = jnp.array([shift_kms+50, shift_kms-50]).reshape(K, 1, 1)
         σ_Δv = 50
         # Δv_prior = shift_kms * jnp.array([-1, 1])  # Shape: (K,)
         # σ_Δv = 200 * jnp.ones(K)                    # Shape: (K,)
@@ -374,19 +375,21 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         print('amp_mu.shape: ', amp_mu.shape)
         print('amp_sigma.shape: ', amp_sigma.shape, '\n')
         wid1_min = 0.5
-        wid1_max = 5.0
+        wid1_max = 3.
         wid2_min = 0.5  # Ensure this is greater than wid1_min
         wid2_max = 6.0
 
         # with npro.plate(f"k=1..{K}", K, dim=-3): # Component plate
-        print('Δv = ', Δv)
+        # print('Δv = ', Δv)
         print('Δv_means = ', Δv_means)
         print('σ_Δv = ', σ_Δv)
         # Δv_τk = npro.sample("Δv_τk", dist.Normal(Δv, σ_Δv), sample_shape=(nepochs,))
 
         with npro.plate(f'τ=1..{nepochs}', nepochs, dim=-1):
+            print('Δv_min', Δv_min.shape)
+            print('Δv_max', Δv_max.shape)
             Δv_τk = npro.sample("Δv_τk", dist.Normal(loc=Δv_means, scale=σ_Δv))
-            # Δv_τk = npro.sample("Δv_τk", dist.Uniform(Δv_min, Δv_max), sample_shape=(nepochs,))
+            # Δv_τk = npro.sample("Δv_τk", dist.Uniform(Δv_min, Δv_max))
             # print('Δv_τk: ', Δv_τk[0, 1, :])
             # Δv_τk = Δv_τk.T[:, None, :]
             print('Δv_τk.shape: ', Δv_τk.shape)
@@ -400,7 +403,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
             # Sample amplitude per line
             # amp = npro.sample('𝛼_kλ', dist.LogNormal(amp_mu, amp_sigma))  # Shape: ()
             amp0 = npro.sample('amp0', dist.Uniform(amp1_min, amp1_max))
-            amp1 = npro.sample('amp1', dist.Uniform(amp2_min, 0.9*amp0))
+            amp1 = npro.sample('amp1', dist.Uniform(amp2_min, 0.75*amp0))
             print('amp0.shape: ', amp0.shape)
             print('amp1.shape: ', amp1.shape)
             amp = jnp.stack([amp0, amp1], axis=-3)  # Shape: (2,)
@@ -418,8 +421,8 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
             wid1 = npro.sample('wid1', dist.Uniform(wid1_min, wid1_max))
             
             # Sample delta_wid from a uniform distribution ensuring wid2 > wid1
-            delta_wid_min = 0.1  # Minimum separation between wid1 and wid2
-            delta_wid_max = 5.0  # Maximum separation
+            delta_wid_min = 0.1  # Minimum separation between wid1 and wid2. Default 0.1
+            delta_wid_max = 5.  # Maximum separation. Default 5
             delta_wid = npro.sample('delta_wid', dist.Uniform(delta_wid_min, delta_wid_max))
             
             # Define wid2 as wid1 plus the sampled delta
@@ -493,6 +496,9 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     ######################## Testing
     Δv_prior_hist=False
     fλ_pred_plot=False
+    shift_kms=170
+    Δv_means = jnp.array([shift_kms+50, shift_kms-50]).reshape(K, 1, 1)
+    smc_shift=170
     print('Starting prior predictive sampling...')
     # Define the number of samples you want to generate
     num_prior_samples = 100
@@ -503,7 +509,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
     # Sample from the prior
     λ=jnp.array(x_waves)
-    prior_samples = prior_predictive(rng_key, λ=jnp.array(x_waves), σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline, shift_kms=200)
+    prior_samples = prior_predictive(rng_key, λ=jnp.array(x_waves), σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline, shift_kms=170, Δv_means=Δv_means)
 
     # Extract Δv_τk samples
     print('prior_samples.keys(): ', prior_samples.keys())
@@ -536,7 +542,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
     # Extract the generated spectra
     prior_predictive = Predictive(sb2_model, num_samples=num_prior_samples)
-    prior_samples = prior_predictive(rng_key, λ=jnp.array(x_waves), σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline, shift_kms=200)
+    prior_samples = prior_predictive(rng_key, λ=jnp.array(x_waves), σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline, shift_kms=170, Δv_means=Δv_means)
     fλ_prior_samples = prior_samples['fλ']  # Shape: (num_prior_samples, nlines, nepochs, ndata)
     Δv_τk_prior_samples = prior_samples['Δv_τk']  # Shape: (num_prior_samples, K, nepochs)
 
@@ -585,46 +591,128 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         plt.show()
 
 
-    # # Plot multiple prior samples for a specific line and epoch
-    # line_idx = 1
-    # epoch_idx = 4
+        # # Plot multiple prior samples for a specific line and epoch
+        # line_idx = 1
+        # epoch_idx = 4
 
-    # plt.figure(figsize=(10, 6))
-    # plt.title(f"Line {line_idx}, Epoch {epoch_idx}")
-    # plt.xlabel("Wavelength")
-    # plt.ylabel("Flux")
+        # plt.figure(figsize=(10, 6))
+        # plt.title(f"Line {line_idx}, Epoch {epoch_idx}")
+        # plt.xlabel("Wavelength")
+        # plt.ylabel("Flux")
 
-    # λ_plot = λ[line_idx, epoch_idx, :]  # Shape: (ndata,)
+        # λ_plot = λ[line_idx, epoch_idx, :]  # Shape: (ndata,)
 
-    # for sample_idx in range(num_prior_samples):
-    #     fλ_plot = fλ_prior_samples[sample_idx, line_idx, epoch_idx, :]  # Shape: (ndata,)
-    #     plt.plot(λ_plot, fλ_plot, alpha=0.3)
+        # for sample_idx in range(num_prior_samples):
+        #     fλ_plot = fλ_prior_samples[sample_idx, line_idx, epoch_idx, :]  # Shape: (ndata,)
+        #     plt.plot(λ_plot, fλ_plot, alpha=0.3)
 
-    # plt.show()
+        # plt.show()
 
-    # plt.figure()
-    # print('Δv_τk_prior_samples.shape: ', Δv_τk_prior_samples.shape)
-    # for k in range(K):
-    #     Δv_samples = Δv_τk_prior_samples[:, k, line_idx, epoch_idx]  # Shape: (num_prior_samples,)
-    #     # Plot a histogram of the sampled Δv values
-    #     plt.hist(Δv_samples, bins=np.arange(-400, 800, 50), alpha=0.7)
-    # plt.title(f"Histogram of deltav for Component {k}, Epoch {epoch_idx}")
-    # plt.xlabel("deltav (km/s)")
-    # plt.ylabel("Frequency")
-    # plt.show()
+        # plt.figure()
+        # print('Δv_τk_prior_samples.shape: ', Δv_τk_prior_samples.shape)
+        # for k in range(K):
+        #     Δv_samples = Δv_τk_prior_samples[:, k, line_idx, epoch_idx]  # Shape: (num_prior_samples,)
+        #     # Plot a histogram of the sampled Δv values
+        #     plt.hist(Δv_samples, bins=np.arange(-400, 800, 50), alpha=0.7)
+        # plt.title(f"Histogram of deltav for Component {k}, Epoch {epoch_idx}")
+        # plt.xlabel("deltav (km/s)")
+        # plt.ylabel("Frequency")
+        # plt.show()
 
-    ######################## End testing
+        ######################## End testing
 
 
+    # Define the configurations to fit
+    configurations = [
+        {"swap": False, "rndKey": 0, "Δv_means": jnp.array([shift_kms - 50, shift_kms + 50]).reshape(K, 1, 1)},
+        {"swap": True, "rndKey": 1,  "Δv_means": jnp.array([shift_kms + 50, shift_kms - 50]).reshape(K, 1, 1)}
+    ]
 
+    # Initialize variables to keep track of the best configuration
+    best_trace = None
+    best_log_prob = -np.inf
+    best_swap = None
+
+    config = configurations[0]
+    swap = config["swap"]
+    Δv_means = config["Δv_means"]
+
+    print(f"\nFitting configuration: swap={swap}")
+
+    # Define the model with the current configuration using a default argument to bind 'swap'
+    # def current_model(λ, fλ, σ_fλ, K, is_hline, shift_kms, Δv_means=Δv_means):
+    #     sb2_model(λ=λ, fλ=fλ, σ_fλ=σ_fλ, K=K, is_hline=is_hline, shift_kms=shift_kms, Δv_means=Δv_means)
+
+    # Initialize MCMC with a unique random key for each configuration
+    rng_key = random.PRNGKey(config["rndKey"])  # Consider using different keys for different configurations
+
+    # kernel = NUTS(current_model)
     kernel = NUTS(sb2_model)
     mcmc = MCMC(kernel, num_warmup=500, num_samples=500)
-    mcmc.run(rng_key, λ=jnp.array(x_waves), fλ=jnp.array(y_fluxes), σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline, shift_kms=200)
-    mcmc.print_summary()
-    trace = mcmc.get_samples()
-    # print(trace.keys())
-    # for key in trace:
-    #     print(f"{key}: {trace[key].shape}")
+
+    # Run MCMC
+    smc_shift=170
+    mcmc.run(rng_key, extra_fields=("potential_energy",), λ=jnp.array(x_waves), fλ=jnp.array(y_fluxes), 
+                σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline, shift_kms=smc_shift, Δv_means=Δv_means)
+
+    # Extract potential energy
+    potential_energy = mcmc.get_extra_fields()['potential_energy']
+    # print('potential_energy', potential_energy)
+
+    log_probs = -potential_energy  # Convert to log posterior probabilities
+    log_prob = np.mean(log_probs)
+
+    print(f"Configuration swap={swap}: mean log posterior probability = {log_prob}")
+
+    # Compare and keep the best configuration
+    if log_prob > best_log_prob:
+        best_log_prob = log_prob
+        best_trace = mcmc.get_samples()
+        best_swap = swap
+        print(f"New best configuration found: swap={best_swap} with log_prob={best_log_prob}")
+        mcmc.print_summary()
+
+    print(f"\nFinal Selection: The best configuration was with swap={best_swap}, with mean log posterior probability {best_log_prob}")
+    trace = best_trace
+
+    # # Perform posterior diagnostics using ArviZ
+
+    # # Convert Numpyro trace to ArviZ InferenceData
+    # idata = az.from_numpyro(mcmc)
+
+    # # Summary statistics
+    # az.summary(idata)
+
+    # # Trace plots
+    # az.plot_trace(idata)
+    # plt.show()
+
+
+        # Run the MCMC sampler
+        # smc_shift=170
+
+        # kernel = NUTS(sb2_model)
+        # mcmc = MCMC(kernel, num_warmup=500, num_samples=500)
+        # mcmc.run(rng_key, extra_fields=("potential_energy",), λ=jnp.array(x_waves), fλ=jnp.array(y_fluxes), σ_fλ=jnp.array(y_errors), K=K, is_hline=is_hline, shift_kms=smc_shift)
+
+        # Compute the log posterior probability
+        # potential_energy = mcmc.get_extra_fields()['potential_energy']
+        # log_probs = -potential_energy
+        # log_prob = np.mean(log_probs)
+
+        # if log_prob > best_log_prob:
+        #     best_log_prob = log_prob
+        #     best_trace = mcmc.get_samples()
+        #     best_swap = swap  # Keep track of which configuration was better
+        #     mcmc.print_summary()
+
+        # print(f"The best configuration was with swap={best_swap}, with mean log posterior probability {best_log_prob}")
+
+        # trace = best_trace
+        # trace = mcmc.get_samples()
+        # print(trace.keys())
+        # for key in trace:
+        #     print(f"{key}: {trace[key].shape}")
 
     ######################## Examining Posterior Distributions of All Parameters
 
@@ -654,34 +742,30 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
     n_sol = 100
     for idx, line in enumerate(lines): 
+        print('Plotting fits for line:', line)
         fig, axes = setup_fits_plots(wavelengths)
         for epoch_idx, (epoch, ax) in enumerate(zip(range(n_epochs), axes.ravel())):
             # Extract the posterior samples for the total prediction
-            print('trace[fλ_pred].shape: ', trace['fλ_pred'].shape)
             fλ_pred_samples = trace['fλ_pred'][-n_sol:, idx, epoch, :]  # Shape: (n_sol, ndata)
-            print('fλ_pred_samples.shape: ', fλ_pred_samples.shape)
             # Extract the posterior samples for the continuum
             continuum_pred_samples = trace['ε'][-n_sol:, None]
             # Extract the posterior samples for each component
-            print('trace[C_λk].shape: ', trace['C_λk'].shape)
-            print('trace[C_λk].shape: ', trace['C_λk'][-n_sol:, 0, idx, epoch, :].shape)
-            print('continuum_pred_samples.shape: ', continuum_pred_samples.shape, '\n')
             fλ_pred_comp1_samples = continuum_pred_samples + trace['C_λk'][-n_sol:, 0, idx, epoch, :]
             fλ_pred_comp2_samples = continuum_pred_samples + trace['C_λk'][-n_sol:, 1, idx, epoch, :]
             
             # Plot the posterior predictive samples without labels
-            ax.plot(x_waves[idx][epoch], fλ_pred_comp1_samples.T, rasterized=True, color='C0', alpha=0.1)
-            ax.plot(x_waves[idx][epoch], fλ_pred_comp2_samples.T, rasterized=True, color='C1', alpha=0.1)
+            ax.plot(x_waves[idx][epoch], fλ_pred_comp1_samples.T, rasterized=True, color='C1', alpha=0.1)
+            ax.plot(x_waves[idx][epoch], fλ_pred_comp2_samples.T, rasterized=True, color='C0', alpha=0.1)
             ax.plot(x_waves[idx][epoch], fλ_pred_samples.T, rasterized=True, color='C2', alpha=0.1)
 
             # Plot the observed data without label
             ax.plot(x_waves[idx][epoch], y_fluxes[idx][epoch], color='k', lw=1, alpha=0.8)
 
             # Plot vertical line at the central wavelength
-            # shift=200
-            # ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift), color='r', linestyle='--', lw=1)
-            # ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift-200), color='orange', linestyle='--', lw=1)
-            # ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift+200), color='orange', linestyle='--', lw=1)
+            shift=170
+            ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift), color='r', linestyle='--', lw=1)
+            ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift-250), color='orange', linestyle='--', lw=1)
+            ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], +shift+250), color='orange', linestyle='--', lw=1)
             
         # Create custom legend entries
         custom_lines = [
@@ -691,8 +775,17 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
             Line2D([0], [0], color='k', lw=2)
         ]
         axes[0].legend(custom_lines, ['Total Prediction', 'Component 1', 'Component 2', 'Observed Data'], fontsize=10)
-        fig.supxlabel('Wavelength [\AA]', size=22)
-        fig.supylabel('Flux', size=22)  
+        # Conditional label placement
+        if len(axes) < 8:
+            fig.supxlabel('Wavelength [Å]', fontsize=24)#, y=0.04)
+            fig.supylabel('Flux', fontsize=24)#, x=0.04)
+        else:
+            axes[7].set_xlabel('Wavelength [Å]', fontsize=24, labelpad=10)
+            axes[3].set_ylabel('Flux', fontsize=24, labelpad=10)
+        # axes[7].set_xlabel('Wavelength [\AA]', size=24)
+        # axes[3].set_ylabel('Flux', size=24)  
+        # fig.supxlabel('Wavelength [\AA]', size=24)
+        # fig.supylabel('Flux', size=24)  
         plt.savefig(path + f'{line}_fits_SB2_.png', bbox_inches='tight', dpi=150)
         plt.close()
 
@@ -747,7 +840,7 @@ def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):
         indiv_mod = gauss1
 
     pars.update(indiv_mod.make_params())
-    pars[f'{prefix}_amp'].set(1.05-y_flux.min(), min=0.01, max=2. )
+    pars[f'{prefix}_amp'].set(1.05-y_flux.min(), min=0.01, max=0.8 )
     pars[f'{prefix}_wid'].set(wid_ini, min=1, max=11)
     pars[f'{prefix}_cen'].set(cen_ini, min=cen_ini-4, max=cen_ini+4)
     mod = indiv_mod + cont
@@ -769,15 +862,20 @@ def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):
             #     pars['neb_amp'].set((1-y_flux.min())/2, min=0.001, max=0.5)
             # else:
             #     pars['neb_amp'].set((y_flux.max()-y_flux.min())/1.1, min=0.05)#, max=65)
-            pars[f'neb{i}_amp'].set(y_flux.max()-y_flux.min(), min=0.01)
-            pars[f'neb{i}_wid'].set(1, min=0.05, max=2)
-            if i == 2:
-                pars[f'neb{i}_cen'].set(cen_ini+0.2)
+            if line == 4102:
+                pars[f'neb{i}_amp'].set((y_flux.max()-y_flux.min())*0.6, min=0.01)
+            elif line == 4340:
+                pars[f'neb{i}_amp'].set(y_flux.max()-y_flux.min(), min=0.01)
             else:
-                pars[f'neb{i}_cen'].set(cen_ini-0.2)
+                pars[f'neb{i}_amp'].set((y_flux.max()-y_flux.min())*0.6, min=0.01)
+            pars[f'neb{i}_wid'].set(1, min=0.05, max=3)
+            if i == 2:
+                if line not in doubem:
+                    break
+                pars[f'neb{i}_cen'].set(cen_ini + 0.2, vary=True)
+            else:
+                pars[f'neb{i}_cen'].set(cen_ini - 0.2, vary=True)
             mod += nebem
-            if i == 2 and line not in doubem:
-                break
 
     result = mod.fit(y_flux, pars, x=x_wave, weights=1/ferr[wave_region])
 
@@ -938,10 +1036,6 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', plot
         writer = None
 
         print('Fitting all lines simultaneously')
-        # if plots:
-        #     fig, axes = setup_fits_plots(wavelengths)
-        # else:
-        #     axes = [None] * len(wavelengths)
         if SB2:
             result, x_wave, y_flux = fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, K=K)   
             # result, x_wave, y_flux = fit_sb2(line, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, shift, axes, path)
@@ -973,7 +1067,11 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', plot
                 #     plt.savefig(path+str(line)+'_fits_SB2_.png', bbox_inches='tight', dpi=150)
                 #     plt.close()
         else:
-            for line in lines:
+            for i,line in enumerate(lines):
+                if plots:
+                    fig, axes = setup_fits_plots(wavelengths)
+                else:
+                    axes = [None] * len(wavelengths)
                 for j, (wave, flux, ferr, name, ax) in enumerate(zip(wavelengths, fluxes, f_errors, names, axes)):
                     result, x_wave, y_flux, wave_region = fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift)
                     
@@ -1040,7 +1138,7 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', plot
                                 ax.plot(x_wave, component['continuum_']+component['g1_'], '--', zorder=3, c='blue', lw=2)#, label='spectral line')
                                 ax.plot(x_wave, component['continuum_']+component['g2_'], '--', zorder=3, c='blue', lw=2)#, label='spectral line')
                             if line in neblines:
-                                ax.plot(x_wave, component['continuum_']+component['neb_'], '--', zorder=3, c='orange', lw=2)#, label='nebular emision')
+                                ax.plot(x_wave, component['continuum_']+component['neb1_'], '--', zorder=3, c='orange', lw=2)#, label='nebular emision')
                             if line in neblines and not line in Hlines and SB2==False:
                                 ax.plot(x_wave, component['continuum_']+component['g1_'], '--', zorder=3, c='limegreen', lw=2)#, label='spectral line')
 
@@ -1050,14 +1148,14 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', plot
                         # ax.legend(loc='upper center',fontsize=10, handlelength=0, handletextpad=0.4, borderaxespad=0., frameon=False)
 
                         ax.set_ylim(0.9*y_flux.min(), 1.1*y_flux.max())
-            if plots:        
-                fig.supxlabel('Wavelength', size=22)
-                fig.supylabel('Flux', size=22)
-                if SB2==True:
-                    plt.savefig(path+str(line)+'_fits_0_.png', bbox_inches='tight', dpi=150)
-                else:
-                    plt.savefig(path+str(line)+'_fits.png', bbox_inches='tight', dpi=150)
-                plt.close()
+                if plots:        
+                    fig.supxlabel('Wavelength', size=24)
+                    fig.supylabel('Flux', size=24)
+                    if SB2==True:
+                        plt.savefig(path+str(line)+'_fits_0_.png', bbox_inches='tight', dpi=150)
+                    else:
+                        plt.savefig(path+str(line)+'_fits.png', bbox_inches='tight', dpi=150)
+                    plt.close()
 
     return path
 
@@ -1806,7 +1904,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
     if not indi:
         ind = 4
     else:
-        ind = indi
+        ind = indi[0]
         
     maxpower_maxfal = maxpower/fal1[2].value
     maxpower_maxfal2 = maxpower/fal1[1].value
@@ -1956,7 +2054,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
     #               Compute phases of the obsevations
     #################################################################
     if Pfold:
-        # print(peri_peaks1)
+        print('peri_peaks1 size:', peri_peaks1.size)
         if peri_peaks1.size == 0:
             if SB2:
                 if peri_peaks2.size > 0:
@@ -1967,14 +2065,15 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
             else:
                 print('  Warning: No periods found for primary star')
                 periods = [period1_at_max_power]
-        elif peri_peaks1.size < 4 & peri_peaks1.size >0:
+        elif (peri_peaks1.size < 6) & (peri_peaks1.size >0):
+            # print('this should b e printed')
             periods = peri_peaks1
         else:
             periods = [best_period]
-            
+        print('periods:', periods)
         
         for period in periods:
-            print(f'Computing phases for period={period}, from {len(periods)} periods')
+            print(f'\nComputing phases for period={period}, from {len(periods)} periods')
             fine_phase = np.linspace(-0.5, 1.5, 1000)
             if SB2:
                 print('\nComputing phases for the secondary star\n')
@@ -2007,7 +2106,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
                 # fine_preds2 = np.array(fine_preds2)  
 
             else:
-                results1, phase, vel1, vel1_err  = phase_rv_curve(hjd1, rv1, period=period, rv_err=rv1_err)
+                results1, phase, vel1, vel1_err  = phase_rv_curve(hjd1, rv1, rv1_err, period=period)
 
                 # fine_phase = np.linspace(phase.min(), phase.max(), 1000)
 
@@ -2028,12 +2127,12 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
             fig, ax = plt.subplots(figsize=(8, 6))
             # ax.plot(phase, result['pred'][-n_lines:].T, rasterized=True, color='C2', alpha=0.1)
             for pred in fine_preds1[-n_lines:]:
-                ax.plot(fine_phase, pred, rasterized=True, color='C0', alpha=0.05)
-            ax.errorbar(phase, vel1, yerr=vel1_err, color='C2', fmt='o', label='Data')
+                ax.plot(fine_phase, pred, rasterized=True, color='C1', alpha=0.05)
+            ax.errorbar(phase, vel1, yerr=vel1_err, color='k', fmt='o', label='Data')
             if SB2:
                 for pred in fine_preds2[-n_lines:]:
-                    ax.plot(fine_phase, pred, rasterized=True, color='C1', alpha=0.05)
-                ax.errorbar(phase, vel2, yerr=vel2_err, color='k', fmt='^', label='Data')
+                    ax.plot(fine_phase, pred, rasterized=True, color='C0', alpha=0.05)
+                ax.errorbar(phase, vel2, yerr=vel2_err, color='C2', fmt='^', label='Data')
             ax.set_xlabel('Phase')
             ax.set_ylabel('Radial Velocity [km\,s$^{-1}$]')  
             if SB2:
