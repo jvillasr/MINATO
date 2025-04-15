@@ -982,10 +982,102 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
     return out_path
 
 class GetRVs:
-    def __init__(self, fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None, 
-               lines_ok_thrsld=2, epochs_ok_thrsld=2, min_sep=2, print_output=True, 
-               random_eps=False, rndm_eps_n=29, rndm_eps_exc=[], plots=True, 
-               error_type='wid1_percer', rm_epochs=True):
+    """
+    Class for extracting, processing, and analyzing radial velocity (RV) measurements
+    from SLfit spectral line fitting results.
+
+    This class performs a full RV analysis workflow that includes:
+      - Loading SLfit fit values from a CSV file and computing percentage errors for key
+        parameters (e.g., centroids, amplitudes, and widths) for the primary (and secondary,
+        if SB2) components.
+      - Computing radial velocities from the measured line centers by comparing them
+        with pre-defined rest wavelengths (with error propagation).
+      - Generating diagnostic plots for individual spectral lines, including errorbar plots 
+        per epoch and an overall RV plot for each component.
+      - Grouping and statistically analyzing the percentage errors to identify the best 
+        spectral lines using an outlier detection approach based on the median absolute 
+        deviation (MAD).
+      - Removing bad epochs and lines based on user-defined error thresholds.
+      - Calculating weighted mean radial velocities for each epoch from the selected best lines.
+      - Printing and writing comprehensive summary statistics and final RV measurements to
+        various output files.
+
+    Attributes:
+        fit_values (str): Filename of the CSV file containing SLfit fit results.
+        path (str): Directory path for reading input files and writing output results.
+        JDfile (str): Filename containing the Julian Date (MJD) information.
+        balmer (bool): Flag indicating whether Balmer-specific processing should be applied.
+        SB2 (bool): Flag indicating whether the analysis pertains to double-lined (SB2) spectra.
+        use_lines (list): Optional list of spectral lines to consider; if None, all available lines are used.
+        lines_ok_thrsld (float): Threshold for acceptable line error percentages.
+        epochs_ok_thrsld (float): Threshold for acceptable epoch errors.
+        min_sep (float): Minimum separation (e.g., in wavelength) required between lines.
+        print_output (bool): If True, prints debug and status messages.
+        random_eps (bool): Flag for using random epsilon values (experimental).
+        rndm_eps_n (int): Number of random epsilon values to try.
+        rndm_eps_exc (list): List of lines to exclude from random epsilon sampling.
+        plots (bool): Flag indicating whether to generate diagnostic plots.
+        error_type (str): Key to determine which error metric is used for selection (e.g., 'wid1_percer').
+        rm_epochs (bool): If True, epochs with large errors are removed from further analysis.
+        df_SLfit (pd.DataFrame): DataFrame containing the SLfit results.
+        lines (ndarray): Unique spectral line identifiers present in the SLfit results.
+        nepochs (int): Number of epochs calculated from the SLfit data.
+
+    Methods:
+        outlier_killer(data, thresh, print_output):
+            Identifies inliers and outliers in a data series using a MAD test.
+        weighted_mean(data, errors):
+            Computes the weighted mean and error of a set of values given uncertainties.
+        compute_rvs(lines, lambda_rest_dict):
+            Computes radial velocities (and errors) by comparing fitted line centers with rest wavelengths.
+        print_error_stats(grouped_error, error_type):
+            Prints mean and median statistics for grouped error data.
+        write_error_stats(out, grouped_errors, stat_type):
+            Writes summary error statistics to an output file.
+        select_lines(error_type, lines):
+            Selects the best spectral lines based on error metrics.
+        remove_bad_epochs(df, metric, error_type, epochs_ok_thrsld):
+            Identifies and returns indices of epochs with excessive errors.
+        compute_weighted_mean_rvs(rvs_dict, lines, rm_OBs_idx):
+            Computes weighted mean radial velocities per epoch from the best spectral lines.
+        print_and_write_results(lines, line_avg1, total_mean_rv1, nepochs, line_avg2, total_mean_rv2):
+            Prints and writes summary RV results to a file.
+        compute():
+            Orchestrates the full RV analysis workflow:
+              - Defines rest wavelengths.
+              - Computes per-line RVs.
+              - Generates diagnostic plots of RVs per line.
+              - Groups errors and selects the best lines.
+              - Removes problematic epochs.
+              - Computes weighted mean RVs and writes final results.
+    """
+
+    def __init__(self, fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None,
+                 lines_ok_thrsld=2, epochs_ok_thrsld=2, min_sep=2, print_output=True,
+                 random_eps=False, rndm_eps_n=29, rndm_eps_exc=[], plots=True,
+                 error_type='wid1_percer', rm_epochs=True):
+        """
+        Initialize the GetRVs instance and load the SLfit results. Computes percentage errors
+        for the primary (and secondary, if SB2) components.
+
+        Parameters:
+            fit_values (str): Filename of the CSV file with SLfit fit values.
+            path (str): Directory path for reading and writing output.
+            JDfile (str): Filename for Julian Date data.
+            balmer (bool): Whether to apply Balmer-specific settings.
+            SB2 (bool): Whether the fits correspond to double-lined spectra.
+            use_lines (list or None): Specific lines to use; if None, all lines are considered.
+            lines_ok_thrsld (float): Threshold for acceptable line errors.
+            epochs_ok_thrsld (float): Threshold for acceptable epoch errors.
+            min_sep (float): Minimum required separation between lines.
+            print_output (bool): Whether to print output messages.
+            random_eps (bool): Experimental flag for using random epsilon values.
+            rndm_eps_n (int): Number of random epsilon values.
+            rndm_eps_exc (list): Lines to exclude from random epsilon sampling.
+            plots (bool): Whether to generate plots.
+            error_type (str): Which error metric to use (e.g., 'wid1_percer').
+            rm_epochs (bool): Whether to remove epochs with large errors.
+        """
         self.fit_values = fit_values
         self.path = path
         self.JDfile = JDfile
@@ -1003,172 +1095,251 @@ class GetRVs:
         self.error_type = error_type
         self.rm_epochs = rm_epochs
 
-        fecha = str(date.today()) # '2017-12-26'
+        # Get the current date for reference
+        date_current = str(date.today())
 
-        # Reading data from fit_states.csv
-        # print(path+fit_values)
-        self.df_SLfit = pd.read_csv(self.path+self.fit_values)
-
-        # Calculate percentage errors
+        # Load the SLfit results CSV file
+        self.df_SLfit = pd.read_csv(self.path + self.fit_values)
         if self.df_SLfit.isnull().values.any():
-            print("Warning: NaN values found in df_SLfit")    
+            print("Warning: NaN values found in df_SLfit")
+        # Compute percentage errors for primary component parameters
         for param in ['cen1', 'amp1', 'wid1']:
-            self.df_SLfit[f'{param}_percer'] = np.where(self.df_SLfit[f'{param}_er'] != 0, np.abs(100 * self.df_SLfit[f'{param}_er'] / self.df_SLfit[param]), np.nan)
-
+            self.df_SLfit[f'{param}_percer'] = np.where(
+                self.df_SLfit[f'{param}_er'] != 0,
+                np.abs(100 * self.df_SLfit[f'{param}_er'] / self.df_SLfit[param]),
+                np.nan
+            )
+        # For SB2, compute percentage errors for secondary component parameters
         if self.SB2:
             for param in ['cen2', 'amp2', 'wid2']:
-                self.df_SLfit[f'{param}_percer'] = np.where(self.df_SLfit[f'{param}_er'] != 0, np.abs(100 * self.df_SLfit[f'{param}_er'] / self.df_SLfit[param]), np.nan)
+                self.df_SLfit[f'{param}_percer'] = np.where(
+                    self.df_SLfit[f'{param}_er'] != 0,
+                    np.abs(100 * self.df_SLfit[f'{param}_er'] / self.df_SLfit[param]),
+                    np.nan
+                )
 
-        # Get unique lines
+        # Store the unique lines from the fits and calculate the number of epochs
         self.lines = self.df_SLfit['line'].unique()
         print('lines from SLfit results:', self.lines)
-
         self.nepochs = len(self.df_SLfit) // len(self.lines)
 
     def outlier_killer(self, data, thresh=2, print_output=None):
-        ''' returns the positions of elements in a list that
-            are not outliers. Based on a median-absolute-deviation
-            (MAD) test '''
+        """
+        Identify inliers and outliers from a data array using a MAD-based test.
+        
+        Parameters:
+            data (array-like): Numerical data to test.
+            thresh (float): Threshold multiplier for the MAD.
+            print_output (bool or None): Whether to print details (default uses self.print_output).
+        
+        Returns:
+            tuple: (inliers, outliers) where both are lists of indices.
+        """
         if print_output is None:
             print_output = self.print_output
-        # diff = abs(data - np.nanmedian(data))
         diff = data - np.nanmedian(data)
-        # diff = data - np.nanmean(data)
-        with open(self.path+'rv_stats.txt', 'a') as f:
-            if print_output==True:
+        # Output debug information to file and/or console
+        with open(self.path + 'rv_stats.txt', 'a') as f:
+            if print_output:
                 print('     mean(x)        =', f'{np.nanmean(data):.3f}')
                 print('     mean(x)        =', f'{np.nanmean(data):.3f}', file=f)
-                print('     median(x)        =', f'{np.nanmedian(data):.3f}')
-                print('     median(x)        =', f'{np.nanmedian(data):.3f}', file=f)
-                print('     x-median(x)      =', [f'{x:.3f}' for x in diff])
-                print('     x-median(x)      =', [f'{x:.3f}' for x in diff], file=f)
+                print('     median(x)      =', f'{np.nanmedian(data):.3f}')
+                print('     median(x)      =', f'{np.nanmedian(data):.3f}', file=f)
+                print('     x-median(x)    =', [f'{x:.3f}' for x in diff])
+                print('     x-median(x)    =', [f'{x:.3f}' for x in diff], file=f)
                 print('     abs(x-median(x)) =', [f'{abs(x):.3f}' for x in diff])
                 print('     abs(x-median(x)) =', [f'{abs(x):.3f}' for x in diff], file=f)
-            mad = 1.4826*np.nanmedian(abs(diff))
-            if print_output==True:
+            mad = 1.4826 * np.nanmedian(np.abs(diff))
+            if print_output:
                 print('     mad =', f'{mad:.3f}')
                 print('     mad =', f'{mad:.3f}', file=f)
-                print('     abs(x-median(x)) <', (f'{thresh*mad:.3f}'), '(thresh*mad) =', [abs(x)<thresh*mad for x in diff])
-                print('     abs(x-median(x)) <', (f'{thresh*mad:.3f}'), '(thresh*mad) =', [abs(x)<thresh*mad for x in diff], file=f)
-        inliers, outliers = [], []
-        for i in range(len(data)):
-            # if diff[i] < thresh*mad:
-            if abs(diff[i]) < thresh*mad:
-                inliers.append(i)
-            else:
-                outliers.append(i)
+                print('     abs(x-median(x)) <', f'{thresh * mad:.3f}', '(thresh*mad) =',
+                      [abs(x) < thresh * mad for x in diff])
+                print('     abs(x-median(x)) <', f'{thresh * mad:.3f}', '(thresh*mad) =',
+                      [abs(x) < thresh * mad for x in diff], file=f)
+        inliers = [i for i, x in enumerate(data) if abs(x - np.nanmedian(data)) < thresh * mad]
+        outliers = [i for i in range(len(data)) if i not in inliers]
         return inliers, outliers
 
     @staticmethod
     def weighted_mean(data, errors):
-        weights = [1/(dx**2) for dx in errors]
-        mean = sum([wa*a for a,wa in zip(data, weights)])/sum(weights)
-        mean_err = np.sqrt(sum( [(da*wa)**2 for da,wa in zip(errors, weights)] ))/sum(weights)
+        """
+        Compute a weighted mean and its error based on input values and uncertainties.
+        
+        Parameters:
+            data (list or array): Values for which the mean is computed.
+            errors (list or array): Corresponding uncertainties.
+        
+        Returns:
+            tuple: (weighted mean, weighted error)
+        """
+        weights = [1 / (dx ** 2) for dx in errors]
+        mean = sum(wa * a for a, wa in zip(data, weights)) / sum(weights)
+        mean_err = np.sqrt(sum((da * wa) ** 2 for da, wa in zip(errors, weights))) / sum(weights)
         return mean, mean_err
 
     def compute_rvs(self, lines, lambda_rest_dict):
-        c_kms = c.to('km/s').value   
+        """
+        Compute radial velocities (and uncertainties) for each spectral line.
+        
+        The method compares fitted central wavelengths (and errors) to the provided
+        rest wavelengths, propagating errors appropriately. For SB2 fits, it computes
+        results for the secondary as well.
+        
+        Parameters:
+            lines (list): List of line identifiers.
+            lambda_rest_dict (dict): Dictionary mapping each line to a tuple
+                                     (lambda_rest, lambda_rest_error).
+        
+        Returns:
+            dict: For each line, a sub-dictionary with keys 'rv1' and 'rv1_er' (and if SB2,
+                  also 'rv2' and 'rv2_er').
+        """
+        c_kms = c.to('km/s').value
         rvs = {}
-
         for line in lines:
-            # print(f'Computing RVs for line {line}')
             lambda_rest, lambda_r_er = lambda_rest_dict[line]
             current_line_values = self.df_SLfit[self.df_SLfit['line'] == line]
-
+            # Calculate the radial velocity for the first component
             dlambda1 = current_line_values['cen1'].values - lambda_rest
-            dlambda1_er = np.sqrt(current_line_values['cen1_er'].values**2 + lambda_r_er**2)
+            dlambda1_er = np.sqrt(current_line_values['cen1_er'].values ** 2 + lambda_r_er ** 2)
             rv1 = dlambda1 * c_kms / lambda_rest
-            # print('rv1:', rv1)
-            rv1_er = np.sqrt((dlambda1_er / dlambda1)**2 + (lambda_r_er / lambda_rest)**2) * np.abs(rv1)
-            # print('rv1_er:', rv1_er)
+            rv1_er = np.sqrt((dlambda1_er / dlambda1) ** 2 + (lambda_r_er / lambda_rest) ** 2) * np.abs(rv1)
             rvs[line] = {'rv1': rv1, 'rv1_er': rv1_er}
-
+            # If SB2, calculate the radial velocity for the second component
             if self.SB2:
                 dlambda2 = np.abs(current_line_values['cen2'].values - lambda_rest)
-                dlambda2_er = np.sqrt(current_line_values['cen2_er'].values**2 + lambda_r_er**2)
+                dlambda2_er = np.sqrt(current_line_values['cen2_er'].values ** 2 + lambda_r_er ** 2)
                 rv2 = dlambda2 * c_kms / lambda_rest
-                rv2_er = np.sqrt((dlambda2_er / dlambda2)**2 + (lambda_r_er / lambda_rest)**2) * rv2
-
+                rv2_er = np.sqrt((dlambda2_er / dlambda2) ** 2 + (lambda_r_er / lambda_rest) ** 2) * rv2
                 rvs[line].update({'rv2': rv2, 'rv2_er': rv2_er})
-
         return rvs
 
     @staticmethod
     def print_error_stats(grouped_error, error_type):
-        mean_values = [f'{np.mean(value):6.3f}' for value in grouped_error.values]
-        median_values = [f'{np.median(value):6.3f}' for value in grouped_error.values]
+        """
+        Print the mean and median values for a grouped error dictionary.
+        
+        Parameters:
+            grouped_error (dict): Error values grouped by some line or parameter.
+            error_type (str): A label describing the error type.
+        """
+        mean_values = [f'{np.mean(value):6.3f}' for value in grouped_error.values()]
+        median_values = [f'{np.median(value):6.3f}' for value in grouped_error.values()]
         print(f'   mean({error_type})  ', ' '.join(mean_values))
         print(f'   median({error_type})', ' '.join(median_values))
 
     def write_error_stats(self, out, grouped_errors, stat_type):
+        """
+        Write summarized error statistics to an output file.
+        
+        Parameters:
+            out (file-like): Open file handle to which the stats will be written.
+            grouped_errors (dict): Grouped error data for each line.
+            stat_type (str): Indicates whether using mean or median (e.g., "Mean").
+        """
         stat_func = np.nanmean if stat_type == 'Mean' else np.nanmedian
         out.write(f' {stat_type} of percentual errors\n')
         out.write('   Lines   wid1    cen1   amp1   |    wid2    cen2   amp2 \n')
         out.write('   -------------------------------------------------------\n')
         for line in grouped_errors['cen1_percer'].keys():
-            stats = ' '.join([f'{stat_func(grouped_errors[error_type][line]):7.3f}' for error_type in grouped_errors])
+            stats = ' '.join([f'{stat_func(grouped_errors[error_type][line]):7.3f}' 
+                              for error_type in grouped_errors])
             out.write(f'   {line}: {stats}\n')
         out.write('\n')
 
-    # def select_lines(self, error_type, lines):
-    #     if not self.use_lines:
-    #         best_lines_index, rm_lines_idx = self.outlier_killer([np.nanmedian(x) for x in error_type], thresh=self.lines_ok_thrsld)
-    #     else:
-    #         best_lines_index = [i for i, line in enumerate(lines) if line in self.use_lines]
-    #         rm_lines_idx = [i for i, line in enumerate(lines) if line not in self.use_lines]
-
-    #     best_lines = [lines[x] for x in best_lines_index]
-    #     return best_lines, best_lines_index, rm_lines_idx
-        
     def select_lines(self, error_type, lines):
+        """
+        Select the best lines for RV computation based on error criteria.
+        
+        If no preferred lines are specified via use_lines, the method filters out those with
+        NaN errors and then identifies outliers based on the median error.
+        
+        Parameters:
+            error_type (pd.Series or pd.DataFrame): Error data (e.g., percentage errors) for each line.
+            lines (list): List of candidate line identifiers.
+        
+        Returns:
+            tuple: (best_lines, best_lines_index, rm_lines_idx) where best_lines is a list of selected lines,
+                   best_lines_index are indices of selected lines, and rm_lines_idx are indices of removed lines.
+        """
         if not self.use_lines:
-            nonan_lines = []
-            # for line, x in error_type.iteritems():
-            for line, x in error_type.items():
-                if np.isnan(x).sum() == 0:
-                    nonan_lines.append(line)
-            best_lines_index, rm_lines_idx = self.outlier_killer([np.nanmedian(error_type.loc[i]) for i in nonan_lines], thresh=self.lines_ok_thrsld)
+            # Only consider lines with no NaN values in their errors
+            nonan_lines = [line for line, x in error_type.items() if np.isnan(x).sum() == 0]
+            best_lines_index, rm_lines_idx = self.outlier_killer(
+                [np.nanmedian(error_type.loc[i]) for i in nonan_lines],
+                thresh=self.lines_ok_thrsld
+            )
             best_lines = [nonan_lines[x] for x in best_lines_index]
         else:
             best_lines_index = [i for i, line in enumerate(lines) if line in self.use_lines]
             rm_lines_idx = [i for i, line in enumerate(lines) if line not in self.use_lines]
             best_lines = [lines[x] for x in best_lines_index]
-        
         return best_lines, best_lines_index, rm_lines_idx
 
     def remove_bad_epochs(self, df, metric='mean', error_type='cen', epochs_ok_thrsld=None):
+        """
+        Identify epochs with high errors that should be removed from subsequent RV computations.
         
+        This method computes the per-epoch error (using either the mean or median) for a selected parameter,
+        then uses the outlier_killer to mark epochs that exceed the threshold.
+        
+        Parameters:
+            df (pd.DataFrame): DataFrame containing the SLfit results.
+            metric (str): 'mean' or 'median' to compute the summary error statistic.
+            error_type (str): Key for the error type; valid options include 'wid', 'rvs', 'cen', or 'amp'.
+            epochs_ok_thrsld (float, optional): Threshold for acceptable error values (if not provided,
+                                                uses self.epochs_ok_thrsld).
+        
+        Returns:
+            list: Indices of the epochs to remove.
+        """
         error_list = []
-        err_type_dic={'wid':'wid1_er', 'rvs':'sigma_rv', 'cen':'cen1_er', 'amp':'amp1_er'}
-        self.print_output and print('\n   '+'-'*34+'\n   Removing epochs with large errors:')
-        self.print_output and print('     using error_type:', error_type)
+        err_type_dic = {'wid': 'wid1_er', 'rvs': 'sigma_rv', 'cen': 'cen1_er', 'amp': 'amp1_er'}
+        if self.print_output:
+            print('\n' + '-' * 34 + '\n   Removing epochs with large errors:')
+            print('     using error_type:', error_type)
         if not epochs_ok_thrsld:
             epochs_ok_thrsld = self.epochs_ok_thrsld
-        with open(self.path+'rv_stats.txt', 'a') as out:
+        with open(self.path + 'rv_stats.txt', 'a') as out:
             out.write(' Removing epochs with large errors:\n')
             rm_OBs_idx = []
             epochs_unique = df['epoch'].unique()
             for i, epoch in enumerate(epochs_unique):
                 df_epoch = df[df['epoch'] == epoch]
-                error = df_epoch[err_type_dic[error_type]].mean() if metric == 'mean' \
-                    else df_epoch[err_type_dic[error_type]].median()
+                error = df_epoch[err_type_dic[error_type]].mean() if metric == 'mean' else df_epoch[err_type_dic[error_type]].median()
                 error_list.append(error)
-
+                # If the error type is 'rvs' and there is any NaN, mark this epoch for removal
                 if error_type == 'rvs' and df_epoch.isna().any().any():
                     rm_OBs_idx.append(i)
-
-            self.print_output and print('\n   Applying outlier_killer to remove epochs')
+            if self.print_output:
+                print('\n   Applying outlier_killer to remove epochs')
             rm_OBs_idx += self.outlier_killer(error_list, thresh=epochs_ok_thrsld)[1]
-
-            self.print_output and print(f'   Indices of epochs to be removed: {[x for x in rm_OBs_idx]}')
-            out.write(f'   Indices of epochs to be removed: {[x for x in rm_OBs_idx]}\n\n')
-
-            return rm_OBs_idx
+            if self.print_output:
+                print(f'   Indices of epochs to be removed: {rm_OBs_idx}')
+            out.write(f'   Indices of epochs to be removed: {rm_OBs_idx}\n\n')
+        return rm_OBs_idx
 
     def compute_weighted_mean_rvs(self, rvs_dict, lines, rm_OBs_idx):
+        """
+        Compute the weighted mean radial velocities for each epoch based on measurements from the best lines.
+        
+        For each line, bad epochs (determined by rm_OBs_idx) are removed before computing per-line
+        averages. Then, a weighted mean over the selected lines is computed for each epoch.
+        
+        Parameters:
+            rvs_dict (dict): Dictionary of RV measurements for each line.
+            lines (list): Lines to consider.
+            rm_OBs_idx (list): Indices of epochs to remove.
+        
+        Returns:
+            tuple: (wmean_rvs1, wmean_rvs2, line_avg1, line_avg2) where wmean_rvs1 and wmean_rvs2
+                   are dictionaries mapping each epoch to its weighted mean RV (primary and secondary),
+                   and line_avg1 and line_avg2 are per-line average RVs.
+        """
         wmean_rvs1, wmean_rvs2 = {}, {}
         line_avg1, line_avg2 = {}, {}
-        # Filter the RVs and errors for the best lines and remove bad epochs
+        # Process primary component RVs
         for line, rvs in rvs_dict.items():
             if line not in lines:
                 continue
@@ -1177,13 +1348,14 @@ class GetRVs:
             line_avg1[line] = {'mean': np.mean(rv1), 'std': np.std(rv1)}
             rvs_dict[line]['rv1'] = rv1
             rvs_dict[line]['rv1_er'] = rv1_er
-        # Compute the weighted mean RV for the primary for each epoch
+        # Compute weighted mean for primary RVs for each epoch
         for epoch in range(len(rv1)):
-            weighted_mean1, weighted_error1 = GetRVs.weighted_mean([rvs_dict[line]['rv1'][epoch] for line in lines], 
-                                                                   [rvs_dict[line]['rv1_er'][epoch] for line in lines])
+            weighted_mean1, weighted_error1 = GetRVs.weighted_mean(
+                [rvs_dict[line]['rv1'][epoch] for line in lines],
+                [rvs_dict[line]['rv1_er'][epoch] for line in lines]
+            )
             wmean_rvs1[epoch] = {'value': weighted_mean1, 'error': weighted_error1}
-
-        # Same for the secondary if SB2
+        # Process secondary RVs if SB2 is enabled
         if self.SB2:
             for line, rvs in rvs_dict.items():
                 if line not in lines:
@@ -1194,29 +1366,38 @@ class GetRVs:
                 rvs_dict[line]['rv2'] = rv2
                 rvs_dict[line]['rv2_er'] = rv2_er
             for epoch in range(len(rv2)):
-                weighted_mean2, weighted_error2 = GetRVs.weighted_mean([rvs_dict[line]['rv2'][epoch] for line in lines], 
-                                                                       [rvs_dict[line]['rv2_er'][epoch] for line in lines])
+                weighted_mean2, weighted_error2 = GetRVs.weighted_mean(
+                    [rvs_dict[line]['rv2'][epoch] for line in lines],
+                    [rvs_dict[line]['rv2_er'][epoch] for line in lines]
+                )
                 wmean_rvs2[epoch] = {'value': weighted_mean2, 'error': weighted_error2}
-
         return wmean_rvs1, wmean_rvs2, line_avg1, line_avg2
 
     def print_and_write_results(self, lines, line_avg1, total_mean_rv1, nepochs, line_avg2=None, total_mean_rv2=None):
-        # Prepare the lines to print/write
+        """
+        Generate formatted text output summarizing per-line and overall RV results and write to file.
+        
+        Parameters:
+            lines (list): Spectral line identifiers.
+            line_avg1 (dict): Per-line average primary RVs.
+            total_mean_rv1 (dict): Overall weighted mean and standard deviation for primary RVs.
+            nepochs (int): Total number of epochs.
+            line_avg2 (dict, optional): Per-line average secondary RVs (if SB2).
+            total_mean_rv2 (dict, optional): Overall weighted mean and standard deviation for secondary RVs (if SB2).
+        """
         rows = []
         rows.append(f'RV mean of the {nepochs} epochs for each line:')
         rows.append('---------------------------------------')
-        # print('line_avg1:', line_avg1)
-        # print('line_avg2:', line_avg2)
         for line in lines:
             mean = line_avg1[line]['mean']
             std = line_avg1[line]['std']
             rows.append(f'   - {line}: {mean:.3f} +/- {std:.3f}')
         if self.SB2:
-            rows.append(f'   Component 2:') 
+            rows.append('   Component 2:')
             for line in lines:
                 mean = line_avg2[line]['mean']
                 std = line_avg2[line]['std']
-                rows.append(f'   - {line}: {mean:.3f} +/- {std:.3f}')                
+                rows.append(f'   - {line}: {mean:.3f} +/- {std:.3f}')
         rows.append('')
         rows.append(f'Weighted mean RV of the {nepochs} epochs:')
         rows.append('------------------------------------------')
@@ -1226,96 +1407,111 @@ class GetRVs:
             mean2, std2 = total_mean_rv2['mean'], total_mean_rv2['std']
             rows.append(f'   Secondary: {mean2:.3f}, std dev = {std2:.3f}')
         rows.append('')
-
         if self.print_output:
             print('\n'.join(rows))
-        with open(self.path+'rv_stats.txt', 'a') as out:
+        with open(self.path + 'rv_stats.txt', 'a') as out:
             out.write('\n'.join(rows))
 
     def compute(self):
-        '''
+        """
+        Orchestrates the full radial velocity (RV) analysis workflow for single-lined (SB1)
+        spectra. 
+        Note: SB2-related processing in GetRVs is now deprecated, as the new SB2 
+        probabilistic method computes RVs directly.
+
+        This method performs the following steps:
+          - Prints header information.
+          - Defines a dictionary of rest wavelengths (in air).
+          - Computes per-line RVs (with error propagation) from the SLfit results.
+          - Generates an errorbar plot of RVs per spectral line.
+          - Groups percentage errors per line and selects the best lines using a MAD-based outlier test.
+          - Writes statistical error analyses to a file.
+          - Reads and processes JD information.
+          - Removes bad/noisy epochs based on error thresholds.
+          - Computes weighted mean RVs per epoch from the selected best lines.
+          - Prints and writes summary RV results and saves final RV values to file.
+          - Generates a final diagnostic plot of RVs versus Julian Date.
         
-        '''
-        
-        if self.print_output==True:
-            print('\n')
-            print( '*******************************************************************************' )
-            print( '******************                RV Analisys                ******************' )
-            print( '*******************************************************************************\n' )
+        Returns:
+            pd.DataFrame: A DataFrame containing the final RV results.
+        """
+        # Print header information
+        if self.print_output:
+            print('\n' + '*' * 79)
+            print('******************                RV Analysis                ******************')
+            print('*' * 79 + '\n')
 
-        # All wavelengths in air
-        lambda_rest_dict =  {4009: [4009.2565, 0.00002], 4026: [4026.1914, 0.0010],
-                    4102: [4101.734, 0.006],    4121: [4120.8154, 0.0012],
-                    4128: [4128.07, 0.10],      4131: [4130.89, 0.10],
-                    4144: [4143.761, 0.010],    4267: [4267.258, 0.007], 
-                    4340: [4340.472, 0.006],    4388: [4387.9296, 0.0006],  
-                    4471: [4471.4802, 0.0015],  4481: [4481.130, 0.010],    
-                    4542: [4541.591, 0.010],    4553: [4552.62, 0.10], 
-                    4713: [4713.1457, 0.0006],      
-                    4861: [4861.35, 0.05],      4922: [4921.9313, 0.0005],
-                    5412: [5411.52, 0,10],      5876: [5875.621, 0.010],
-                    5890: [5889.951, 0.00003],  6562: [6562.79, 0.030],
-                    6678: [6678.151, 0.010],    7774: [7774.17, 0,10]
-                    }
+        # Define rest wavelengths dictionary (wavelength and its error)
+        lambda_rest_dict = {
+            4009: [4009.2565, 0.00002], 4026: [4026.1914, 0.0010],
+            4102: [4101.734, 0.006],     4121: [4120.8154, 0.0012],
+            4128: [4128.07, 0.10],       4131: [4130.89, 0.10],
+            4144: [4143.761, 0.010],     4267: [4267.258, 0.007],
+            4340: [4340.472, 0.006],     4388: [4387.9296, 0.0006],
+            4471: [4471.4802, 0.0015],   4481: [4481.130, 0.010],
+            4542: [4541.591, 0.010],     4553: [4552.62, 0.10],
+            4713: [4713.1457, 0.0006],
+            4861: [4861.35, 0.05],       4922: [4921.9313, 0.0005],
+            5412: [5411.52, 0.10],       5876: [5875.621, 0.010],
+            5890: [5889.951, 0.00003],   6562: [6562.79, 0.030],
+            6678: [6678.151, 0.010],     7774: [7774.17, 0.10]
+        }
 
-        if self.print_output==True:
-            print('*** SB2 set to: ', self.SB2, ' ***\n')
-    
-        if self.print_output==True:
-            print( '\n')
-            print( '*** Computing Radial velocities ***')
-            print( '-----------------------------------')
+        if self.print_output:
+            print('*** SB2 set to:', self.SB2, '***\n')
+            print('\n*** Computing Radial Velocities ***')
+            print('-----------------------------------')
 
+        # Compute per-line RVs based on the SLfit results and rest wavelengths.
         rvs_dict = self.compute_rvs(self.lines, lambda_rest_dict)
- 
-        # RV plot per spectral line from rvs_dict
+
+        # Plot RVs for each spectral line
         fig, ax = plt.subplots()
         markers = ['o', 'v', '^', '<', '>', 's', 'X', '*', 'D', 'H']
         for line, marker in zip(self.lines, markers):
             rv1 = rvs_dict[line]['rv1']
             rv1_er = rvs_dict[line]['rv1_er']
-            ax.errorbar(range(len(rv1)), rv1, yerr=rv1_er, fmt=marker, color='dodgerblue', label=f'Comp. 1 {line}', alpha=0.5)
+            ax.errorbar(range(len(rv1)), rv1, yerr=rv1_er, fmt=marker,
+                        color='dodgerblue', label=f'Comp. 1 {line}', alpha=0.5)
             if self.SB2:
                 rv2 = rvs_dict[line]['rv2']
                 rv2_er = rvs_dict[line]['rv2_er']
-                ax.errorbar(range(len(rv2)), rv2, yerr=rv2_er, fmt=marker, color='darkorange', alpha=0.5)# , label=f'Comp. 2 {line}'
+                ax.errorbar(range(len(rv2)), rv2, yerr=rv2_er, fmt=marker,
+                            color='darkorange', alpha=0.5)
         ax.set_xlabel('Epoch')
         ax.set_ylabel('Radial Velocity (km/s)')
         ax.legend(loc='lower left', fontsize=8)
-        plt.savefig(self.path+'rvs_per_line.png', bbox_inches='tight', dpi=300)
-        # plt.show()
+        plt.savefig(self.path + 'rvs_per_line.png', bbox_inches='tight', dpi=300)
         plt.close()
 
         #################################################################
         #                Selecting lines with the best fits
         #################################################################
-
         primary_error_types = ['wid1_percer', 'cen1_percer', 'amp1_percer']
         secondary_error_types = ['wid2_percer', 'cen2_percer', 'amp2_percer'] if self.SB2 else []
-        
-        grouped_errors = {error_type: self.df_SLfit.groupby('line')[error_type].apply(list) for error_type in primary_error_types + secondary_error_types}
+        all_error_types = primary_error_types + secondary_error_types
+        grouped_errors = {error_type: self.df_SLfit.groupby('line')[error_type].apply(list)
+                          for error_type in all_error_types}
 
         if self.print_output:
             print('\n*** Choosing the best lines ***\n-------------------------------')
-
             print_lines = [str(line) for line in grouped_errors['cen1_percer'].keys()]
-            print(' Primary:'+' ' * 14, '   '.join(print_lines))
+            print(' Primary:' + ' ' * 14, '   '.join(print_lines))
             for error_type in primary_error_types:
                 GetRVs.print_error_stats(grouped_errors[error_type], error_type)
-
             if self.SB2:
                 print(' Secondary:')
                 for error_type in secondary_error_types:
                     GetRVs.print_error_stats(grouped_errors[error_type], error_type)
 
-        with open(self.path+'rv_stats.txt', 'w') as out:
+        # Write statistical error analysis to file.
+        with open(self.path + 'rv_stats.txt', 'w') as out:
             out.write(' ********************************\n')
             out.write('  Statistical analysis of errors \n')
             out.write(' ********************************\n\n')
-
             for stat_type in ['Mean', 'Median']:
                 self.write_error_stats(out, grouped_errors, stat_type)
-    
+
         if self.print_output:
             print('\n   --------------------------------------------')
             if not self.use_lines:
@@ -1323,65 +1519,48 @@ class GetRVs:
             else:
                 print('   Selecting lines determined by user:')
 
-        # if self.SB2:
-        #     error_type = 'cen2_percer'
-        # for line in self.lines:
-        #     print(line, grouped_errors[self.error_type][line])
-        #     print('mean:', np.nanmean(grouped_errors[self.error_type][line]))
-        #     print('median:', np.nanmedian(grouped_errors[self.error_type][line]))
-        # Selecting the best lines
+        # Select the best lines based on the specified error metric.
         best_lines, best_lines_index, rm_lines_idx = self.select_lines(grouped_errors[self.error_type], self.lines)
         if self.print_output:
-            print('\n   These are the best lines: ', best_lines)
-
+            print('\n   These are the best lines:', best_lines)
         nlines = len(best_lines)
-
-        with open(self.path+'rv_stats.txt', 'a') as out:
+        with open(self.path + 'rv_stats.txt', 'a') as out:
             out.write('\n')
             out.write(f' Lines with the best fitted profile according to the median {self.error_type} criterion:\n')
             out.write(' --------------------------------------------------------------------------\n')
             for i in range(nlines):
-                if i<range(nlines)[-1]:
-                    out.write('   '+str(best_lines_index[i])+': '+str(best_lines[i])+', ')
+                if i < nlines - 1:
+                    out.write(f'   {best_lines_index[i]}: {best_lines[i]}, ')
                 else:
-                    out.write('   '+str(best_lines_index[i])+': '+str(best_lines[i])+'\n')
+                    out.write(f'   {best_lines_index[i]}: {best_lines[i]}\n')
             out.write('\n')
 
-        #################################################################
-        #                Removing lines with inverted components
-        #################################################################
-        if self.SB2:
-            if len(best_lines) > 2:
-                if self.print_output:
-                    print('\n   --------------------------------------------')
-                    print('   Removing lines with inverted components:')
 
-                failed_lines_indices = []
-                for epoch in range(self.nepochs):
-                    rv1s = [rvs_dict[line]['rv1'][epoch] for line in best_lines]
-                    _, failed_lines_index = self.outlier_killer(rv1s, thresh=self.lines_ok_thrsld, print_output=False)
-                    failed_lines_indices.extend(failed_lines_index)
-                    failed_lines_counts = Counter(failed_lines_indices)
-                print(f'   {failed_lines_counts}')
-
-                threshold_percentage = 0.60  # 60%
-                threshold = threshold_percentage * self.nepochs
-                # Find the lines that failed the test more than the threshold number of times
-                lines_to_remove = [line for line, count in failed_lines_counts.items() if count > threshold]
-                lines_to_remove = [best_lines[i] for i in lines_to_remove]
-                # Remove the lines from the list of lines
-                print(f"   Lines to remove: {lines_to_remove}")
-                best_lines = [line for line in best_lines if line not in lines_to_remove]
-                print(f"   Remaining lines: {best_lines}")
+        #################################################################
+        #       Removing lines with inverted components (deprecated)
+        #################################################################
+        if self.SB2 and len(best_lines) > 2:
+            if self.print_output:
+                print('\n   --------------------------------------------')
+                print('   Removing lines with inverted components:')
+            failed_lines_indices = []
+            for epoch in range(self.nepochs):
+                rv1s = [rvs_dict[line]['rv1'][epoch] for line in best_lines]
+                _, failed_idx = self.outlier_killer(rv1s, thresh=self.lines_ok_thrsld, print_output=False)
+                failed_lines_indices.extend(failed_idx)
+            failed_lines_counts = Counter(failed_lines_indices)
+            print(f'   {failed_lines_counts}')
+            threshold = 0.60 * self.nepochs  # Remove lines that fail >60% of epochs
+            lines_to_remove = [best_lines[i] for i, count in failed_lines_counts.items() if count > threshold]
+            print(f"   Lines to remove: {lines_to_remove}")
+            best_lines = [line for line in best_lines if line not in lines_to_remove]
+            print(f"   Remaining lines: {best_lines}")
 
         #################################################################
         #                  Removing bad/noisy epochs
         #################################################################
-        df_rv = pd.read_csv(self.JDfile, names = ['epoch', 'MJD'], sep='\s+')
-        df_rv = df_rv.replace({'.fits':''}, regex=True)
-        df_rv2 = pd.read_csv(self.JDfile, names = ['epoch', 'MJD'], sep='\s+')
-        df_rv2 = df_rv2.replace({'.fits':''}, regex=True)
-
+        df_rv = pd.read_csv(self.JDfile, names=['epoch', 'MJD'], sep='\s+').replace({'.fits': ''}, regex=True)
+        df_rv2 = pd.read_csv(self.JDfile, names=['epoch', 'MJD'], sep='\s+').replace({'.fits': ''}, regex=True)
         rv1_values, rv2_values = [], []
         for line in best_lines:
             df_rv[f'rv_{line}'] = rvs_dict[line]['rv1']
@@ -1397,18 +1576,19 @@ class GetRVs:
         if self.SB2:
             df_rv2['comp'] = 2
             df_rv2['sigma_rv'] = np.std(np.stack(rv2_values), axis=0)
-            error_par = 'cen'        
+            error_par = 'cen'
 
-        if self.rm_epochs:    
+        # Remove bad/noisy epochs if specified.
+        if self.rm_epochs:
             if self.print_output:
                 print('\n*** Choosing best epochs for analysis ***\n---------------------------------------------')
-            if len(best_lines) > 1:            
+            if len(best_lines) > 1:
                 rm_OBs_idx = self.remove_bad_epochs(self.df_SLfit, metric='median', error_type=error_par)
                 rm_OBs_idx += self.remove_bad_epochs(df_rv, metric='median', error_type='rvs', epochs_ok_thrsld=10)
                 final_nepochs = self.nepochs - len(rm_OBs_idx)
             else:
                 rm_OBs_idx = []
-                final_nepochs = self.nepochs                
+                final_nepochs = self.nepochs
         else:
             rm_OBs_idx = []
             final_nepochs = self.nepochs
@@ -1416,32 +1596,29 @@ class GetRVs:
         #################################################################
         #                Computing weighted mean RVs
         #################################################################
-        if self.print_output==True:
-            print( '\n')
-            print( '*** Calculating the RV weighted mean for each epoch  ***')
-            print( '--------------------------------------------------------')
-
+        if self.print_output:
+            print('\n*** Calculating the RV weighted mean for each epoch  ***')
+            print('--------------------------------------------------------')
         wmean_rv1, wmean_rv2, line_avg1, line_avg2 = self.compute_weighted_mean_rvs(rvs_dict, best_lines, rm_OBs_idx)
-        total_rv1, total_rv2 = {}, {}
-        total_rv1['mean'] = np.mean([wmean_rv1[i]['value'] for i in wmean_rv1.keys()])
-        total_rv1['std'] = np.std([wmean_rv1[i]['value'] for i in wmean_rv1.keys()])
+        total_rv1 = {'mean': np.mean([wmean_rv1[i]['value'] for i in wmean_rv1.keys()]),
+                     'std': np.std([wmean_rv1[i]['value'] for i in wmean_rv1.keys()])}
         if self.SB2:
-            total_rv2['mean'] = np.mean([wmean_rv2[i]['value'] for i in wmean_rv2.keys()])
-            total_rv2['std'] = np.std([wmean_rv2[i]['value'] for i in wmean_rv2.keys()])
+            total_rv2 = {'mean': np.mean([wmean_rv2[i]['value'] for i in wmean_rv2.keys()]),
+                         'std': np.std([wmean_rv2[i]['value'] for i in wmean_rv2.keys()])}
+        else:
+            total_rv2 = None
 
-        # Printing/Writing
-        self.print_and_write_results(best_lines, line_avg1, total_rv1, final_nepochs, line_avg2=line_avg2, total_mean_rv2=total_rv2)
-        
+        self.print_and_write_results(best_lines, line_avg1, total_rv1, final_nepochs,
+                                     line_avg2=line_avg2, total_mean_rv2=total_rv2)
+
         #################################################################
         #                Writing RVs to file RVs.txt
         #################################################################
         if self.rm_epochs and rm_OBs_idx:
             df_rv.drop(rm_OBs_idx, inplace=True)
             df_rv.reset_index(drop=True, inplace=True)
-            # rv1_values = [np.delete(rv, rm_OBs_idx) for rv in rv1_values]
         df_rv['mean_rv'] = [wmean_rv1[i]['value'] for i in range(len(wmean_rv1))]
         df_rv['mean_rv_er'] = [wmean_rv1[i]['error'] for i in range(len(wmean_rv1))]
-
         if self.SB2:
             if self.rm_epochs and rm_OBs_idx:
                 df_rv2.drop(rm_OBs_idx, inplace=True)
@@ -1450,127 +1627,196 @@ class GetRVs:
             df_rv2['mean_rv_er'] = [wmean_rv2[i]['error'] for i in range(len(wmean_rv2))]
             df_rv = pd.concat([df_rv, df_rv2], ignore_index=True)
 
-        with open(self.path+'RVs1.txt', 'w') as fo:
+        with open(self.path + 'RVs1.txt', 'w') as fo:
             fo.write(df_rv.to_string(formatters={'MJD': '{:.8f}'.format}, index=False))
 
         #################################################################
         #        Plotting RVs per spectral line and weighted mean
         #################################################################
-        data = pd.read_csv(self.path+'RVs1.txt', delim_whitespace=True)
+        data = pd.read_csv(self.path + 'RVs1.txt', delim_whitespace=True)
         primary_data = data[data['comp'] == 1]
         secondary_data = data[data['comp'] == 2]
         fig, ax = plt.subplots(figsize=(8, 6))
         rv_lines = [f'rv_{line}' for line in best_lines]
         rv_er = [f'rv_{line}_er' for line in best_lines]
-        markers = ['o', 'v', '^', '<', '>', 's', 'X', '*', 'D', 'H']
         for i, (rv_line, marker) in enumerate(zip(rv_lines, markers)):
-            ax.errorbar(primary_data['MJD'], primary_data[rv_line], yerr=primary_data[rv_er[i]], fmt=marker, 
-                        color='dodgerblue', fillstyle='none', label=f'Comp. 1 {best_lines[i]}', alpha=0.5)
+            ax.errorbar(primary_data['MJD'], primary_data[rv_line], yerr=primary_data[rv_er[i]],
+                        fmt=marker, color='dodgerblue', fillstyle='none',
+                        label=f'Comp. 1 {best_lines[i]}', alpha=0.5)
         for i, (rv_line, marker) in enumerate(zip(rv_lines, markers)):
-            ax.errorbar(secondary_data['MJD'], secondary_data[rv_line], yerr=secondary_data[rv_er[i]], fmt=marker, 
-                        color='darkorange', fillstyle='none', alpha=0.5)# label=f'Comp. 1 {best_lines[i]}', 
-        ax.errorbar(primary_data['MJD'], primary_data['mean_rv'], fmt='s', color='dodgerblue', alpha=0.5, label=f'Primary weighted mean')
-        ax.errorbar(secondary_data['MJD'], secondary_data['mean_rv'], fmt='s', color='darkorange', alpha=0.5, label=f'Secondary weighted mean')
+            ax.errorbar(secondary_data['MJD'], secondary_data[rv_line], yerr=secondary_data[rv_er[i]],
+                        fmt=marker, color='darkorange', fillstyle='none', alpha=0.5)
+        ax.errorbar(primary_data['MJD'], primary_data['mean_rv'], fmt='s', color='dodgerblue',
+                    alpha=0.5, label='Primary weighted mean')
+        ax.errorbar(secondary_data['MJD'], secondary_data['mean_rv'], fmt='s', color='darkorange',
+                    alpha=0.5, label='Secondary weighted mean')
         ax.set_xlabel('Julian Date')
         ax.set_ylabel('Mean Radial Velocity')
         ax.legend(fontsize=8)
-        plt.savefig(self.path+'RVs1.png', bbox_inches='tight', dpi=300)
+        plt.savefig(self.path + 'RVs1.png', bbox_inches='tight', dpi=300)
         plt.close()
 
         return df_rv
 
 def get_peaks(power, frequency, fal_50pc, fal_1pc, fal_01pc, minP=1.1):
+    """
+    Identify significant peaks in a periodogram based on false alarm levels.
+    
+    The function determines a minimum power threshold (peaks_min_h) based on the
+    maximum power relative to the given false alarm levels and then finds peaks 
+    within specified frequency regions.
+    
+    Parameters:
+        power (array-like): The Lomb–Scargle power spectrum.
+        frequency (array-like): The corresponding frequency grid (1/days).
+        fal_50pc (float): The false alarm level corresponding to a 50% probability.
+        fal_1pc (float): The false alarm level corresponding to a 1% probability.
+        fal_01pc (float): The false alarm level corresponding to a 0.1% probability.
+        minP (float, optional): The minimum period to consider (default is 1.1 days).
+    
+    Returns:
+        tuple:
+            - freq_peaks (np.array): Frequencies at which significant peaks occur.
+            - peri_peaks (np.array): Corresponding periods (in days) computed as 1/frequency.
+            - peaks (np.array): Indices of the detected peaks in the `power` array.
+    """
     if power.max() > fal_01pc:
         peaks_min_h = float(f'{fal_1pc:.3f}')
     elif power.max() <= fal_01pc and power.max() > fal_1pc:
-        peaks_min_h = float(f'{0.6*fal_1pc:.3f}')
+        peaks_min_h = float(f'{0.6 * fal_1pc:.3f}')
     else:
         peaks_min_h = float(f'{fal_50pc:.3f}')
-   
-    freq_index1 = np.argmin(np.abs(frequency - 1/5))
+    
+    # Define index boundaries corresponding to periods
+    freq_index1 = np.argmin(np.abs(frequency - 1/5))  # approx period = 5 days
     freq_index2 = np.argmin(np.abs(frequency - 1/minP))
-    plt.plot(frequency, power)
+    
+    # Plot the periodogram (could be commented out in production)
+    # plt.plot(frequency, power)
+    
+    # Find peaks in two frequency ranges and merge the results
     peaks1, _ = find_peaks(power[:freq_index1], height=peaks_min_h, distance=1000)
     peaks2, _ = find_peaks(power[:freq_index2], height=peaks_min_h, distance=5000)
-
     peaks = np.unique(np.concatenate((peaks1, peaks2)))
-
+    
     freq_peaks = frequency[peaks]
-    peri_peaks = 1/frequency[peaks]
-
+    peri_peaks = 1 / frequency[peaks]
+    
     return freq_peaks, peri_peaks, peaks
 
-def run_LS(hjd, rv, rv_err=None, probabilities = [0.5, 0.01, 0.001], method='bootstrap', P_ini=1.2, P_end=500, samples_per_peak=5000):
+def run_LS(hjd, rv, rv_err=None, probabilities=[0.5, 0.01, 0.001], method='bootstrap',
+           P_ini=1.2, P_end=500, samples_per_peak=5000):
+    """
+    Run a Lomb–Scargle periodogram on provided time series data.
+    
+    This function computes the Lomb–Scargle power spectrum and obtains the false alarm 
+    levels for the specified probability thresholds. It uses the 'fast' method for power 
+    computation.
+    
+    Parameters:
+        hjd (array-like): Times of observation (HJD or MJD).
+        rv (array-like): Radial velocity measurements.
+        rv_err (array-like, optional): Measurement uncertainties. If None, errors are ignored.
+        probabilities (list, optional): List of false alarm probability thresholds (default: [0.5, 0.01, 0.001]).
+        method (str, optional): The method used for computing false alarm levels (default is 'bootstrap').
+        P_ini (float, optional): The minimum period (in days) to consider (default is 1.2).
+        P_end (float, optional): The maximum period (in days) to consider (default is 500).
+        samples_per_peak (int, optional): Oversampling factor per peak (default is 5000).
+    
+    Returns:
+        tuple:
+            - frequency (np.array): The frequency grid over which power was computed (1/days).
+            - power (np.array): The computed Lomb–Scargle power spectrum.
+            - fap (float): The false alarm probability of the highest peak.
+            - fal (list): The false alarm levels corresponding to the specified probabilities.
+    """
     if rv_err is None:
-    # if rv_err.any() == False:
         ls = LombScargle(hjd, rv, normalization='model')
     else:
         ls = LombScargle(hjd, rv, rv_err, normalization='model')
     fal = ls.false_alarm_level(probabilities, method=method)
-    frequency, power = ls.autopower(method='fast', minimum_frequency=1/P_end, #0.001=1000
-                                                    maximum_frequency=1/P_ini, # 0.9=1.1, 1.5=0.67, 2=0.5, 4=0.25
-                                                    samples_per_peak=samples_per_peak) # 2000
+    frequency, power = ls.autopower(method='fast', minimum_frequency=1/P_end,
+                                    maximum_frequency=1/P_ini, samples_per_peak=samples_per_peak)
     fap = ls.false_alarm_probability(power.max(), method=method)
-
     return frequency, power, fap, fal
 
 def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=False, Pfold=True, fold_rv_curve=True):
-    '''
-    df: dataframe with the RVs, output from getrvs()
-    '''
-    # print(df)
-    if not os.path.exists(path+'LS'):
-        os.makedirs(path+'LS')
-    try:
-        hjd1, rv1 = df['JD'][df['comp']==1], df['mean_rv'][df['comp']==1]
-    except:
-        hjd1, rv1 = df['MJD'][df['comp']==1], df['mean_rv'][df['comp']==1]
-
-    if 'mean_rv_er' in df.columns:
-        rv1_err = df['mean_rv_er'][df['comp']==1]
-    else:
-        rv1_err = None
+    """
+    Perform Lomb–Scargle period analysis on a DataFrame of radial velocities.
     
-    starname = df['epoch'][0].split('_')[0]+'_'+df['epoch'][0].split('_')[1]
-    nepochs=len(hjd1)
-
-    with open(path+'LS/ls_output.txt', 'w') as lsout:
+    This function reads the input DataFrame (from getrvs()), determines which column to use for times
+    (HJD/MJD), and computes the Lomb–Scargle periodogram for the primary (and, if SB2==True, secondary)
+    component. It saves outputs (text and plots) to a dedicated 'LS' directory within the provided path.
+    
+    Parameters:
+        df (pd.DataFrame): DataFrame containing RV measurements and associated metadata.
+        path (str): Directory path for saving LS outputs.
+        SB2 (bool, optional): If True, perform secondary analysis for SB2 stars (default is False).
+        print_output (bool, optional): If True, print intermediate outputs (default is True).
+        plots (bool, optional): If True, generate diagnostic plots (default is True).
+        best_lines (bool, optional): (Reserved) Whether to use best-lines selection (default is False).
+        Pfold (bool, optional): If True, perform RV curve folding (default is True).
+        fold_rv_curve (bool, optional): If True, compute phase-folded RV curves (default is True).
+    
+    Returns:
+        dict: A dictionary (`ls_results`) containing periodogram outputs, including frequency grid,
+              power spectrum, false alarm probabilities and levels, detected peaks, and best period estimates.
+    """
+    # Ensure LS output directory exists
+    ls_path = os.path.join(path, 'LS')
+    if not os.path.exists(ls_path):
+        os.makedirs(ls_path)
+    
+    # Select times and RVs from DataFrame; try both 'JD' and 'MJD'
+    try:
+        hjd1, rv1 = df['JD'][df['comp'] == 1], df['mean_rv'][df['comp'] == 1]
+    except:
+        hjd1, rv1 = df['MJD'][df['comp'] == 1], df['mean_rv'][df['comp'] == 1]
+    
+    rv1_err = df['mean_rv_er'][df['comp'] == 1] if 'mean_rv_er' in df.columns else None
+    starname = df['epoch'][0].split('_')[0] + '_' + df['epoch'][0].split('_')[1]
+    nepochs = len(hjd1)
+    
+    # Write header information
+    with open(os.path.join(ls_path, 'ls_output.txt'), 'w') as lsout:
         lsout.write(' ***************************************\n')
-        lsout.write('   LS output for star '+starname+'\n')
-        lsout.write(' ***************************************\n')
-        lsout.write('\n')
-
+        lsout.write('   LS output for star ' + starname + '\n')
+        lsout.write(' ***************************************\n\n')
+    
     #################################################################
     #                Running the Lomb-Scargle periodogram
     #################################################################
-    ls_results = {'freq': {}, 'power': {}, 'fap': {}, 'fal_50%': {}, 'fal_1%': {}, 
-                  'fal_01%': {}, 'max_freq': {}, 'max_period': {}, 'max_power': {}, 
-                  'peaks': {}, 'best_period': {}, 'best_P_pow': {}, 'ind': {}, 'freq_peaks': {}, 
-                  'peri_peaks': {}, 'pow_over_fal01': {}, 'pow_over_fal1': {}}    
-    if rv1_err is not None:
-        frequency1, power1, fap1, fal1 = run_LS(hjd1, rv1, rv1_err)
-    else:
-        frequency1, power1, fap1, fal1 = run_LS(hjd1, rv1)
-        
+    frequency1, power1, fap1, fal1 = run_LS(hjd1, rv1, rv1_err)
     fal1_50pc, fal1_1pc, fal1_01pc = fal1[0].value, fal1[1].value, fal1[2].value
     freq1_at_max_power = frequency1[np.argmax(power1)]
-    period1_at_max_power = 1/freq1_at_max_power
+    period1_at_max_power = 1 / freq1_at_max_power
     
-    ls_results['freq'][1] = frequency1
-    ls_results['power'][1] = power1
-    ls_results['fap'][1] = fap1
-    ls_results['fal_50%'][1] = fal1_50pc
-    ls_results['fal_1%'][1] = fal1_1pc
-    ls_results['fal_01%'][1] = fal1_01pc
-    ls_results['max_freq'][1] = freq1_at_max_power
-    ls_results['max_period'][1] = period1_at_max_power
+    ls_results = {'freq': {1: frequency1},
+                  'power': {1: power1},
+                  'fap': {1: fap1},
+                  'fal_50%': {1: fal1_50pc},
+                  'fal_1%': {1: fal1_1pc},
+                  'fal_01%': {1: fal1_01pc},
+                  'max_freq': {1: freq1_at_max_power},
+                  'max_period': {1: period1_at_max_power},
+                  'peaks': {},
+                  'best_period': {},
+                  'best_P_pow': {},
+                  'ind': {},
+                  'freq_peaks': {},
+                  'peri_peaks': {},
+                  'pow_over_fal01': {},
+                  'pow_over_fal1': {}}
+    
     if SB2:
-        hjd2, rv2, rv2_err = df['MJD'][df['comp']==2], df['mean_rv'][df['comp']==2], df['mean_rv_er'][df['comp']==2]
+        # Secondary component analysis (if applicable)
+        hjd2 = df['MJD'][df['comp'] == 2]
+        rv2 = df['mean_rv'][df['comp'] == 2]
+        rv2_err = df['mean_rv_er'][df['comp'] == 2]
         frequency2, power2, fap2, fal2 = run_LS(hjd2, rv2, rv2_err)
         fal2_50pc, fal2_1pc, fal2_01pc = fal2[0].value, fal2[1].value, fal2[2].value
         freq2_at_max_power = frequency2[np.argmax(power2)]
-        period2_at_max_power = 1/freq2_at_max_power
-        
+        period2_at_max_power = 1 / freq2_at_max_power
         ls_results['freq'][2] = frequency2
         ls_results['power'][2] = power2
         ls_results['fap'][2] = fap2
@@ -1579,20 +1825,17 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
         ls_results['fal_01%'][2] = fal2_01pc
         ls_results['max_freq'][2] = freq2_at_max_power
         ls_results['max_period'][2] = period2_at_max_power
-
-    fapper1 = fap1*100
-    if print_output==True:
-        print('   these are the false alarm levels: ', [f'{x:.3f}' for x in fal1])
-        print('   FAP of the highest peak         : ', f'{fap1:.5f}')
-        print('   FAP of the highest peak x100    : ', f'{fapper1:.5f}')
-    with open(path+'LS/ls_output.txt', 'a') as lsout:
-        lsout.write(' these are the false alarm levels: ')
-        for fal in fal1:
-            lsout.write(str(f'{fal:.3f}')+'  ')
-        lsout.write('\n')
-        lsout.write(' FAP of the highest peak         : '+ f'{fap1:.5f}'+'\n')
-        lsout.write(' FAP of the highest peak x100    : '+ f'{fapper1:.5f}'+'\n')
-
+    
+    # Write some summary info to ls_output.txt
+    fapper1 = fap1 * 100
+    if print_output:
+        print('   False alarm levels:', [f'{x:.3f}' for x in fal1])
+        print('   FAP of highest peak:', f'{fap1:.5f}', ' (x100: ', f'{fapper1:.5f}', ')')
+    with open(os.path.join(ls_path, 'ls_output.txt'), 'a') as lsout:
+        lsout.write(' False alarm levels: ' + ' '.join([f'{x:.3f}' for x in fal1]) + '\n')
+        lsout.write(' FAP of highest peak: ' + f'{fap1:.5f}' + '\n')
+        lsout.write(' FAP of highest peak x100: ' + f'{fapper1:.5f}' + '\n')
+    
     #################################################################
     #                        Finding peaks
     #################################################################
@@ -1603,32 +1846,27 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
     
     if SB2:
         freq_peaks2, peri_peaks2, peaks2 = get_peaks(power2, frequency2, fal2_50pc, fal2_1pc, fal2_01pc)
-        
-        # test |RV1-RV2|
-        rv_abs = np.abs(rv1-rv2.reset_index(drop=True))
-        if rv1_err is not None:
-            rv_abs_er = np.sqrt(rv1_err**2+rv2_err.reset_index(drop=True)**2)
-        else:
-            rv_abs_er = None
-
-        frequency3, power3, fap3, fal3 = run_LS(hjd1, rv_abs, rv_abs_er)
-
-        fal3_50pc, fal3_1pc, fal3_01pc = fal3[0], fal3[1], fal3[2]
-        freq3_at_max_power = frequency3[np.argmax(power3)]
-        period3_at_max_power = 1/freq3_at_max_power
-        freq_peaks3, peri_peaks3, peaks3 = get_peaks(power3, frequency3, fal3_50pc, fal3_1pc, fal3_01pc)
-
         ls_results['freq_peaks'][2] = freq_peaks2
         ls_results['peri_peaks'][2] = peri_peaks2
         ls_results['peaks'][2] = peaks2
-
+        
+        # Test period from the difference between RV components
+        rv_abs = np.abs(rv1 - rv2.reset_index(drop=True))
+        if rv1_err is not None:
+            rv_abs_er = np.sqrt(rv1_err**2 + rv2_err.reset_index(drop=True)**2)
+        else:
+            rv_abs_er = None
+        frequency3, power3, fap3, fal3 = run_LS(hjd1, rv_abs, rv_abs_er)
+        fal3_50pc, fal3_1pc, fal3_01pc = fal3[0], fal3[1], fal3[2]
+        freq3_at_max_power = frequency3[np.argmax(power3)]
+        period3_at_max_power = 1 / freq3_at_max_power
+        freq_peaks3, peri_peaks3, peaks3 = get_peaks(power3, frequency3, fal3_50pc, fal3_1pc, fal3_01pc)
         ls_results['freq_peaks'][3] = freq_peaks3
         ls_results['peri_peaks'][3] = peri_peaks3
         ls_results['peaks'][3] = peaks3
-
         ls_results['max_freq'][3] = freq3_at_max_power
         ls_results['max_period'][3] = period3_at_max_power
-    
+
     #################################################################
     #           Printing the results and writing to file
     #################################################################
@@ -1648,104 +1886,87 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
     ls_results['best_period'][1] = best_period
     ls_results['best_P_pow'][1] = best_pow
 
-    if print_output==True:
+    if print_output:
         print("   Best frequency                  :  {0:.3f}".format(freq1_at_max_power))
         print('   ***********************************************')
         print("   Best Period                     :  {0:.8f} days".format(best_period))
         print('   ***********************************************')
-        if SB2==True:
+        if SB2:
             print("   Best Period from secondary      :  {0:.8f} days".format(period2_at_max_power))
             print("   Period from |RV1-RV2|           :  {0:.8f} days".format(period3_at_max_power), 'correct period = P1 or ', period1_at_max_power/2)
-
         print('   Other periods:')
         print('     peaks                         : ', [f'{x:.3f}' for x in power1[peaks1]])
-        print('     positions                     : ', [x for x in peaks1 ])
-        # print('     positions                     : ', [f'{x:.3f}' for x in np.where(power1==power[peaks1]) ])
-        # print('/////////////// these are the periods', periods)
         print('     frequencies                   : ', [f'{x:.5f}' for x in freq_peaks1])
         print('     periods                       : ', [f'{x:.3f}' for x in peri_peaks1])
-        if SB2==True:
-            print('   from secondary:')
-            print('     peaks                         : ', [f'{x:.3f}' for x in power2[peaks2]])
-            print('     frequencies                   : ', [f'{x:.3f}' for x in freq_peaks2])
-            print('     periods                       : ', [f'{x:.3f}' for x in peri_peaks2])
-    with open(path+'LS/ls_output.txt', 'a') as lsout:
-        lsout.write("\n Best frequency                  :  {0:.3f}".format(freq1_at_max_power)+'\n')
-        lsout.write(' ****************************************************'+'\n')
-        lsout.write(" Best Period                     :  {0:.8f} days".format(best_period)+'\n')
-        lsout.write(' ****************************************************'+'\n')
-        if SB2==True:
-            lsout.write(" Best Period from secondary      :  {0:.8f} days".format(period2_at_max_power)+'\n')
-            lsout.write(" Period from |RV1-RV2|           :  {0:.8f} days".format(period3_at_max_power)+ ' correct period = P1 or '+ str(period1_at_max_power/2)+'\n')
-        lsout.write(' Other periods:'+'\n')
+    
+    with open(os.path.join(ls_path, 'ls_output.txt'), 'a') as lsout:
+        lsout.write("\n Best frequency                  :  {0:.3f}\n".format(freq1_at_max_power))
+        lsout.write(' ****************************************************\n')
+        lsout.write(" Best Period                     :  {0:.8f} days\n".format(best_period))
+        lsout.write(' ****************************************************\n')
+        if SB2:
+            lsout.write(" Best Period from secondary      :  {0:.8f} days\n".format(period2_at_max_power))
+            lsout.write(" Period from |RV1-RV2|           :  {0:.8f} days".format(period3_at_max_power) +
+                        ' correct period = P1 or ' + str(period1_at_max_power/2) + '\n')
+        lsout.write(' Other periods:\n')
         lsout.write('   peaks                         : ')
         for peak in power1[peaks1]:
-            lsout.write('     '+f'{peak:7.3f}')
+            lsout.write('     ' + f'{peak:7.3f}')
         lsout.write('\n   frequencies                   : ')
         for freq in freq_peaks1:
-            lsout.write('     '+f'{freq:7.3f}')
+            lsout.write('     ' + f'{freq:7.3f}')
         lsout.write('\n   periods                       : ')
         for per in peri_peaks1:
-            lsout.write('     '+f'{per:7.3f}')
-        if SB2==True:
+            lsout.write('     ' + f'{per:7.3f}')
+        if SB2:
             lsout.write('\n from secondary:\n')
             lsout.write('   peaks                         : ')
             for peak in power2[peaks2]:
-                lsout.write('     '+f'{peak:7.3f}')
+                lsout.write('     ' + f'{peak:7.3f}')
             lsout.write('\n   frequencies                   : ')
             for freq in freq_peaks2:
-                lsout.write('     '+f'{freq:7.3f}')
+                lsout.write('     ' + f'{freq:7.3f}')
             lsout.write('\n   periods                       : ')
             for per in peri_peaks2:
-                lsout.write('     '+f'{per:7.3f}')
+                lsout.write('     ' + f'{per:7.3f}')
         lsout.write('\n')
-
+    
     #################################################################
-    #            Setting quality index for the periodogram
+    #           Setting quality index for the periodogram
     #################################################################
     indi = []
     maxpower = power1.max()
     for LS_pow, peri in zip(power1[peaks1], peri_peaks1):
-        maxpower_maxfal = LS_pow/fal1[2]
-        maxpower_maxfal2 = LS_pow/fal1[1]
-        if print_output==True:
+        maxpower_maxfal = LS_pow / fal1[2]
+        maxpower_maxfal2 = LS_pow / fal1[1]
+        if print_output:
             print('   fal1/P                          : ', f'{maxpower_maxfal:.2f}')
             print('   fal2/P                          : ', f'{maxpower_maxfal2:.2f}')
-        with open(path+'LS/ls_output.txt', 'a') as lsout:
-            lsout.write(' fal1/P                          :  '+ f'{maxpower_maxfal:.2f}'+'\n')
-            lsout.write(' fal2/P                          :  '+ f'{maxpower_maxfal2:.2f}'+'\n')
-
+        with open(os.path.join(ls_path, 'ls_output.txt'), 'a') as lsout:
+            lsout.write(' fal1/P                          :  ' + f'{maxpower_maxfal:.2f}' + '\n')
+            lsout.write(' fal2/P                          :  ' + f'{maxpower_maxfal2:.2f}' + '\n')
         conditions = [
-            (maxpower > fal1_01pc),                 # FAL 0.1%
-            (fal1_01pc >= maxpower > fal1_1pc),     # FAL 1%
-            (fal1_1pc >= maxpower > fal1_50pc),     # FAL 50%
-            (maxpower <= fal1_50pc)                 # Below 50% FAL
+            (maxpower > fal1_01pc),                   # FAL 0.1%
+            (fal1_01pc >= maxpower > fal1_1pc),         # FAL 1%
+            (fal1_1pc >= maxpower > fal1_50pc),         # FAL 50%
+            (maxpower <= fal1_50pc)                     # Below 50% FAL
         ]
-        indices = [0, 1, 2, 3] 
-
-        # Get the index for each condition that is True
+        indices = [0, 1, 2, 3]
         indi = [index for condition, index in zip(conditions, indices) if condition]
-
-    # If no conditions were True, set ind to 4
-    if not indi:
-        ind = 4
-    else:
-        ind = indi[0]
-        
-    maxpower_maxfal = maxpower/fal1[2].value
-    maxpower_maxfal2 = maxpower/fal1[1].value
-    if print_output==True:
-        # print(indi)
+    ind = indi[0] if indi else 4
+    maxpower_maxfal = maxpower / fal1[2].value
+    maxpower_maxfal2 = maxpower / fal1[1].value
+    if print_output:
         print('\n   Classification index            : ', ind)
         print('   maxpower                        : ', f'{maxpower:.2f}')
         print('   fal1                            : ', f'{fal1[2]:.2f}')
         print('   maxpower_maxfal                 : ', f'{maxpower_maxfal:.2f}')
-    with open(path+'LS/ls_output.txt', 'a') as lsout:
-        lsout.write(' Classification index            :  '+str(ind)+'\n')
-        lsout.write(' maxpower                        :  '+f'{maxpower:.2f}'+'\n')
-        lsout.write(' fal1                            :  '+f'{fal1[2]:.2f}'+'\n')
-        lsout.write(' maxpower_maxfal                 :  '+f'{maxpower_maxfal:.2f}'+'\n')
-
+    with open(os.path.join(ls_path, 'ls_output.txt'), 'a') as lsout:
+        lsout.write(' Classification index            :  ' + str(ind) + '\n')
+        lsout.write(' maxpower                        :  ' + f'{maxpower:.2f}' + '\n')
+        lsout.write(' fal1                            :  ' + f'{fal1[2]:.2f}' + '\n')
+        lsout.write(' maxpower_maxfal                 :  ' + f'{maxpower_maxfal:.2f}' + '\n')
+    
     ls_results['ind'][1] = ind
     ls_results['max_power'][1] = maxpower
     ls_results['pow_over_fal01'][1] = maxpower_maxfal
@@ -1754,9 +1975,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
     #################################################################
     #                  Plotting the periodogram
     #################################################################
-    # vs Period
-    if plots==True:
-
+    if plots:
         fig, ax = plt.subplots(figsize=(8, 6))
         ax.errorbar(hjd1, rv1, yerr=rv1_err, fmt='o', color='dodgerblue')
         ax.set(xlabel='MJD', ylabel='RV [km/s]')
@@ -1875,9 +2094,9 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
         pow_spec = np.column_stack((frequency1, power1))
         # Save the data to a text file
         np.savetxt(path+'LS/power_spectrum.txt', pow_spec)
-
+    
     #################################################################
-    #               Compute phases of the obsevations
+    #               Compute phases of the observations
     #################################################################
     if fold_rv_curve:
         if Pfold:
@@ -1893,7 +2112,6 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
                     print('  Warning: No periods found for primary star')
                     periods = [period1_at_max_power]
             elif (peri_peaks1.size < 6) & (peri_peaks1.size >0):
-                # print('this should b e printed')
                 periods = peri_peaks1
             else:
                 periods = [best_period]
@@ -1925,34 +2143,18 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
 
                     fine_preds1 = np.array(fine_preds1)
                     fine_preds2 = np.array(fine_preds2)
-
-                    # for i in range(results2['amplitude'].shape[0]):
-                    #     fine_pred2 = results2['amplitude'][i] * np.sin(2 * np.pi * fine_phase + results2['phase_shift'][i]) \
-                    #         + results2['height'][i]
-                    #     fine_preds2.append(fine_pred2)
-                    # fine_preds2 = np.array(fine_preds2)  
-
                 else:
                     results1, phase, vel1, vel1_err  = phase_rv_curve(hjd1, rv1, rv1_err, period=period)
-
-                    # fine_phase = np.linspace(phase.min(), phase.max(), 1000)
-
                     fine_preds1, fine_preds2 = [], []
                     for i in range(results1['amplitude'].shape[0]):
-                        # fine_pred1 = results1['amplitude'][i] * np.sin(results1['frequency'][i] * (fine_phase - results1['phase'][i])) \
-                        #     + results1['height'][i]
                         fine_pred1 = results1['amplitude'][i] * np.sin(2 * np.pi * fine_phase + results1['phase_shift'][i]) \
                             + results1['height'][i]
-
                         fine_preds1.append(fine_pred1)
                     fine_preds1 = np.array(fine_preds1)
 
-
-                # Plotting the phased RV curve
                 print('\n*** Plotting phased RV curve ***\n-------------------------------')
                 n_lines = 200
                 fig, ax = plt.subplots(figsize=(8, 6))
-                # ax.plot(phase, result['pred'][-n_lines:].T, rasterized=True, color='C2', alpha=0.1)
                 for pred in fine_preds1[-n_lines:]:
                     ax.plot(fine_phase, pred, rasterized=True, color='C1', alpha=0.05)
                 ax.errorbar(phase, vel1, yerr=vel1_err, color='k', fmt='o', label='Data')
@@ -1967,145 +2169,162 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
                 else:
                     plt.savefig(f'{path}LS/{starname}_sinu_fit_SB1_P={period:.2f}.png', bbox_inches='tight', dpi=300)
                 plt.close()
-
-    #################################################################
-    #                      Return the results
-    #################################################################
-    # if SB2==True:
-    #     return [best_period, period2_at_max_power, period3_at_max_power], [frequency1, frequency2, frequency3],  \
-    #             [power1, power2, power3], [power1.max(), power2.max(), power3.max()], [fal1, fal2, fal3], \
-    #             [peaks1, peaks2, peaks3], sorted(peri_peaks1), peri_peaks2, indi, [fapper1, maxpower_maxfal, maxpower_maxfal2]
-    # else:
-    #     return [best_period], [frequency1], [power1], [maxpower], [fal1], [peaks1], sorted(peri_peaks1), ind, [fapper1, maxpower_maxfal, maxpower_maxfal2]
+    
     return ls_results
 
-
 def fit_sinusoidal_probmod(times, rvs, rv_errors):
-    '''
-    Probabilistic model for sinusoidal fitting with fixed frequency.
-    '''
+    """
+    Probabilistic model for fitting a sinusoidal RV curve with a fixed frequency (2π per cycle).
+    
+    This function defines a Numpyro model that samples amplitude, phase shift, and baseline 
+    (height) parameters to reproduce the observed RV variation as a sinusoid. It uses the NUTS
+    sampler and returns the trace of posterior samples.
+    
+    Parameters:
+        times (array-like): Array of observation times or phases.
+        rvs (array-like): Radial velocity measurements.
+        rv_errors (array-like): Measurement uncertainties for the RVs.
+    
+    Returns:
+        dict: Posterior samples (trace) of the model parameters.
+    """
     def sinu_model(times=None, rvs=None):
-        # Fixed frequency based on phasing
-        fixed_frequency = 2 * jnp.pi  # 2π radians per phase cycle
-        
+        fixed_frequency = 2 * jnp.pi
         # Model parameters
         amplitude = npro.sample('amplitude', dist.Uniform(0, 500))
         phase_shift = npro.sample('phase_shift', dist.Uniform(-jnp.pi, jnp.pi))
         height = npro.sample('height', dist.Uniform(50, 250))
-        
         # Sinusoidal model with fixed frequency
         pred = amplitude * jnp.sin(fixed_frequency * times + phase_shift) + height
-        
         # Likelihood
-        model = npro.deterministic('pred', pred)
+        npro.deterministic('pred', pred)
         if rv_errors is not None:
-            npro.sample('obs', dist.Normal(model, jnp.array(rv_errors)), obs=rvs)
-    
+            npro.sample('obs', dist.Normal(pred, jnp.array(rv_errors)), obs=rvs)
     rng_key = random.PRNGKey(0)
     kernel = NUTS(sinu_model)
-    mcmc = MCMC(kernel, num_warmup=2000, num_samples=2000)  # Adjusted for efficiency
+    mcmc = MCMC(kernel, num_warmup=2000, num_samples=2000)
     mcmc.run(rng_key, times=jnp.array(times), rvs=jnp.array(rvs))
     mcmc.print_summary()
-    trace = mcmc.get_samples()
-
-    return trace
+    return mcmc.get_samples()
 
 def fit_sinusoidal_probmod_sb2(phase, rv1, rv1_err, rv2, rv2_err, amp_max=500, height_min=50, height_max=250):
-    '''
-    Probabilistic model for sinusoidal fitting of SB2 binary stars.
-    '''
+    """
+    Probabilistic model for sinusoidally fitting RV curves for SB2 binary stars.
+    
+    In this model, a fixed frequency is assumed, with shared parameters for phase offset 
+    (phi0) and systemic velocity (gamma) and separate amplitudes (K1 and K2) for the primary
+    and secondary components. The model returns RV predictions for both components.
+    
+    Parameters:
+        phase (array-like): Phases of observation.
+        rv1 (array-like): Radial velocities for the primary component.
+        rv1_err (array-like): Uncertainties for the primary RVs.
+        rv2 (array-like): Radial velocities for the secondary component.
+        rv2_err (array-like): Uncertainties for the secondary RVs.
+        amp_max (float, optional): Maximum amplitude allowed (default=500).
+        height_min (float, optional): Minimum systemic velocity (default=50).
+        height_max (float, optional): Maximum systemic velocity (default=250).
+    
+    Returns:
+        dict: Posterior samples (trace) of the model parameters.
+    """
     def sb2_model(phase, rv1, rv1_err, rv2, rv2_err):
-        fixed_frequency = 2 * jnp.pi  # Fixed frequency for phased data
-        
+        fixed_frequency = 2 * jnp.pi
         # Shared parameters
         phi0 = npro.sample('phi0', dist.Uniform(-jnp.pi, jnp.pi))
         gamma = npro.sample('gamma', dist.Uniform(height_min, height_max))
-        
         # Distinct parameters
         K1 = npro.sample('K1', dist.Uniform(0, amp_max))
         K2 = npro.sample('K2', dist.Uniform(0, amp_max))
-        
         # Predicted RVs
         pred_rv1 = K1 * jnp.sin(fixed_frequency * phase + phi0) + gamma
         pred_rv2 = -K2 * jnp.sin(fixed_frequency * phase + phi0) + gamma
-        
         # Likelihood
         npro.sample('obs1', dist.Normal(pred_rv1, rv1_err), obs=rv1)
         npro.sample('obs2', dist.Normal(pred_rv2, rv2_err), obs=rv2)
-    
     rng_key = random.PRNGKey(0)
     kernel = NUTS(sb2_model)
     mcmc = MCMC(kernel, num_warmup=3000, num_samples=3000, num_chains=4)
     mcmc.run(rng_key, phase=phase, rv1=rv1, rv1_err=rv1_err, rv2=rv2, rv2_err=rv2_err)
     mcmc.print_summary()
-    trace = mcmc.get_samples()
-    
-    return trace
+    return mcmc.get_samples()
 
 def phase_rv_curve(time, rv1, rv1_er=None, rv2=None, rv2_er=None, period=None, print_output=True, plots=True):
-    '''
-    Compute phases of the obsevations and models
-    '''
-    if print_output==True:
-        print( '\n*** Computing phases ***')
-        print( '------------------------')
+    """
+    Compute phases for the RV observations and prepare data for sinusoidal fitting.
+    
+    Given a period, this function computes the phase for each observation (time modulo period),
+    sorts the data, and duplicates the phase data shifted by -1 and +1 to allow for a continuous 
+    view over a phase range of [-0.5, 1.5]. It returns the expanded phase array and sorted RVs 
+    (and errors). If secondary RVs are provided, they are similarly processed.
+    
+    Parameters:
+        time (array-like): Observation times.
+        rv1 (array-like): Primary RV measurements.
+        rv1_er (array-like, optional): Errors on the primary RVs.
+        rv2 (array-like, optional): Secondary RV measurements (if available).
+        rv2_er (array-like, optional): Errors for the secondary RVs.
+        period (float): The period to use in phasing.
+        print_output (bool, optional): If True, print status messages.
+        plots (bool, optional): If True, generate plots (not directly used here).
+    
+    Returns:
+        If secondary RVs are provided:
+            tuple: (result, phase_expanded, rv1_expanded, rv1_err_expanded, rv2_expanded, rv2_err_expanded)
+        Otherwise:
+            tuple: (result, phase_expanded, rv1_expanded, rv1_err_expanded)
+        Where 'result' is the output of the sinusoidal fitting function.
+    """
+    if print_output:
+        print('\n*** Computing phases ***')
+        print('------------------------')
     print('  period = ', period)
     if not period:
-        print('  No periods provided for primary star')
+        print('  No period provided for primary star')
         return
     
-    # Compute phase
+    # Compute phases mod period
     phase = (np.array(time) / period) % 1
-
-    # Sort by phase
     sort_idx = np.argsort(phase)
     phase_sorted = phase[sort_idx]
     rv1_sorted = np.array(rv1.reset_index(drop=True))[sort_idx]
-    if rv1_er is not None:
-        rv1_er_sorted = np.array(rv1_er.reset_index(drop=True))[sort_idx]
-    else:
-        rv1_er_sorted = None
+    rv1_er_sorted = np.array(rv1_er.reset_index(drop=True))[sort_idx] if rv1_er is not None else None
     if rv2 is not None:
         rv2_sorted = np.array(rv2.reset_index(drop=True))[sort_idx]
-        if rv2_er is not None:
-            rv2_er_sorted = np.array(rv2_er.reset_index(drop=True))[sort_idx]
-        else:
-            rv2_er_sorted = None
-
-    # Duplicate data shifted by -1 and +1 to cover [-1,0) and [1,2)
-    phase_neg = phase_sorted - 1  # Shifted to [-1,0)
-    phase_pos = phase_sorted + 1  # Shifted to [1,2)
+        rv2_er_sorted = np.array(rv2_er.reset_index(drop=True))[sort_idx] if rv2_er is not None else None
     
+    # Duplicate phases shifted by -1 and +1 for continuity
+    phase_neg = phase_sorted - 1
+    phase_pos = phase_sorted + 1
     rv1_neg = rv1_sorted.copy()
     rv1_pos = rv1_sorted.copy()
-    rv1_err_neg = rv1_er_sorted.copy()
-    rv1_err_pos = rv1_er_sorted.copy()
+    rv1_err_neg = rv1_er_sorted.copy() if rv1_er_sorted is not None else None
+    rv1_err_pos = rv1_er_sorted.copy() if rv1_er_sorted is not None else None
     if rv2 is not None:
         rv2_neg = rv2_sorted.copy()
         rv2_pos = rv2_sorted.copy()
-        rv2_err_neg = rv2_er_sorted.copy()
-        rv2_err_pos = rv2_er_sorted.copy()
+        rv2_err_neg = rv2_er_sorted.copy() if rv2_er_sorted is not None else None
+        rv2_err_pos = rv2_er_sorted.copy() if rv2_er_sorted is not None else None
     
-    # Concatenate all data
     phase_all = np.concatenate([phase_neg, phase_sorted, phase_pos])
     rv1_all = np.concatenate([rv1_neg, rv1_sorted, rv1_pos])
-    rv1_err_all = np.concatenate([rv1_err_neg, rv1_er_sorted, rv1_err_pos])
+    rv1_err_all = np.concatenate([rv1_err_neg, rv1_er_sorted, rv1_err_pos]) if rv1_er_sorted is not None else None
     if rv2 is not None:
         rv2_all = np.concatenate([rv2_neg, rv2_sorted, rv2_pos])
-        rv2_err_all = np.concatenate([rv2_err_neg, rv2_er_sorted, rv2_err_pos])
+        rv2_err_all = np.concatenate([rv2_err_neg, rv2_er_sorted, rv2_err_pos]) if rv2_er_sorted is not None else None
     
-    # Select phases within [-0.5, 1.5]
+    # Select data in the phase interval [-0.5, 1.5]
     mask = (phase_all >= -0.5) & (phase_all <= 1.5)
     phase_expanded = phase_all[mask]
     rv1_expanded = rv1_all[mask]
-    rv1_err_expanded = rv1_err_all[mask]
+    rv1_err_expanded = rv1_err_all[mask] if rv1_err_all is not None else None
     if rv2 is not None:
         rv2_expanded = rv2_all[mask]
-        rv2_err_expanded = rv2_err_all[mask]
-
-    # Fitting a sinusoidal model
+        rv2_err_expanded = rv2_err_all[mask] if rv2_err_all is not None else None
+    
+    # Fit a sinusoidal model to the phased data
     if rv2 is not None:
-        result = fit_sinusoidal_probmod_sb2(phase_expanded, rv1_expanded, rv1_err_expanded, rv2_expanded, rv2_err_expanded)    
+        result = fit_sinusoidal_probmod_sb2(phase_expanded, rv1_expanded, rv1_err_expanded, rv2_expanded, rv2_err_expanded)
         return result, phase_expanded, rv1_expanded, rv1_err_expanded, rv2_expanded, rv2_err_expanded
     else:
         result = fit_sinusoidal_probmod(phase_expanded, rv1_expanded, rv1_err_expanded)
