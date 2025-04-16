@@ -10,3 +10,7 @@ index.html
 minato/__pycache*
 minato/run_thejoker.py
 minato/sep2porb.ipynb
+minato/create_model.py
+minato/rotin_inp.py
+minato/rvcurve.py
+minato/spdis.py
