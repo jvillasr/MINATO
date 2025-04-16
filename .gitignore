@@ -2,11 +2,11 @@
 .ipynb_checkpoints
 # Exclude .DS_Store and other files
 .DS_Store*
-.token
 .vscode/
 __pycache*
 **/data
 # Exclude files in minato
+index.html
 minato/__pycache*
 minato/run_thejoker.py
 minato/sep2porb.ipynb
