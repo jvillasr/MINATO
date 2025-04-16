@@ -11,8 +11,10 @@ Observing
 pyrvfit
 ravel
 span
-# Exclude file in minato
+# Exclude files in minato
 minato/__pycache*
 minato/models/ATLAS9.zip
 mianto/tutorials/polynom_fitreport.txt
 mianto/tutorials/atmfit_results_0.feather
+minato/run_thejoker.py
+minato/sep2porb.ipynb
