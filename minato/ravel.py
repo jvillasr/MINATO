@@ -1,5 +1,3 @@
-import sys
-import copy
 import os
 import matplotlib
 import csv
@@ -11,20 +9,16 @@ from astropy.io import fits
 from astropy.timeseries import LombScargle
 from collections import Counter
 from matplotlib.ticker import StrMethodFormatter
-from matplotlib.collections import LineCollection
-from lmfit import Model, Parameters, models, minimize, report_fit
+from lmfit import Model, Parameters, models
 from datetime import date
-from scipy.optimize import basinhopping
 from scipy.signal import find_peaks
 from scipy.interpolate import interp1d
 import numpyro as npro
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive
-from numpyro.infer.util import initialize_model
 from jax import numpy as jnp
 from jax import random
 import multiprocessing
-# import arviz as az
 
 # Set the number of devices to the number of available CPUs
 npro.set_host_device_count(multiprocessing.cpu_count())
