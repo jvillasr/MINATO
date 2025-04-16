@@ -1,0 +1,15 @@
+name: minato
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - astropy
+  - jax
+  - lmfit
+  - matplotlib
+  - numpy
+  - numpyro
+  - pandas
+  - scipy
+  - tqdm
