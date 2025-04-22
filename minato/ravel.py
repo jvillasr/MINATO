@@ -155,7 +155,7 @@ def read_fits(fits_file, instrument):
 
         return wave, flux, ferr, star_epoch, mjd
 
-def read_spectra(filelist, path, file_type, instrument):
+def read_spectra(filelist, path, file_type, instrument=None):
     """
     Read spectral data from a collection of files.
 
@@ -178,7 +178,12 @@ def read_spectra(filelist, path, file_type, instrument):
         if file_type in ['dat', 'txt', 'csv']:
             names.append(spec.replace(f'.{file_type}', ''))
             try:
-                df = pd.read_csv(spec, header=None, delim_whitespace=True)
+                # read everything as rows of strings
+                df = pd.read_csv(spec, header=None, sep=r'\s+', dtype=str)
+                # keep only rows where first column is numeric (drop header lines)
+                mask = pd.to_numeric(df.iloc[:, 0], errors='coerce').notnull()
+                df = df[mask].reset_index(drop=True).astype(float)
+
                 # If the file has fewer than 2 columns, try alternative separators.
                 if df.shape[1] < 2:
                     for separator in [',', ';', '\t', '|']:
@@ -201,6 +206,11 @@ def read_spectra(filelist, path, file_type, instrument):
                 f_errors.append(compute_flux_err(df[0], df[1]))
             jds.append(None)  # Append None for non-FITS files.
         elif file_type == 'fits':
+            if instrument is None:
+                raise ValueError(
+                    "Instrument must be provided when reading FITS files. "
+                    "Currently supported instruments: 'FLAMES', 'FEROS'."
+                )
             wave, flux, ferr, star, mjd = read_fits(spec, instrument)
             wavelengths.append(wave)
             fluxes.append(flux)
@@ -252,6 +262,7 @@ def setup_star_directory_and_save_jds(names, jds, path, SB2):
 def setup_line_dictionary():
     """
     Create a dictionary of spectral lines, including regions and initial fitting parameters.
+    Lines centroids are given in vacuum wavelengths (Angstroms). Alternative, the 'air' key  provides air wavelengths. 
 
     Returns:
     dict
@@ -259,29 +270,30 @@ def setup_line_dictionary():
     """
     lines_dic = {
         3995: { 'region': [3986, 4001], 'centre': None, 'wid_ini': 2, 'title': 'N II $\lambda$3995'},
-        4009: { 'region': [4001, 4014], 'centre': [4009.2565, 0.00002], 'wid_ini': 3, 'title': 'He I $\lambda$4009'},
-        4026: { 'region': [4013, 4039], 'centre': [4026.1914, 0.0010], 'wid_ini': 3, 'title': 'He I $\lambda$4026'},
-        4102: { 'region': [4081, 4116], 'centre': [4101.734, 0.006], 'wid_ini': 6, 'title': 'H$\delta$'},
-        4121: { 'region': [4114, 4126], 'centre': [4120.8154, 0.0012], 'wid_ini': 3, 'title': 'He I $\lambda$4121'},
-        4128: { 'region': [4120, 4132], 'centre': [4128.07, 0.10], 'wid_ini': 2, 'title': 'Si II $\lambda$4128'},
-        4131: { 'region': [4124, 4136], 'centre': [4130.89, 0.10], 'wid_ini': 2, 'title': 'Si II $\lambda$4131'},
-        4144: { 'region': [4131, 4166], 'centre': [4143.761, 0.010], 'wid_ini': 3, 'title': 'He I $\lambda$4144'},
-        4233: { 'region': [4225, 4237], 'centre': None, 'wid_ini': 2, 'title': 'Fe II $\lambda$4233'},
-        4267: { 'region': [4259, 4271], 'centre': [4267.258, 0.007], 'wid_ini': 2, 'title': 'C II $\lambda$4267'},
-        4340: { 'region': [4316, 4366], 'centre': [4340.472, 0.006], 'wid_ini': 7, 'title': 'H$\gamma$'},
-        4388: { 'region': [4376, 4406], 'centre': [4387.9296, 0.0006], 'wid_ini': 3, 'title': 'He I $\lambda$4388'},
-        4471: { 'region': [4454, 4487], 'centre': [4471.4802, 0.0015], 'wid_ini': 3, 'title': 'He I $\lambda$4471'},
-        4481: { 'region': [4474, 4486], 'centre': [4481.130, 0.010], 'wid_ini': 2, 'title': 'Mg II $\lambda$4481'},
-        4542: { 'region': [4533, 4548], 'centre': [4541.591, 0.010], 'wid_ini': 3, 'title': 'He II $\lambda$4542'},
-        4553: { 'region': [4543, 4558], 'centre': [4552.62, 0.10], 'wid_ini': 3, 'title': 'Si III $\lambda$4553'},
-        4861: { 'region': [4836, 4871], 'centre': [4861.35, 0.05], 'wid_ini': 5, 'title': 'H$\beta$'},
-        4922: { 'region': [4911, 4926], 'centre': [4921.9313, 0.0005], 'wid_ini': 4, 'title': 'He I $\lambda$4922'},
-        5412: { 'region': [5401, 5415], 'centre': [5411.52, 0.10], 'wid_ini': 4, 'title': 'He II $\lambda$5412'},
-        5876: { 'region': [5861, 5884], 'centre': [5875.621, 0.010], 'wid_ini': 4, 'title': 'He I $\lambda$5876'},
-        5890: { 'region': [5877, 5901], 'centre': [5889.951, 0.00003], 'wid_ini': 3, 'title': 'Na I $\lambda$5890'},
-        6562: { 'region': [6538, 6579], 'centre': [6562.79, 0.030], 'wid_ini': 6, 'title': 'H$\alpha$'},
-        6678: { 'region': [6664, 6686], 'centre': [6678.151, 0.010], 'wid_ini': 4, 'title': 'He I $\lambda$6678'},
-        7774: { 'region': [7758, 7782], 'centre': [7774.17, 0.10], 'wid_ini': 3, 'title': 'O I $\lambda$7774'}
+        4009: { 'region': [4001, 4014], 'centre': [4010.3899037, 0.0000011], 'air': [4009.256516, 0.000020], 'wid_ini': 3, 'title': 'He I $\lambda$4009'},
+        4026: { 'region': [4013, 4039], 'centre': [4027.3238176, 0.0000003], 'air': [4026.184368, 0.000020], 'wid_ini': 3, 'title': 'He I $\lambda$4026'},
+        4089: { 'region': [4075, 4095], 'centre': [4090.016, 0.1], 'air': [4088.862, 0.10], 'wid_ini': 2, 'title': 'Si IV $\lambda$4089'},
+        4102: { 'region': [4081, 4116], 'centre': [4102.92068748, 0.00000008], 'air': [4101.734, 0.006], 'wid_ini': 6, 'title': 'H$\delta$'},
+        4121: { 'region': [4114, 4126], 'centre': [4121.9733416, 0.0000017], 'air': [4120.8154, 0.0012], 'wid_ini': 3, 'title': 'He I $\lambda$4121'},
+        4128: { 'region': [4120, 4132], 'centre': [], 'air': [4128.07, 0.10], 'wid_ini': 2, 'title': 'Si II $\lambda$4128'},
+        4131: { 'region': [4124, 4136], 'centre': [], 'air': [4130.89, 0.10], 'wid_ini': 2, 'title': 'Si II $\lambda$4131'},
+        4144: { 'region': [4131, 4166], 'centre': [4144.9276502, 0.0000012], 'air': [4143.761, 0.010], 'wid_ini': 3, 'title': 'He I $\lambda$4144'},
+        4233: { 'region': [4225, 4237], 'centre': [], 'air': None, 'wid_ini': 2, 'title': 'Fe II $\lambda$4233'},
+        4267: { 'region': [4259, 4271], 'centre': [], 'air': [4267.258, 0.007], 'wid_ini': 2, 'title': 'C II $\lambda$4267'},
+        4340: { 'region': [4316, 4366], 'centre': [4341.714690, 0.000004], 'air': [4340.472, 0.006], 'wid_ini': 7, 'title': 'H$\gamma$'},
+        4388: { 'region': [4376, 4406], 'centre': [4389.1619053, 0.0000013], 'air': [4387.9296, 0.0006], 'wid_ini': 3, 'title': 'He I $\lambda$4388'},
+        4471: { 'region': [4454, 4487], 'centre': [4472.7291049, 0.0000004], 'air': [4471.4802, 0.0015], 'wid_ini': 3, 'title': 'He I $\lambda$4471'},
+        4481: { 'region': [4474, 4486], 'centre': [], 'air': [4481.130, 0.010], 'wid_ini': 2, 'title': 'Mg II $\lambda$4481'},
+        4542: { 'region': [4533, 4548], 'centre': [], 'air': [4541.591, 0.010], 'wid_ini': 3, 'title': 'He II $\lambda$4542'},
+        4553: { 'region': [4543, 4558], 'centre': [4553.898, 0.1], 'air': [4552.62, 0.10], 'wid_ini': 3, 'title': 'Si III $\lambda$4553'},
+        4861: { 'region': [4836, 4871], 'centre': [], 'air': [4861.35, 0.05], 'wid_ini': 5, 'title': 'H$\beta$'},
+        4922: { 'region': [4911, 4926], 'centre': [], 'air': [4921.9313, 0.0005], 'wid_ini': 4, 'title': 'He I $\lambda$4922'},
+        5412: { 'region': [5401, 5415], 'centre': [], 'air': [5411.52, 0.10], 'wid_ini': 4, 'title': 'He II $\lambda$5412'},
+        5876: { 'region': [5861, 5884], 'centre': [], 'air': [5875.621, 0.010], 'wid_ini': 4, 'title': 'He I $\lambda$5876'},
+        5890: { 'region': [5877, 5901], 'centre': [], 'air': [5889.951, 0.00003], 'wid_ini': 3, 'title': 'Na I $\lambda$5890'},
+        6562: { 'region': [6538, 6579], 'centre': [], 'air': [6562.79, 0.030], 'wid_ini': 6, 'title': 'H$\alpha$'},
+        6678: { 'region': [6664, 6686], 'centre': [], 'air': [6678.151, 0.010], 'wid_ini': 4, 'title': 'He I $\lambda$6678'},
+        7774: { 'region': [7758, 7782], 'centre': [], 'air': [7774.17, 0.10], 'wid_ini': 3, 'title': 'O I $\lambda$7774'}
     }
     return lines_dic
 
@@ -847,7 +859,14 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
     
     # Get the dictionary with line regions and initial parameters
     lines_dic = setup_line_dictionary()
-    
+
+    # Verify that user‑requested lines exist in the dictionary
+    missing = [ln for ln in lines if ln not in lines_dic]
+    if missing:
+        print("Error: Unknown spectral line identifier(s):", missing)
+        print("Available lines are:", sorted(lines_dic.keys()))
+        raise ValueError(f"Please choose from the available lines or add your own. Missing: {missing}")
+
     print('\n*** Fitting lines ***')
     print('---------------------')
     print('Lines to be fitted:', lines)
