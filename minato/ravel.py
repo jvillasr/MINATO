@@ -1234,11 +1234,11 @@ class GetRVs:
         Print the mean and median values for a grouped error dictionary.
         
         Parameters:
-            grouped_error (dict): Error values grouped by some line or parameter.
+            grouped_error (dict): Error values grouped by spectral line.
             error_type (str): A label describing the error type.
         """
-        mean_values = [f'{np.mean(value):6.3f}' for value in grouped_error.values()]
-        median_values = [f'{np.median(value):6.3f}' for value in grouped_error.values()]
+        mean_values = [f'{np.mean(value):6.3f}' for value in grouped_error]
+        median_values = [f'{np.median(value):6.3f}' for value in grouped_error]
         print(f'   mean({error_type})  ', ' '.join(mean_values))
         print(f'   median({error_type})', ' '.join(median_values))
 
@@ -1457,6 +1457,7 @@ class GetRVs:
         # Define rest wavelengths dictionary (wavelength and its error)
         lambda_rest_dict = {
             4009: [4009.2565, 0.00002], 4026: [4026.1914, 0.0010],
+            4089: [4088.862, 0.10],
             4102: [4101.734, 0.006],     4121: [4120.8154, 0.0012],
             4128: [4128.07, 0.10],       4131: [4130.89, 0.10],
             4144: [4143.761, 0.010],     4267: [4267.258, 0.007],
@@ -1505,12 +1506,12 @@ class GetRVs:
         all_error_types = primary_error_types + secondary_error_types
         grouped_errors = {error_type: self.df_SLfit.groupby('line')[error_type].apply(list)
                           for error_type in all_error_types}
-
         if self.print_output:
             print('\n*** Choosing the best lines ***\n-------------------------------')
             print_lines = [str(line) for line in grouped_errors['cen1_percer'].keys()]
             print(' Primary:' + ' ' * 14, '   '.join(print_lines))
             for error_type in primary_error_types:
+                print(error_type)
                 GetRVs.print_error_stats(grouped_errors[error_type], error_type)
             if self.SB2:
                 print(' Secondary:')
@@ -1575,6 +1576,7 @@ class GetRVs:
         df_rv = pd.read_csv(self.JDfile, names=['epoch', 'MJD'], sep='\s+').replace({'.fits': ''}, regex=True)
         df_rv2 = pd.read_csv(self.JDfile, names=['epoch', 'MJD'], sep='\s+').replace({'.fits': ''}, regex=True)
         rv1_values, rv2_values = [], []
+
         for line in best_lines:
             df_rv[f'rv_{line}'] = rvs_dict[line]['rv1']
             df_rv[f'rv_{line}_er'] = rvs_dict[line]['rv1_er']
@@ -1646,7 +1648,7 @@ class GetRVs:
         #################################################################
         #        Plotting RVs per spectral line and weighted mean
         #################################################################
-        data = pd.read_csv(self.path + 'RVs1.txt', delim_whitespace=True)
+        data = pd.read_csv(self.path + 'RVs1.txt', sep=r'\s+')
         primary_data = data[data['comp'] == 1]
         secondary_data = data[data['comp'] == 2]
         fig, ax = plt.subplots(figsize=(8, 6))
@@ -1818,6 +1820,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
                   'ind': {},
                   'freq_peaks': {},
                   'peri_peaks': {},
+                  'max_power': {},
                   'pow_over_fal01': {},
                   'pow_over_fal1': {}}
     
