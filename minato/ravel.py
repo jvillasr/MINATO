@@ -2162,9 +2162,9 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
                 else:
                     results1, phase, vel1, vel1_err  = phase_rv_curve(hjd1, rv1, rv1_err, period=period)
                     fine_preds1, fine_preds2 = [], []
-                    for i in range(results1['amplitude'].shape[0]):
-                        fine_pred1 = results1['amplitude'][i] * np.sin(2 * np.pi * fine_phase + results1['phase_shift'][i]) \
-                            + results1['height'][i]
+                    for i in range(results1['K'].shape[0]):
+                        fine_pred1 = results1['K'][i] * np.sin(2 * np.pi * fine_phase + results1['phase_shift'][i]) \
+                            + results1['gamma'][i]
                         fine_preds1.append(fine_pred1)
                     fine_preds1 = np.array(fine_preds1)
 
@@ -2207,9 +2207,12 @@ def fit_sinusoidal_probmod(times, rvs, rv_errors):
     def sinu_model(times=None, rvs=None):
         fixed_frequency = 2 * jnp.pi
         # Model parameters
-        amplitude = npro.sample('amplitude', dist.Uniform(0, 500))
+        # amplitude = npro.sample('amplitude', dist.Uniform(0, 500))
+        amplitude = npro.sample('K', dist.Normal(0, 500))
         phase_shift = npro.sample('phase_shift', dist.Uniform(-jnp.pi, jnp.pi))
-        height = npro.sample('height', dist.Uniform(50, 250))
+        # height = npro.sample('height', dist.Uniform(50, 250))
+        rv_min, rv_max = jnp.min(rvs), jnp.max(rvs)
+        height = npro.sample('gamma', dist.Uniform(rv_min-10, rv_max+10))
         # Sinusoidal model with fixed frequency
         pred = amplitude * jnp.sin(fixed_frequency * times + phase_shift) + height
         # Likelihood
