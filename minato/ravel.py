@@ -18,6 +18,7 @@ import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive
 from jax import numpy as jnp
 from jax import random
+from jax.scipy.special import wofz
 import multiprocessing
 
 # Set the number of devices to the number of available CPUs
@@ -65,6 +66,53 @@ def lorentzian(x, amp, cen, wid):
         Lorentzian evaluated at x.
     """
     return -amp * (wid**2 / (4 * (x - cen)**2 + wid**2))
+
+def voigt(x, amp, cen, wid_G, wid_L):
+    """
+    1-dimensional Voigt function for absorption profiles using the Faddeeva function.
+
+    Parameters:
+    x : array_like
+        Input values (wavelengths).
+    amp : float
+        Amplitude (depth) of the Voigt profile (positive value). The profile minimum will be -amp.
+    cen : float
+        Center of the profile.
+    wid_G : float
+        Full Width at Half Maximum (FWHM) of the Gaussian component.
+    wid_L : float
+        Full Width at Half Maximum (FWHM) of the Lorentzian component.
+
+    Returns:
+    array_like
+        Voigt profile evaluated at x.
+    """
+    SIGMA_TO_FWHM = 2.0 * jnp.sqrt(2.0 * jnp.log(2.0)) # Approx 2.3548
+    GAMMA_TO_FWHM = 2.0 # FWHM = 2 * HWHM(gamma)
+    # Convert FWHM to sigma (Gaussian std dev) and gamma (Lorentzian HWHM)
+    sigma = wid_G / SIGMA_TO_FWHM
+    gamma = wid_L / GAMMA_TO_FWHM # gamma is the HWHM for Lorentzian
+
+    # Avoid division by zero or very small sigma
+    sigma = jnp.maximum(sigma, 1e-10)
+
+    # Compute z argument for Faddeeva function (wofz)
+    # z = (x + i*gamma) / (sigma * sqrt(2))
+    z = ((x - cen) + 1j * gamma) / (sigma * jnp.sqrt(2.0))
+
+    # Compute Voigt profile using Faddeeva function: V = Re[wofz(z)] / (sigma * sqrt(2*pi))
+    profile_val = wofz(z).real / (sigma * jnp.sqrt(2.0 * jnp.pi))
+
+    # Normalize profile to have peak value of 1 at the center (x=cen) before scaling by amplitude
+    # Peak value = V(x=cen) = voigt_profile(0, sigma, gamma)
+    z_peak = (0 + 1j * gamma) / (sigma * jnp.sqrt(2.0))
+    peak_value = wofz(z_peak).real / (sigma * jnp.sqrt(2.0 * jnp.pi))
+
+    # Avoid division by zero if peak_value is very small (e.g., if widths are tiny)
+    peak_value = jnp.maximum(peak_value, 1e-15)
+
+    # Scale profile so the minimum (peak depth) is -amp relative to a zero baseline
+    return -amp * (profile_val / peak_value)
 
 def nebu(x, amp, cen, wid):
     """
@@ -155,7 +203,7 @@ def read_fits(fits_file, instrument):
 
         return wave, flux, ferr, star_epoch, mjd
 
-def read_spectra(filelist, path, file_type, instrument=None):
+def read_spectra(filelist, path, file_type, instrument=None, SB2=False):
     """
     Read spectral data from a collection of files.
 
@@ -204,7 +252,6 @@ def read_spectra(filelist, path, file_type, instrument=None):
                 f_errors.append(np.array(df[2]))
             else:
                 f_errors.append(compute_flux_err(df[0], df[1]))
-            jds.append(None)  # Append None for non-FITS files.
         elif file_type == 'fits':
             if instrument is None:
                 raise ValueError(
@@ -223,6 +270,18 @@ def read_spectra(filelist, path, file_type, instrument=None):
             f_errors = filelist['f_errors']
             names = filelist['names']
             jds = filelist['jds']
+    if file_type in ['dat', 'txt', 'csv']:
+        # Check if JDs.txt file with observation times exists:
+        try:
+            # print(f"Looking for JDs.txt file in {path}...")
+            if SB2==True:
+                path = path+'SB2/'
+            with open(path + 'JDs.txt', 'r') as f:
+                df_jds = pd.read_csv(f, header=None, sep=r'\s+', dtype=str)
+                jds = df_jds[1].tolist()
+        except FileNotFoundError:
+            print(f"JDs.txt file not found in {path}.")
+            jds.append(None)
 
     return wavelengths, fluxes, f_errors, names, jds
 
@@ -251,7 +310,7 @@ def setup_star_directory_and_save_jds(names, jds, path, SB2):
         star = 'Unknown_Star/'
     path = path.replace('FITS/', '')
     if SB2:
-        path = os.path.join(path, 'SB2')
+        path = os.path.join(path, 'SB2/')
     if not os.path.exists(path):
         os.makedirs(path)
     if any(jds):
@@ -375,7 +434,8 @@ def rv_shift_wavelength(lambda_emitted, v):
     lambda_observed = lambda_emitted * (1 + (v / c_kms))
     return lambda_observed
 
-def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, K=2, shift_kms=0):
+def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, K=2, shift_kms=0,
+                    wavelength_type='air'):
     """
     Fit SB2 (double-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
@@ -404,6 +464,8 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         Number of components (default 2).
     shift_kms : float, optional
         The overall velocity shift in km/s. For example, use 172 km/s for the SMC.
+    wavelength_type : str, optional
+        Type of wavelength to use ('air' or 'vacuum'). Default is 'air'.
 
     Returns:
     --------
@@ -418,6 +480,9 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     n_epochs = len(wavelengths)
     print('Number of lines:', n_lines)
     print('Number of epochs:', n_epochs)
+
+    # Determine the key to use based on the chosen wavelength type
+    key = 'centre' if wavelength_type == 'vacuum' else 'air'
 
     # Boolean mask for Hydrogen lines (will use Lorentzian instead of Gaussian)
     is_hline = jnp.array([line in Hlines for line in lines])
@@ -466,7 +531,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     y_errors = jnp.array(y_errors_interp)       # Shape: (n_lines, n_epochs, common_grid_length)
 
     # Initial guess for the rest (central) wavelength from lines_dic
-    cen_ini = jnp.array([lines_dic[line]['centre'][0] for line in lines])
+    cen_ini = jnp.array([lines_dic[line][key][0] for line in lines])
 
     # Define the probabilistic SB2 model
     def sb2_model(λ, fλ, σ_fλ, K, is_hline, Δv_means):
@@ -548,7 +613,8 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         gaussian_profile = gaussian(λ_expanded, amp, μ, wid)
         lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
         # Use Lorentzian for Hydrogen lines, Gaussian otherwise:
-        comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
+        # comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
+        comp_profile = lorentzian_profile
         Ck = npro.deterministic("C_λk", comp_profile)
 
         # Sum over components and add continuum to yield the predicted flux
@@ -645,10 +711,10 @@ def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines
             # Plot the observed data
             ax.plot(x_waves[idx][epoch_idx], y_fluxes[idx][epoch_idx], color='k', lw=1, alpha=0.8)
             # Plot vertical lines for the rest wavelength and component shifts
-            centre = rv_shift_wavelength(lines_dic[line]['centre'][0], shift_kms)
+            centre = rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms)
             ax.axvline(centre, color='r', linestyle='--', lw=1)
-            ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], shift_kms - comp_sep/2), color='orange', linestyle='--', lw=1)
-            ax.axvline(rv_shift_wavelength(lines_dic[line]['centre'][0], shift_kms + comp_sep/2), color='orange', linestyle='--', lw=1)
+            ax.axvline(rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms - comp_sep/2), color='orange', linestyle='--', lw=1)
+            ax.axvline(rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms + comp_sep/2), color='orange', linestyle='--', lw=1)
             # Annotate the epoch number
             ax.text(0.15, 0.86, f'Epoch {epoch_idx+1}', transform=ax.transAxes, fontsize=16)
 
@@ -850,7 +916,7 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
     print('*** SB2 set to:', SB2, '***\n')
 
     # Read in spectral data from the provided file list and data path
-    wavelengths, fluxes, f_errors, names, jds = read_spectra(spectra_list, data_path, file_type, instrument=instrument)
+    wavelengths, fluxes, f_errors, names, jds = read_spectra(spectra_list, save_path, file_type, instrument=instrument, SB2=SB2)
     # print('names:', names)
     
     # Setup the output directory and save the JD information if available
@@ -1024,7 +1090,6 @@ class GetRVs:
         use_lines (list): Optional list of spectral lines to consider; if None, all available lines are used.
         lines_ok_thrsld (float): Threshold for acceptable line error percentages.
         epochs_ok_thrsld (float): Threshold for acceptable epoch errors.
-        min_sep (float): Minimum separation (e.g., in wavelength) required between lines.
         print_output (bool): If True, prints debug and status messages.
         random_eps (bool): Flag for using random epsilon values (experimental).
         rndm_eps_n (int): Number of random epsilon values to try.
@@ -1065,10 +1130,10 @@ class GetRVs:
               - Computes weighted mean RVs and writes final results.
     """
 
-    def __init__(self, fit_values, path, JDfile, balmer=False, SB2=False, use_lines=None,
-                 lines_ok_thrsld=2, epochs_ok_thrsld=2, min_sep=2, print_output=True,
-                 random_eps=False, rndm_eps_n=29, rndm_eps_exc=[], plots=True,
-                 error_type='wid1_percer', rm_epochs=True):
+    def __init__(self, fit_values, path, JDfile, balmer=False, SB2=False, lines_dic=None,  
+                 wavelength_type='air', use_lines=None, lines_ok_thrsld=3, epochs_ok_thrsld=3, 
+                 print_output=True, random_eps=False, rndm_eps_n=29, rndm_eps_exc=[], 
+                 plots=True, error_type='wid1_percer', rm_epochs=False):
         """
         Initialize the GetRVs instance and load the SLfit results. Computes percentage errors
         for the primary (and secondary, if SB2) components.
@@ -1079,10 +1144,14 @@ class GetRVs:
             JDfile (str): Filename for Julian Date data.
             balmer (bool): Whether to apply Balmer-specific settings.
             SB2 (bool): Whether the fits correspond to double-lined spectra.
+            lines_dic (dict, optional): A dictionary mapping spectral line IDs to properties.
+                                        If None, the default dictionary from
+                                        `ravel.setup_line_dictionary()` is used. Defaults to None.
+            wavelength_type (str): Specifies whether to use 'vacuum' or 'air' rest wavelengths 
+                                    from lines_dic. Defaults to 'air'.
             use_lines (list or None): Specific lines to use; if None, all lines are considered.
             lines_ok_thrsld (float): Threshold for acceptable line errors.
             epochs_ok_thrsld (float): Threshold for acceptable epoch errors.
-            min_sep (float): Minimum required separation between lines.
             print_output (bool): Whether to print output messages.
             random_eps (bool): Experimental flag for using random epsilon values.
             rndm_eps_n (int): Number of random epsilon values.
@@ -1096,10 +1165,11 @@ class GetRVs:
         self.JDfile = JDfile
         self.balmer = balmer
         self.SB2 = SB2
+        self.lines_dic = lines_dic
+        self.wavelength_type = wavelength_type
         self.use_lines = use_lines
         self.lines_ok_thrsld = lines_ok_thrsld
         self.epochs_ok_thrsld = epochs_ok_thrsld
-        self.min_sep = min_sep
         self.print_output = print_output
         self.random_eps = random_eps
         self.rndm_eps_n = rndm_eps_n
@@ -1110,6 +1180,28 @@ class GetRVs:
 
         # Get the current date for reference
         date_current = str(date.today())
+
+        if wavelength_type not in ['vacuum', 'air']:
+            raise ValueError("wavelength_type must be either 'vacuum' or 'air'.")
+
+        if lines_dic is None:
+            # Import here if GetRVs is in the same file as setup_line_dictionary
+            # Or adjust import path if it's elsewhere
+            try:
+                # Assuming setup_line_dictionary is accessible in the current scope
+                # If GetRVs is in ravel.py, this works directly.
+                # If not, you might need 'from . import setup_line_dictionary' or similar
+                self.lines_dic = setup_line_dictionary()
+                print("Using default line dictionary from ravel.setup_line_dictionary().")
+            except NameError:
+                # Handle case where the function isn't directly available
+                # This might require a specific import based on your project structure
+                raise ImportError("Could not find setup_line_dictionary(). "
+                                  "Ensure it's imported or provide a lines_dic.")
+        else:
+            # Use the user-provided dictionary
+            self.lines_dic = lines_dic
+            print("Using user-provided line dictionary.")
 
         # Load the SLfit results CSV file
         self.df_SLfit = pd.read_csv(self.path + self.fit_values)
@@ -1191,13 +1283,12 @@ class GetRVs:
         mean_err = np.sqrt(sum((da * wa) ** 2 for da, wa in zip(errors, weights))) / sum(weights)
         return mean, mean_err
 
-    def compute_rvs(self, lines, lambda_rest_dict):
+    def compute_rvs(self, lines):
         """
         Compute radial velocities (and uncertainties) for each spectral line.
         
         The method compares fitted central wavelengths (and errors) to the provided
-        rest wavelengths, propagating errors appropriately. For SB2 fits, it computes
-        results for the secondary as well.
+        rest wavelengths, propagating errors appropriately. 
         
         Parameters:
             lines (list): List of line identifiers.
@@ -1210,22 +1301,51 @@ class GetRVs:
         """
         c_kms = c.to('km/s').value
         rvs = {}
+        # Determine the key to use based on the chosen wavelength type
+        key = 'centre' if self.wavelength_type == 'vacuum' else 'air'
+
         for line in lines:
-            lambda_rest, lambda_r_er = lambda_rest_dict[line]
+
+            # Select rest wavelength and error from self.lines_dic
+            if line not in self.lines_dic:
+                print(f"  Warning: Line {line} not found in lines_dic. Skipping RV computation.")
+                continue
+            line_info = self.lines_dic[line]
+
+            # Check if the required key exists and has valid data (list with at least 2 elements)
+            if key not in line_info or not isinstance(line_info[key], list) or len(line_info[key]) < 2:
+                print(f"  Warning: Wavelength type '{self.wavelength_type}' ('{key}' key) "
+                      f"not available, empty, or incomplete for line {line}. Skipping RV computation.")
+                continue
+
+            lambda_rest, lambda_r_er = line_info[key] # Get wavelength and its error
+
+            # Check if rest wavelength is valid
+            if lambda_rest is None or lambda_rest <= 0:
+                 print(f"  Warning: Invalid rest wavelength ({lambda_rest}) for line {line} and type '{self.wavelength_type}'. Skipping.")
+                 continue
+            # Ensure error is a non-negative float, default to 0.1 if None or invalid
+            if lambda_r_er is None or not isinstance(lambda_r_er, (int, float)) or lambda_r_er < 0:
+                lambda_r_er = 0.1
+
             current_line_values = self.df_SLfit[self.df_SLfit['line'] == line]
-            # Calculate the radial velocity for the first component
-            dlambda1 = current_line_values['cen1'].values - lambda_rest
-            dlambda1_er = np.sqrt(current_line_values['cen1_er'].values ** 2 + lambda_r_er ** 2)
+            if current_line_values.empty:
+                 print(f"  Warning: No SLfit data found for line {line}. Skipping RV computation.")
+                 continue
+
+            # Ensure fitted center and error columns exist and handle potential NaNs
+            if 'cen1' not in current_line_values.columns or 'cen1_er' not in current_line_values.columns:
+                 print(f"  Warning: Missing 'cen1' or 'cen1_er' column for line {line}. Skipping primary RV.")
+                 continue
+            
+            cen1_vals = current_line_values['cen1'].values
+            cen1_er_vals = current_line_values['cen1_er'].values
+            dlambda1 = cen1_vals - lambda_rest
+            dlambda1_er = np.sqrt(cen1_er_vals**2 + lambda_r_er**2)
             rv1 = dlambda1 * c_kms / lambda_rest
             rv1_er = np.sqrt((dlambda1_er / dlambda1) ** 2 + (lambda_r_er / lambda_rest) ** 2) * np.abs(rv1)
             rvs[line] = {'rv1': rv1, 'rv1_er': rv1_er}
-            # If SB2, calculate the radial velocity for the second component
-            if self.SB2:
-                dlambda2 = np.abs(current_line_values['cen2'].values - lambda_rest)
-                dlambda2_er = np.sqrt(current_line_values['cen2_er'].values ** 2 + lambda_r_er ** 2)
-                rv2 = dlambda2 * c_kms / lambda_rest
-                rv2_er = np.sqrt((dlambda2_er / dlambda2) ** 2 + (lambda_r_er / lambda_rest) ** 2) * rv2
-                rvs[line].update({'rv2': rv2, 'rv2_er': rv2_er})
+
         return rvs
 
     @staticmethod
@@ -1454,30 +1574,13 @@ class GetRVs:
             print('******************                RV Analysis                ******************')
             print('*' * 79 + '\n')
 
-        # Define rest wavelengths dictionary (wavelength and its error)
-        lambda_rest_dict = {
-            4009: [4009.2565, 0.00002], 4026: [4026.1914, 0.0010],
-            4089: [4088.862, 0.10],
-            4102: [4101.734, 0.006],     4121: [4120.8154, 0.0012],
-            4128: [4128.07, 0.10],       4131: [4130.89, 0.10],
-            4144: [4143.761, 0.010],     4267: [4267.258, 0.007],
-            4340: [4340.472, 0.006],     4388: [4387.9296, 0.0006],
-            4471: [4471.4802, 0.0015],   4481: [4481.130, 0.010],
-            4542: [4541.591, 0.010],     4553: [4552.62, 0.10],
-            4713: [4713.1457, 0.0006],
-            4861: [4861.35, 0.05],       4922: [4921.9313, 0.0005],
-            5412: [5411.52, 0.10],       5876: [5875.621, 0.010],
-            5890: [5889.951, 0.00003],   6562: [6562.79, 0.030],
-            6678: [6678.151, 0.010],     7774: [7774.17, 0.10]
-        }
-
         if self.print_output:
             print('*** SB2 set to:', self.SB2, '***\n')
             print('\n*** Computing Radial Velocities ***')
             print('-----------------------------------')
 
         # Compute per-line RVs based on the SLfit results and rest wavelengths.
-        rvs_dict = self.compute_rvs(self.lines, lambda_rest_dict)
+        rvs_dict = self.compute_rvs(self.lines)
 
         # Plot RVs for each spectral line
         fig, ax = plt.subplots()
@@ -1790,6 +1893,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
     
     rv1_err = df['mean_rv_er'][df['comp'] == 1] if 'mean_rv_er' in df.columns else None
     starname = df['epoch'][0].split('_')[0] + '_' + df['epoch'][0].split('_')[1]
+    starname = starname.split('/')[-1]
     nepochs = len(hjd1)
     
     # Write header information
@@ -2159,6 +2263,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
 
                     fine_preds1 = np.array(fine_preds1)
                     fine_preds2 = np.array(fine_preds2)
+                    phase_results = results2
                 else:
                     results1, phase, vel1, vel1_err  = phase_rv_curve(hjd1, rv1, rv1_err, period=period)
                     fine_preds1, fine_preds2 = [], []
@@ -2167,6 +2272,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
                             + results1['gamma'][i]
                         fine_preds1.append(fine_pred1)
                     fine_preds1 = np.array(fine_preds1)
+                    phase_results = results1
 
                 print('\n*** Plotting phased RV curve ***\n-------------------------------')
                 n_lines = 200
@@ -2186,7 +2292,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
                     plt.savefig(f'{path}LS/{starname}_sinu_fit_SB1_P={period:.2f}.png', bbox_inches='tight', dpi=300)
                 plt.close()
     
-    return ls_results
+    return ls_results, phase_results
 
 def fit_sinusoidal_probmod(times, rvs, rv_errors):
     """
@@ -2226,7 +2332,7 @@ def fit_sinusoidal_probmod(times, rvs, rv_errors):
     mcmc.print_summary()
     return mcmc.get_samples()
 
-def fit_sinusoidal_probmod_sb2(phase, rv1, rv1_err, rv2, rv2_err, amp_max=500, height_min=50, height_max=250):
+def fit_sinusoidal_probmod_sb2(phase, rv1, rv1_err, rv2, rv2_err, amp_max=500):
     """
     Probabilistic model for sinusoidally fitting RV curves for SB2 binary stars.
     
@@ -2251,10 +2357,14 @@ def fit_sinusoidal_probmod_sb2(phase, rv1, rv1_err, rv2, rv2_err, amp_max=500, h
         fixed_frequency = 2 * jnp.pi
         # Shared parameters
         phi0 = npro.sample('phi0', dist.Uniform(-jnp.pi, jnp.pi))
-        gamma = npro.sample('gamma', dist.Uniform(height_min, height_max))
+        rv_min, rv_max = jnp.min(rv1), jnp.max(rv1)
+        gamma = npro.sample('gamma', dist.Uniform(rv_min-10, rv_max+10))
         # Distinct parameters
-        K1 = npro.sample('K1', dist.Uniform(0, amp_max))
-        K2 = npro.sample('K2', dist.Uniform(0, amp_max))
+        K1 = npro.sample('K1', dist.HalfNormal(amp_max)) # Ensures K1 > 0
+        delta_K = npro.sample('delta_K', dist.HalfNormal(amp_max))
+        K2 = npro.deterministic('K2', K1 + delta_K) # Ensures K2 > K1 > 0
+        # K1 = npro.sample('K1', dist.Normal(0, amp_max))
+        # K2 = npro.sample('K2', dist.Normal(0, amp_max))
         # Predicted RVs
         pred_rv1 = K1 * jnp.sin(fixed_frequency * phase + phi0) + gamma
         pred_rv2 = -K2 * jnp.sin(fixed_frequency * phase + phi0) + gamma
