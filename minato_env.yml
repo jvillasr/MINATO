@@ -1,9 +1,10 @@
 name: minato
 channels:
   - conda-forge
-  - defaults
+  # - defaults
 dependencies:
-  - python=3.9
+  - python=3.10
+  - pip
   - astropy
   - jax
   - lmfit
@@ -13,3 +14,7 @@ dependencies:
   - pandas
   - scipy
   - tqdm
+  - emcee
+  - multiprocess
+  - pip:
+      - kepler.py
