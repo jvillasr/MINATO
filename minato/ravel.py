@@ -1,4 +1,5 @@
 import os
+os.environ["JAX_ENABLE_X64"] = "True"
 import matplotlib
 import csv
 import numpy as np
@@ -13,14 +14,20 @@ from lmfit import Model, Parameters, models
 from datetime import date
 from scipy.signal import find_peaks
 from scipy.interpolate import interp1d
+from scipy.special import wofz as scipy_wofz
+import multiprocessing
 import numpyro as npro
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive
+from numpyro.infer.util import find_valid_initial_params
+from numpyro.infer.initialization import init_to_uniform 
+import jax
 from jax import numpy as jnp
 from jax import random
-from jax.scipy.special import wofz
-import multiprocessing
-
+from jax import vmap
+from jax import jit
+from exojax.special.faddeeva import rewofz
+print(f"JAX 64-bit enabled: {jax.config.jax_enable_x64}") # Verify
 # Set the number of devices to the number of available CPUs
 npro.set_host_device_count(multiprocessing.cpu_count())
 
@@ -67,52 +74,187 @@ def lorentzian(x, amp, cen, wid):
     """
     return -amp * (wid**2 / (4 * (x - cen)**2 + wid**2))
 
+@jit
 def voigt(x, amp, cen, wid_G, wid_L):
     """
-    1-dimensional Voigt function for absorption profiles using the Faddeeva function.
+    Voigt profile using exojax.special.rewofz, assuming multi-dimensional input support.
+    Ensures explicit broadcasting before calculations.
 
     Parameters:
-    x : array_like
-        Input values (wavelengths).
-    amp : float
-        Amplitude (depth) of the Voigt profile (positive value). The profile minimum will be -amp.
-    cen : float
-        Center of the profile.
-    wid_G : float
-        Full Width at Half Maximum (FWHM) of the Gaussian component.
-    wid_L : float
-        Full Width at Half Maximum (FWHM) of the Lorentzian component.
+    x : jax.Array (e.g., shape (1, n_lines, nepochs, ndata))
+    amp : jax.Array (e.g., shape (K, n_lines, 1, 1))
+    cen : jax.Array (e.g., shape (K, n_lines, nepochs, 1))
+    wid_G : jax.Array (e.g., shape (K, n_lines, 1, 1))
+    wid_L : jax.Array (e.g., shape (K, n_lines, 1, 1))
 
     Returns:
-    array_like
-        Voigt profile evaluated at x.
+    jax.Array with broadcasted shape (e.g., (K, n_lines, nepochs, ndata))
     """
-    SIGMA_TO_FWHM = 2.0 * jnp.sqrt(2.0 * jnp.log(2.0)) # Approx 2.3548
-    GAMMA_TO_FWHM = 2.0 # FWHM = 2 * HWHM(gamma)
-    # Convert FWHM to sigma (Gaussian std dev) and gamma (Lorentzian HWHM)
-    sigma = wid_G / SIGMA_TO_FWHM
-    gamma = wid_L / GAMMA_TO_FWHM # gamma is the HWHM for Lorentzian
+    # Type casting (optional, ensures consistency)
+    x = x.astype(jnp.float64)
+    cen = cen.astype(jnp.float64)
+    wid_G = wid_G.astype(jnp.float64)
+    wid_L = wid_L.astype(jnp.float64)
+    amp = amp.astype(jnp.float64)
 
-    # Avoid division by zero or very small sigma
-    sigma = jnp.maximum(sigma, 1e-10)
+    # Constants
+    sqrt2 = jnp.sqrt(2.0)
+    sqrt2pi = jnp.sqrt(2.0 * jnp.pi)
+    sigma_factor = 2.0 * jnp.sqrt(2.0 * jnp.log(2.0)) # FWHM_G = sigma * factor
 
-    # Compute z argument for Faddeeva function (wofz)
-    # z = (x + i*gamma) / (sigma * sqrt(2))
-    z = ((x - cen) + 1j * gamma) / (sigma * jnp.sqrt(2.0))
+    # Widths conversion
+    sigma = wid_G / sigma_factor
+    gamma = wid_L / 2.0 # HWHM_L
+    sigma = jnp.maximum(sigma, 1e-10) # Avoid division by zero
 
-    # Compute Voigt profile using Faddeeva function: V = Re[wofz(z)] / (sigma * sqrt(2*pi))
-    profile_val = wofz(z).real / (sigma * jnp.sqrt(2.0 * jnp.pi))
+    # print("shapes →  x", x.shape,
+    #     "amp", amp.shape, "cen", cen.shape,
+    #     "wid_G", wid_G.shape, "wid_L", wid_L.shape)
 
-    # Normalize profile to have peak value of 1 at the center (x=cen) before scaling by amplitude
-    # Peak value = V(x=cen) = voigt_profile(0, sigma, gamma)
-    z_peak = (0 + 1j * gamma) / (sigma * jnp.sqrt(2.0))
-    peak_value = wofz(z_peak).real / (sigma * jnp.sqrt(2.0 * jnp.pi))
+    # --- Explicitly broadcast all inputs to a common target shape ---
+    try:
+        # Determine target shape by broadcasting all relevant inputs together
+        target_shape = jnp.broadcast_shapes(x.shape, cen.shape, sigma.shape, gamma.shape, amp.shape)
+    except ValueError as e:
+        # Print shapes if broadcasting fails to help debugging
+        print(f"Error broadcasting shapes in voigt_exojax:")
+        print(f"  x.shape: {x.shape}")
+        print(f"  cen.shape: {cen.shape}")
+        print(f"  sigma.shape: {sigma.shape}")
+        print(f"  gamma.shape: {gamma.shape}")
+        print(f"  amp.shape: {amp.shape}")
+        raise e
 
-    # Avoid division by zero if peak_value is very small (e.g., if widths are tiny)
-    peak_value = jnp.maximum(peak_value, 1e-15)
+    # Broadcast arrays to the target shape
+    x_b = jnp.broadcast_to(x, target_shape)
+    cen_b = jnp.broadcast_to(cen, target_shape)
+    sigma_b = jnp.broadcast_to(sigma, target_shape)
+    gamma_b = jnp.broadcast_to(gamma, target_shape)
+    amp_b = jnp.broadcast_to(amp, target_shape)
+    # --- End Broadcasting ---
 
-    # Scale profile so the minimum (peak depth) is -amp relative to a zero baseline
-    return -amp * (profile_val / peak_value)
+    # Scaled coordinates for rewofz (using broadcasted arrays)
+    x_scaled = (x_b - cen_b) / (sigma_b * sqrt2)
+    y_scaled = gamma_b / (sigma_b * sqrt2)
+
+
+    # --- Flatten inputs for rewofz ---
+    original_shape = x_scaled.shape # Store the 4D shape
+    x_flat = x_scaled.reshape(-1)   # Flatten to 1D
+    y_flat = y_scaled.reshape(-1)   # Flatten to 1D
+    # --- End Flattening ---
+
+    # --- Define a function that calls rewofz for SCALAR inputs ---
+    # We need to handle the potential complex output and take the real part
+    def scalar_rewofz(scalar_x, scalar_y):
+        res = rewofz(scalar_x, scalar_y)
+        # Check if the result is complex (some implementations might return complex)
+        # and return the real part if necessary.
+        # If rewofz always returns real, this check can be simplified/removed.
+        return jnp.real(res) # Take real part safely
+
+    # --- Use vmap to apply scalar_rewofz element-wise ---
+    # Map over the first (and only) dimension of x_flat and y_flat
+    vectorized_rewofz = vmap(scalar_rewofz, in_axes=(0, 0))
+
+    try:
+        w_flat = vectorized_rewofz(x_flat, y_flat) # Apply vmapped function
+    except Exception as e:
+        print(f"Error calling vmapped rewofz:")
+        print(f"  x_flat.shape: {x_flat.shape}")
+        print(f"  y_flat.shape: {y_flat.shape}")
+        raise e
+    # --- End vmap call ---
+
+    # --- Reshape result back to 4D ---
+    try:
+        w = w_flat.reshape(original_shape)
+    except ValueError as e:
+        print(f"Error reshaping vmapped rewofz output:")
+        print(f"  w_flat.shape: {w_flat.shape}")
+        print(f"  target original_shape: {original_shape}")
+        raise e
+    # --- End Reshaping ---
+
+    # Calculate Voigt profile value (using 4D arrays)
+    V = w / (sigma_b * sqrt2pi)
+
+    # --- Peak value (x_scaled = 0) ---
+    zero_flat = jnp.zeros_like(x_flat)
+    try:
+        # Apply the same vmapped function for the peak
+        w0_flat = vectorized_rewofz(zero_flat, y_flat)
+    except Exception as e:
+        print(f"Error calling vmapped rewofz for peak value:")
+        print(f"  zero_flat.shape: {zero_flat.shape}")
+        print(f"  y_flat.shape: {y_flat.shape}")
+        raise e
+
+    # Reshape peak value back to 4D
+    try:
+        w0 = w0_flat.reshape(original_shape)
+    except ValueError as e:
+        print(f"Error reshaping vmapped rewofz peak output:")
+        print(f"  w0_flat.shape: {w0_flat.shape}")
+        print(f"  target original_shape: {original_shape}")
+        raise e
+
+    V0 = w0 / (sigma_b * sqrt2pi)
+    V0 = jnp.maximum(V0, 1e-15)
+    # --- End Peak Calculation ---
+
+    # Final scaling: Returns absorption profile
+    return -amp_b * (V / V0)
+
+SQRT_2   = jnp.sqrt(2.0)
+SQRT_2PI = jnp.sqrt(2.0 * jnp.pi)
+LN2      = jnp.log(2.0)
+SIGMA_FAC = 2.0 * jnp.sqrt(2.0 * LN2)          # FWHM_G = sigma * SIGMA_FAC
+
+@jax.jit
+def pseudo_voigt(x, amp, cen, fwhm_G, fwhm_L):
+    """
+    Pseudo-Voigt profile (Thompson-Cox-Hastings cubic η, Olivero-Longbothum FWHM).
+
+    Shapes follow the broadcasting convention used in the original `voigt`.
+    All arrays are promoted to float64 for consistency.
+    """
+    # --- promote to float64 (once JIT-compiled this is negligible) -----------
+    x   = x.astype(jnp.float64)
+    cen = cen.astype(jnp.float64)
+    fwhm_G = fwhm_G.astype(jnp.float64)
+    fwhm_L = fwhm_L.astype(jnp.float64)
+    amp = amp.astype(jnp.float64)
+
+    # --- Gaussian & Lorentzian widths ----------------------------------------
+    sigma  = fwhm_G / SIGMA_FAC           # Gaussian σ
+    gamma  = fwhm_L / 2.0                 # Lorentzian HWHM
+
+    # Olivero–Longbothum approximation of the *Voigt* FWHM
+    fG5 = fwhm_G**5
+    fL5 = fwhm_L**5
+    fV  = (fG5
+           + 2.69269 * fwhm_G**4 * fwhm_L
+           + 2.42843 * fwhm_G**3 * fwhm_L**2
+           + 4.47163 * fwhm_G**2 * fwhm_L**3
+           + 0.07842 * fwhm_G    * fwhm_L**4
+           + fL5) ** 0.2
+
+    # Thompson-Cox-Hastings mixing coefficient η(y) ;  y = fL / fV
+    y   = fwhm_L / fV
+    eta = 1.36603 * y - 0.47719 * y**2 + 0.11116 * y**3
+    eta = jnp.clip(eta, 0.0, 1.0)         # numerical safety
+
+    # --- profiles, unit peak height ------------------------------------------
+    x_c = x - cen                         # (K,n_lines,n_epochs,n_data)
+
+    G = jnp.exp(- (x_c**2) / (2.0 * sigma**2))            # Gaussian, G(0)=1
+    L = (gamma**2) / (x_c**2 + gamma**2)                  # Lorentzian, L(0)=1
+
+    pV = (1.0 - eta) * G + eta * L                        # unit-height pVoigt
+
+    # --- scale to requested amplitude (absorption) ---------------------------
+    return -amp * pV                                       # negative = absorption
 
 def nebu(x, amp, cen, wid):
     """
@@ -180,11 +322,23 @@ def read_fits(fits_file, instrument):
         # print(repr(header))
         try:
             if instrument == 'FLAMES':
-                star_epoch = header['OBJECT'] + '_' + header['EPOCH_ID']
-                mjd = header['MJD_MID']
-                wave = hdul[1].data['WAVELENGTH']
-                flux = hdul[1].data['SCI_NORM']
-                ferr = hdul[1].data['SCI_NORM_ERR']
+                # BLOeM
+                # star_epoch = header['OBJECT'] + '_' + header['EPOCH_ID']
+                # mjd = header['MJD_MID']
+                # wave = hdul[1].data['WAVELENGTH']
+                # flux = hdul[1].data['SCI_NORM']
+                # ferr = hdul[1].data['SCI_NORM_ERR']
+                # BBC
+                star_epoch = header['BBC_NAME']
+                mjd = header['MJD_OB']
+                lengthx =  header['NAXIS1']
+                refx    =  header['CRPIX1']
+                stepx   =  header['CDELT1']
+                startx  =  header['CRVAL1']
+                wave = (np.arange(lengthx) - (refx - 1))*stepx + startx 
+                flux = hdul[2].data
+                ferr = hdul[3].data
+
             elif instrument == 'FEROS':
                 mjd = header['HIERARCH MBJD']
                 star_epoch = header['HIERARCH TARGET NAME'] + '_' + f'{mjd:.2f}'
@@ -435,7 +589,7 @@ def rv_shift_wavelength(lambda_emitted, v):
     return lambda_observed
 
 def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, K=2, shift_kms=0,
-                    wavelength_type='air'):
+                    wavelength_type='air', rm_epochs=None):
     """
     Fit SB2 (double-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
@@ -530,8 +684,16 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     y_fluxes = jnp.array(y_fluxes_interp)       # Shape: (n_lines, n_epochs, common_grid_length)
     y_errors = jnp.array(y_errors_interp)       # Shape: (n_lines, n_epochs, common_grid_length)
 
+    # Remove bad epochs along the second axis (axis=1)
+    if rm_epochs is not None:
+        x_waves = jnp.delete(x_waves, jnp.array(rm_epochs), axis=1)
+        y_fluxes = jnp.delete(y_fluxes, jnp.array(rm_epochs), axis=1)
+        y_errors = jnp.delete(y_errors, jnp.array(rm_epochs), axis=1)
+
     # Initial guess for the rest (central) wavelength from lines_dic
     cen_ini = jnp.array([lines_dic[line][key][0] for line in lines])
+
+    epoch_ref = 1    # or choose automatically
 
     # Define the probabilistic SB2 model
     def sb2_model(λ, fλ, σ_fλ, K, is_hline, Δv_means):
@@ -570,7 +732,12 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         
         # Sample velocity shifts for each epoch and component
         σ_Δv = 200.
-        with npro.plate(f'epochs', nepochs, dim=-1):
+
+        with npro.plate(f'epochs', nepochs, dim=-1):       
+            # Δv_raw = npro.sample("Δv_raw", dist.Normal(loc=Δv_means, scale=σ_Δv).expand([K, nepochs]))
+            # Δv_raw = npro.sample("Δv_raw", dist.Normal(loc=Δv_means, scale=σ_Δv))   # shape (K, nepochs)
+            # Δv_sorted = Δv_raw.at[:, epoch_ref].set(jnp.sort(Δv_raw[:, epoch_ref]))
+            # Δv_τk = npro.deterministic("Δv_τk", Δv_sorted) 
             Δv_τk = npro.sample("Δv_τk", dist.Normal(loc=Δv_means, scale=σ_Δv))
             # Δv_τk shape: (K, nepochs)
 
@@ -597,6 +764,24 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
             wid2 = wid1 + delta_wid
             wid = jnp.stack([wid1, wid2], axis=-3)  # Shape: (2, n_lines)
             wid = wid[:, :, None]  # Shape: (2, n_lines, 1)
+            
+            # Sample widths to use with new Voigt model
+            # Sample Gaussian FWHM for component 1
+            wid_G1 = npro.sample('wid_G1', dist.Uniform(0.5, 5.0)) # Adjust prior as needed
+            # Sample Lorentzian FWHM for component 1
+            wid_L1 = npro.sample('wid_L1', dist.Uniform(0.1, 3.0)) # Adjust prior as needed
+
+            # Constrain widths for component 2 (example: wid2 > wid1)
+            delta_wid_G = npro.sample('delta_wid_G', dist.Uniform(0.1, 2.0))
+            delta_wid_L = npro.sample('delta_wid_L', dist.Uniform(0.05, 1.0))
+            wid_G2 = wid_G1 + delta_wid_G
+            wid_L2 = wid_L1 + delta_wid_L
+
+            # Stack widths for two components and add extra dimensions for broadcasting
+            wid_G = jnp.stack([wid_G1, wid_G2], axis=-3)  # Shape: (2, n_lines)
+            wid_L = jnp.stack([wid_L1, wid_L2], axis=-3)  # Shape: (2, n_lines)
+            wid_G = wid_G[:, :, None]  # Shape: (2, n_lines, 1)
+            wid_L = wid_L[:, :, None]  # Shape: (2, n_lines, 1)
 
         # Make λ_rest a deterministic variable and reshape for broadcasting
         λ0 = npro.deterministic("λ0", λ_rest)[None, :, None]  # Shape: (1, n_lines, 1)
@@ -612,9 +797,12 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         # Compute the model profiles for each component
         gaussian_profile = gaussian(λ_expanded, amp, μ, wid)
         lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
+        voigt_profile = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
         # Use Lorentzian for Hydrogen lines, Gaussian otherwise:
-        # comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
-        comp_profile = lorentzian_profile
+        comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
+        # comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
+        # comp_profile = gaussian_profile
+        # comp_profile = voigt_profile
         Ck = npro.deterministic("C_λk", comp_profile)
 
         # Sum over components and add continuum to yield the predicted flux
@@ -631,8 +819,20 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
     # Set a fixed random key (you can change this seed if desired)
     rng_key = random.PRNGKey(0)
+
+
+
+    # prior = Predictive(sb2_model, num_samples=200)
+    # s = prior(rng_key, λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors,
+    #         K=K, is_hline=is_hline, Δv_means=Δv_means)
+    # dv = s["Δv_τk"]        # shape (200, K, nepochs)
+    # assert (dv[:,0,epoch_ref] < dv[:,1,epoch_ref]).all()
+
+
+
+
     kernel = NUTS(sb2_model)
-    mcmc = MCMC(kernel, num_warmup=500, num_samples=500)
+    mcmc = MCMC(kernel, num_warmup=1000, num_samples=2000)
     mcmc.run(rng_key, extra_fields=("potential_energy",), 
              λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means)
 
@@ -875,7 +1075,7 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile):
 
 def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', instrument='FLAMES',
           plots=True, balmer=True, neblines=[], doubem=[], SB2=False, init_guess_shift=0,
-          shift_kms=0, use_init_pars=False):
+          shift_kms=0, use_init_pars=False, rm_epochs=None):
     """
     Perform spectral line fitting on a list of spectra. This function reads the spectral data, sets up
     the output directory, initializes line dictionaries and fit variables, and then fits each spectral
@@ -920,6 +1120,7 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
     # print('names:', names)
     
     # Setup the output directory and save the JD information if available
+    print(names, jds, save_path)
     out_path = setup_star_directory_and_save_jds(names, jds, save_path, SB2)
     # print('Output path:', out_path)
     
@@ -950,7 +1151,7 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
         if SB2:
             # SB2 fitting: fit all lines using the probabilistic SB2 model and write results to CSV
             result, x_wave, y_flux = fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic,
-                                                      Hlines, neblines, out_path, K=K, shift_kms=shift_kms)
+                                                      Hlines, neblines, out_path, K=K, shift_kms=shift_kms, rm_epochs=rm_epochs)
             writer = mcmc_results_to_file(result, names, jds, writer, csvfile)
             
             # (Optional plotting of SB2 fits is handled within fit_sb2_probmod and plot_lines_fit)
