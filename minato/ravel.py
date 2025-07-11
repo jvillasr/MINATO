@@ -973,6 +973,14 @@ def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):
     wave_region = (wave > lines_dic[line]['region'][0]) & (wave < lines_dic[line]['region'][1])
     x_wave = wave[wave_region]
     y_flux = flux[wave_region]
+    ferr_sub = ferr[wave_region]
+    # Filter out bad data points: NaN, negative errors, or zero flux
+    good = np.isfinite(ferr_sub) & (ferr_sub > 0) & np.isfinite(y_flux)
+
+    if not good.any():
+        raise ValueError(f"No valid pixels left for line {line}")
+
+    x_wave, y_flux, ferr_sub = x_wave[good], y_flux[good], ferr_sub[good]
 
     # Initial guesses for central wavelength and width
     cen_ini = line + shift
@@ -1034,7 +1042,7 @@ def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):
             mod += nebem
 
     # Fit the model to the data with weights from the flux errors
-    result = mod.fit(y_flux, pars, x=x_wave, weights=1 / ferr[wave_region])
+    result = mod.fit(y_flux, pars, x=x_wave, weights=1 / ferr_sub)
 
     return result, x_wave, y_flux, wave_region
 
