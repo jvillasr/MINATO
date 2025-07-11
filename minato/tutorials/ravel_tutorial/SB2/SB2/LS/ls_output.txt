@@ -1,0 +1,28 @@
+ ***************************************
+   LS output for star synthetic
+ ***************************************
+
+ False alarm levels: 2.474 10.357 36.842
+ FAP of highest peak: 0.00000
+ FAP of highest peak x100: 0.00000
+
+ Best frequency                  :  0.083
+ ****************************************************
+ Best Period                     :  12.00862048 days
+ ****************************************************
+ Best Period from secondary      :  12.00464785 days
+ Period from |RV1-RV2|           :  1.20000008 days correct period = P1 or 6.00431024049301
+ Other periods:
+   peaks                         :       52.176
+   frequencies                   :        0.083
+   periods                       :       12.009
+ from secondary:
+   peaks                         :        3.600       3.096       6.909       4.512       2.773       3.962       3.366       3.532       6.691       4.121       3.237       5.840       3.917       4.068       2.965       3.881       4.164
+   frequencies                   :        0.050       0.058       0.083       0.100       0.155       0.158       0.371       0.442       0.444       0.461       0.470       0.539       0.556       0.755       0.797       0.805       0.831
+   periods                       :       20.096      17.244      12.005      10.016       6.452       6.314       2.693       2.263       2.251       2.169       2.126       1.856       1.800       1.324       1.255       1.242       1.203
+ fal1/P                          :  1.42
+ fal2/P                          :  5.04
+ Classification index            :  0
+ maxpower                        :  52.18
+ fal1                            :  36.84
+ maxpower_maxfal                 :  1.42

@@ -1,0 +1,300 @@
+ravel_tutorial/synth_spectra/synthetic_SB1_01
+---------------------------------------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 31
+    # data points      = 2529
+    # variables        = 4
+    chi-square         = 490.657546
+    reduced chi-square = 0.19431982
+    Akaike info crit   = -4139.13721
+    Bayesian info crit = -4115.79489
+    R-squared          = 0.33942909
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99122001 +/- 4.6466e-04 (0.05%) (init = 1)
+    g1_amp:               0.07912644 +/- 0.00244050 (3.08%) (init = 0.1262497)
+    g1_cen:               4143.84088 +/- 0.03000589 (0.00%) (init = 4144)
+    g1_wid:               1.95533623 +/- 0.07332800 (3.75%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5259
+    C(continuum_intercept, g1_wid) = +0.2158
+    C(continuum_intercept, g1_amp) = +0.1387
+
+ravel_tutorial/synth_spectra/synthetic_SB1_02
+---------------------------------------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 31
+    # data points      = 2529
+    # variables        = 4
+    chi-square         = 496.798521
+    reduced chi-square = 0.19675189
+    Akaike info crit   = -4107.68118
+    Bayesian info crit = -4084.33886
+    R-squared          = 0.25141940
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99106590 +/- 4.6880e-04 (0.05%) (init = 1)
+    g1_amp:               0.06338310 +/- 0.00243907 (3.85%) (init = 0.1062869)
+    g1_cen:               4144.37700 +/- 0.03878316 (0.00%) (init = 4144)
+    g1_wid:               2.02594439 +/- 0.09448547 (4.66%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5244
+    C(continuum_intercept, g1_wid) = +0.2203
+    C(continuum_intercept, g1_amp) = +0.1387
+
+ravel_tutorial/synth_spectra/synthetic_SB1_03
+---------------------------------------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 46
+    # data points      = 2529
+    # variables        = 4
+    chi-square         = 494.714841
+    reduced chi-square = 0.19592667
+    Akaike info crit   = -4118.31065
+    Bayesian info crit = -4094.96834
+    R-squared          = 0.28722397
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99101533 +/- 4.6827e-04 (0.05%) (init = 1)
+    g1_amp:               0.06888703 +/- 0.00241171 (3.50%) (init = 0.1281651)
+    g1_cen:               4143.47600 +/- 0.03572238 (0.00%) (init = 4144)
+    g1_wid:               2.05678385 +/- 0.08719620 (4.24%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5237
+    C(continuum_intercept, g1_wid) = +0.2217
+    C(continuum_intercept, g1_amp) = +0.1409
+
+ravel_tutorial/synth_spectra/synthetic_SB1_04
+---------------------------------------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 38
+    # data points      = 2529
+    # variables        = 4
+    chi-square         = 519.292567
+    reduced chi-square = 0.20566042
+    Akaike info crit   = -3995.68977
+    Bayesian info crit = -3972.34745
+    R-squared          = 0.24181307
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99068707 +/- 4.7899e-04 (0.05%) (init = 1)
+    g1_amp:               0.06333161 +/- 0.00249386 (3.94%) (init = 0.1076591)
+    g1_cen:               4144.35325 +/- 0.03957870 (0.00%) (init = 4144)
+    g1_wid:               2.01996134 +/- 0.09652283 (4.78%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5249
+    C(continuum_intercept, g1_wid) = +0.2196
+    C(continuum_intercept, g1_amp) = +0.1385
+
+ravel_tutorial/synth_spectra/synthetic_SB1_05
+---------------------------------------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 31
+    # data points      = 2529
+    # variables        = 4
+    chi-square         = 502.461445
+    reduced chi-square = 0.19899463
+    Akaike info crit   = -4079.01659
+    Bayesian info crit = -4055.67427
+    R-squared          = 0.25417258
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99077285 +/- 4.6961e-04 (0.05%) (init = 1)
+    g1_amp:               0.06576021 +/- 0.00251294 (3.82%) (init = 0.1114355)
+    g1_cen:               4144.35781 +/- 0.03660574 (0.00%) (init = 4144)
+    g1_wid:               1.92729118 +/- 0.08912509 (4.62%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5269
+    C(continuum_intercept, g1_wid) = +0.2144
+    C(continuum_intercept, g1_amp) = +0.1353
+
+ravel_tutorial/synth_spectra/synthetic_SB1_06
+---------------------------------------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 31
+    # data points      = 2529
+    # variables        = 4
+    chi-square         = 490.755987
+    reduced chi-square = 0.19435881
+    Akaike info crit   = -4138.62987
+    Bayesian info crit = -4115.28755
+    R-squared          = 0.29674646
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99101849 +/- 4.6390e-04 (0.05%) (init = 1)
+    g1_amp:               0.07257883 +/- 0.00248726 (3.43%) (init = 0.1134467)
+    g1_cen:               4143.82157 +/- 0.03247388 (0.00%) (init = 4144)
+    g1_wid:               1.91138726 +/- 0.07928087 (4.15%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5282
+    C(continuum_intercept, g1_wid) = +0.2131
+    C(continuum_intercept, g1_amp) = +0.1356
+
+ravel_tutorial/synth_spectra/synthetic_SB1_07
+---------------------------------------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 36
+    # data points      = 2529
+    # variables        = 4
+    chi-square         = 497.384570
+    reduced chi-square = 0.19698399
+    Akaike info crit   = -4104.69960
+    Bayesian info crit = -4081.35728
+    R-squared          = 0.27904610
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99014714 +/- 4.6941e-04 (0.05%) (init = 1)
+    g1_amp:               0.06750981 +/- 0.00241076 (3.57%) (init = 0.1149934)
+    g1_cen:               4144.41267 +/- 0.03668681 (0.00%) (init = 4144)
+    g1_wid:               2.07213529 +/- 0.08961064 (4.32%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5234
+    C(continuum_intercept, g1_wid) = +0.2228
+    C(continuum_intercept, g1_amp) = +0.1411
+
+ravel_tutorial/synth_spectra/synthetic_SB1_08
+---------------------------------------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 35
+    # data points      = 2529
+    # variables        = 4
+    chi-square         = 510.678750
+    reduced chi-square = 0.20224901
+    Akaike info crit   = -4037.99162
+    Bayesian info crit = -4014.64931
+    R-squared          = 0.27900855
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99110853 +/- 4.7817e-04 (0.05%) (init = 1)
+    g1_amp:               0.06647000 +/- 0.00238841 (3.59%) (init = 0.1140352)
+    g1_cen:               4144.01173 +/- 0.03883232 (0.00%) (init = 4144)
+    g1_wid:               2.18922230 +/- 0.09518103 (4.35%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5216
+    C(continuum_intercept, g1_wid) = +0.2293
+    C(continuum_intercept, g1_amp) = +0.1451
+
+ravel_tutorial/synth_spectra/synthetic_SB1_09
+---------------------------------------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 42
+    # data points      = 2529
+    # variables        = 4
+    chi-square         = 467.073437
+    reduced chi-square = 0.18497958
+    Akaike info crit   = -4263.71556
+    Bayesian info crit = -4240.37324
+    R-squared          = 0.30110863
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99123517 +/- 4.5626e-04 (0.05%) (init = 1)
+    g1_amp:               0.06817469 +/- 0.00230781 (3.39%) (init = 0.1100701)
+    g1_cen:               4144.15303 +/- 0.03568775 (0.00%) (init = 4144)
+    g1_wid:               2.12340485 +/- 0.08715943 (4.10%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5214
+    C(continuum_intercept, g1_wid) = +0.2261
+    C(continuum_intercept, g1_amp) = +0.1432
+
+ravel_tutorial/synth_spectra/synthetic_SB1_10
+---------------------------------------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 35
+    # data points      = 2529
+    # variables        = 4
+    chi-square         = 481.927836
+    reduced chi-square = 0.19086251
+    Akaike info crit   = -4184.53791
+    Bayesian info crit = -4161.19560
+    R-squared          = 0.31301047
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99079223 +/- 4.5945e-04 (0.05%) (init = 1)
+    g1_amp:               0.07488574 +/- 0.00246366 (3.29%) (init = 0.1360509)
+    g1_cen:               4143.54977 +/- 0.03105240 (0.00%) (init = 4144)
+    g1_wid:               1.90254243 +/- 0.07589984 (3.99%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5286
+    C(continuum_intercept, g1_wid) = +0.2126
+    C(continuum_intercept, g1_amp) = +0.1355
+
+ravel_tutorial/synth_spectra/synthetic_SB1_11
+---------------------------------------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 37
+    # data points      = 2529
+    # variables        = 4
+    chi-square         = 497.433599
+    reduced chi-square = 0.19700341
+    Akaike info crit   = -4104.45032
+    Bayesian info crit = -4081.10800
+    R-squared          = 0.26630044
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99050501 +/- 4.6941e-04 (0.05%) (init = 1)
+    g1_amp:               0.06544803 +/- 0.00242612 (3.71%) (init = 0.1155274)
+    g1_cen:               4144.32810 +/- 0.03781902 (0.00%) (init = 4144)
+    g1_wid:               2.05938155 +/- 0.09223463 (4.48%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5232
+    C(continuum_intercept, g1_wid) = +0.2223
+    C(continuum_intercept, g1_amp) = +0.1404
+
+ravel_tutorial/synth_spectra/synthetic_SB1_12
+---------------------------------------------
+[[Model]]
+    (Model(gaussian, prefix='g1_') + Model(linear, prefix='continuum_'))
+[[Fit Statistics]]
+    # fitting method   = leastsq
+    # function evals   = 36
+    # data points      = 2529
+    # variables        = 4
+    chi-square         = 503.776481
+    reduced chi-square = 0.19951544
+    Akaike info crit   = -4072.40637
+    Bayesian info crit = -4049.06405
+    R-squared          = 0.26557590
+[[Variables]]
+    continuum_slope:      0 (fixed)
+    continuum_intercept:  0.99080675 +/- 4.7407e-04 (0.05%) (init = 1)
+    g1_amp:               0.06453960 +/- 0.00238800 (3.70%) (init = 0.1133759)
+    g1_cen:               4143.35355 +/- 0.03940413 (0.00%) (init = 4144)
+    g1_wid:               2.14784674 +/- 0.09630631 (4.48%) (init = 3)
+[[Correlations]] (unreported correlations are < 0.100)
+    C(g1_amp, g1_wid)              = -0.5217
+    C(continuum_intercept, g1_wid) = +0.2271
+    C(continuum_intercept, g1_amp) = +0.1436
+

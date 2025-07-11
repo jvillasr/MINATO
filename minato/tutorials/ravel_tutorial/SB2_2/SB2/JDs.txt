@@ -1,0 +1,12 @@
+synth_spectra/synthetic_case2_SB2_01	58064.91193631773
+synth_spectra/synthetic_case2_SB2_02	58070.03966321
+synth_spectra/synthetic_case2_SB2_03	58177.06613245756
+synth_spectra/synthetic_case2_SB2_04	58228.926794351915
+synth_spectra/synthetic_case2_SB2_05	58416.99220426279
+synth_spectra/synthetic_case2_SB2_06	58583.0296027732
+synth_spectra/synthetic_case2_SB2_07	58637.981639923084
+synth_spectra/synthetic_case2_SB2_08	58666.13039641224
+synth_spectra/synthetic_case2_SB2_09	58699.07521445375
+synth_spectra/synthetic_case2_SB2_10	58901.229114957554
+synth_spectra/synthetic_case2_SB2_11	58920.969085524346
+synth_spectra/synthetic_case2_SB2_12	58943.0848904566
