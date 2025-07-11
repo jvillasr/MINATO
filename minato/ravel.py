@@ -375,55 +375,64 @@ def read_spectra(filelist, path, file_type, instrument=None, SB2=False):
     tuple
         (wavelengths, fluxes, flux_errors, names, jds)
     """
-    wavelengths, fluxes, f_errors, names, jds = [], [], [], [], []
-    for spec in filelist:
-        if file_type in ['dat', 'txt', 'csv']:
-            names.append(spec.replace(f'.{file_type}', ''))
-            try:
-                # read everything as rows of strings
-                df = pd.read_csv(spec, header=None, sep=r'\s+', dtype=str)
-                # keep only rows where first column is numeric (drop header lines)
-                mask = pd.to_numeric(df.iloc[:, 0], errors='coerce').notnull()
-                df = df[mask].reset_index(drop=True).astype(float)
+    if file_type == 'dict':
+        # require these keys, or error out
+        required = ['wavelengths','fluxes','f_errors','names','jds']
+        missing = [k for k in required if k not in filelist]
+        if missing:
+            raise KeyError(f"read_spectra(dict): missing keys {missing}")
+        wavelengths = filelist['wavelengths']
+        fluxes      = filelist['fluxes']
+        f_errors    = filelist['f_errors']
+        names       = filelist['names']
+        jds         = filelist['jds']
+    else:
+        # Text and FITS files are processed one-by-one
+        wavelengths, fluxes, f_errors, names, jds = [], [], [], [], []
+        for spec in filelist:
+            if file_type in ['dat', 'txt', 'csv']:
+                names.append(spec.replace(f'.{file_type}', ''))
+                try:
+                    # read everything as rows of strings
+                    df = pd.read_csv(spec, header=None, sep=r'\s+', dtype=str)
+                    # keep only rows where first column is numeric (drop header lines)
+                    mask = pd.to_numeric(df.iloc[:, 0], errors='coerce').notnull()
+                    df = df[mask].reset_index(drop=True).astype(float)
 
-                # If the file has fewer than 2 columns, try alternative separators.
-                if df.shape[1] < 2:
-                    for separator in [',', ';', '\t', '|']:
-                        try:
-                            temp_df = pd.read_csv(spec, sep=separator, header=None)
-                            if temp_df.shape[1] >= 2:
-                                df = temp_df
-                                break
-                        except Exception:
-                            continue
-            except Exception as e:
-                print(f"Error reading file {spec}: {e}")
-                continue
+                    # If the file has fewer than 2 columns, try alternative separators.
+                    if df.shape[1] < 2:
+                        for separator in [',', ';', '\t', '|']:
+                            try:
+                                temp_df = pd.read_csv(spec, sep=separator, header=None)
+                                if temp_df.shape[1] >= 2:
+                                    df = temp_df
+                                    break
+                            except Exception:
+                                continue
+                except Exception as e:
+                    print(f"Error reading file {spec}: {e}")
+                    continue
 
-            wavelengths.append(np.array(df[0]))
-            fluxes.append(np.array(df[1]))
-            if df.shape[1] >= 3:
-                f_errors.append(np.array(df[2]))
-            else:
-                f_errors.append(compute_flux_err(df[0], df[1]))
-        elif file_type == 'fits':
-            if instrument is None:
-                raise ValueError(
-                    "Instrument must be provided when reading FITS files. "
-                    "Currently supported instruments: 'FLAMES', 'FEROS'."
-                )
-            wave, flux, ferr, star, mjd = read_fits(spec, instrument)
-            wavelengths.append(wave)
-            fluxes.append(flux)
-            f_errors.append(ferr)
-            names.append(star)
-            jds.append(mjd)
-        elif file_type == 'dict':
-            wavelengths = filelist['wavelengths']
-            fluxes = filelist['fluxes']
-            f_errors = filelist['f_errors']
-            names = filelist['names']
-            jds = filelist['jds']
+                wavelengths.append(np.array(df[0]))
+                fluxes.append(np.array(df[1]))
+                if df.shape[1] >= 3:
+                    f_errors.append(np.array(df[2]))
+                else:
+                    f_errors.append(compute_flux_err(df[0], df[1]))
+
+            elif file_type == 'fits':
+                if instrument is None:
+                    raise ValueError(
+                        "Instrument must be provided when reading FITS files. "
+                        "Currently supported instruments: 'FLAMES', 'FEROS'."
+                    )
+                wave, flux, ferr, star, mjd = read_fits(spec, instrument)
+                wavelengths.append(wave)
+                fluxes.append(flux)
+                f_errors.append(ferr)
+                names.append(star)
+                jds.append(mjd)
+
     if file_type in ['dat', 'txt', 'csv']:
         # Check if JDs.txt file with observation times exists:
         try:
