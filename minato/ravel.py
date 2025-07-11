@@ -454,7 +454,7 @@ def setup_star_directory_and_save_jds(names, jds, path, SB2):
 
     Parameters:
     names : list
-        List of star names, formatted as 'STAR_EPOCH'.
+        List of star names.
     jds : list
         List of Julian Dates for each observation.
     path : str
@@ -467,19 +467,19 @@ def setup_star_directory_and_save_jds(names, jds, path, SB2):
         The final directory path used for saving the data.
     """
     try:
-        base_name = names[0].split('_')
-        star = base_name[0] + '_' + base_name[1] + '/'
+        basename = names[0].split('.')[0]  
+        star = basename + '/'
     except IndexError:
         star = 'Unknown_Star/'
-    path = path.replace('FITS/', '')
+    star_path = os.path.join(path, star)
     if SB2:
-        path = os.path.join(path, 'SB2/')
-    if not os.path.exists(path):
-        os.makedirs(path)
+        star_path = os.path.join(star_path, 'SB2/')
+    if not os.path.exists(star_path):
+        os.makedirs(star_path)
     if any(jds):
         df_mjd = pd.DataFrame({'epoch': names, 'JD': jds})
-        df_mjd.to_csv(os.path.join(path, 'JDs.txt'), index=False, header=False, sep='\t')
-    return path
+        df_mjd.to_csv(os.path.join(star_path, 'JDs.txt'), index=False, header=False, sep='\t')
+    return star_path
 
 def setup_line_dictionary():
     """
