@@ -1438,43 +1438,124 @@ class GetRVs:
         print('lines from SLfit results:', self.lines)
         self.nepochs = len(self.df_SLfit) // len(self.lines)
 
-    def outlier_killer(self, data, thresh=2, print_output=None):
+    # def outlier_killer(self, data, thresh=2, print_output=None):
+    #     """
+    #     Identify inliers and outliers from a data array using a MAD-based test.
+        
+    #     Parameters:
+    #         data (array-like): Numerical data to test.
+    #         thresh (float): Threshold multiplier for the MAD.
+    #         print_output (bool or None): Whether to print details (default uses self.print_output).
+        
+    #     Returns:
+    #         tuple: (inliers, outliers) where both are lists of indices.
+    #     """
+    #     if print_output is None:
+    #         print_output = self.print_output
+    #     diff = data - np.nanmedian(data)
+    #     # Output debug information to file and/or console
+    #     with open(self.path + 'rv_stats.txt', 'a') as f:
+    #         if print_output:
+    #             print('     mean(x)        =', f'{np.nanmean(data):.3f}')
+    #             print('     mean(x)        =', f'{np.nanmean(data):.3f}', file=f)
+    #             print('     median(x)      =', f'{np.nanmedian(data):.3f}')
+    #             print('     median(x)      =', f'{np.nanmedian(data):.3f}', file=f)
+    #             print('     x-median(x)    =', [f'{x:.3f}' for x in diff])
+    #             print('     x-median(x)    =', [f'{x:.3f}' for x in diff], file=f)
+    #             print('     abs(x-median(x)) =', [f'{abs(x):.3f}' for x in diff])
+    #             print('     abs(x-median(x)) =', [f'{abs(x):.3f}' for x in diff], file=f)
+    #         mad = 1.4826 * np.nanmedian(np.abs(diff))
+    #         if print_output:
+    #             print('     mad =', f'{mad:.3f}')
+    #             print('     mad =', f'{mad:.3f}', file=f)
+    #             print('     abs(x-median(x)) <', f'{thresh * mad:.3f}', '(thresh*mad) =',
+    #                   [abs(x) < thresh * mad for x in diff])
+    #             print('     abs(x-median(x)) <', f'{thresh * mad:.3f}', '(thresh*mad) =',
+    #                   [abs(x) < thresh * mad for x in diff], file=f)
+    #     inliers = [i for i, x in enumerate(data) if abs(x - np.nanmedian(data)) < thresh * mad]
+    #     outliers = [i for i in range(len(data)) if i not in inliers]
+    #     return inliers, outliers
+
+    def outlier_killer(self, data, thresh=2, max_iter=5, print_output=None):
         """
-        Identify inliers and outliers from a data array using a MAD-based test.
-        
-        Parameters:
-            data (array-like): Numerical data to test.
-            thresh (float): Threshold multiplier for the MAD.
-            print_output (bool or None): Whether to print details (default uses self.print_output).
-        
-        Returns:
-            tuple: (inliers, outliers) where both are lists of indices.
+        Iterative MAD-based clipper with diagnostics.
+
+        Parameters
+        ----------
+        data : array-like
+            1-D numeric input (NaNs are ignored automatically).
+        thresh : float
+            Clipping level in units of MAD.  Typical = 2–3.
+        max_iter : int
+            Maximum number of clipping rounds (safety valve).
+        print_output : bool or None
+            Verbose output flag.  If None, falls back to self.print_output.
+
+        Returns
+        -------
+        inliers, outliers : list[int]
+            Index lists referring to *data*.
         """
         if print_output is None:
-            print_output = self.print_output
-        diff = data - np.nanmedian(data)
-        # Output debug information to file and/or console
-        with open(self.path + 'rv_stats.txt', 'a') as f:
-            if print_output:
-                print('     mean(x)        =', f'{np.nanmean(data):.3f}')
-                print('     mean(x)        =', f'{np.nanmean(data):.3f}', file=f)
-                print('     median(x)      =', f'{np.nanmedian(data):.3f}')
-                print('     median(x)      =', f'{np.nanmedian(data):.3f}', file=f)
-                print('     x-median(x)    =', [f'{x:.3f}' for x in diff])
-                print('     x-median(x)    =', [f'{x:.3f}' for x in diff], file=f)
-                print('     abs(x-median(x)) =', [f'{abs(x):.3f}' for x in diff])
-                print('     abs(x-median(x)) =', [f'{abs(x):.3f}' for x in diff], file=f)
-            mad = 1.4826 * np.nanmedian(np.abs(diff))
-            if print_output:
-                print('     mad =', f'{mad:.3f}')
-                print('     mad =', f'{mad:.3f}', file=f)
-                print('     abs(x-median(x)) <', f'{thresh * mad:.3f}', '(thresh*mad) =',
-                      [abs(x) < thresh * mad for x in diff])
-                print('     abs(x-median(x)) <', f'{thresh * mad:.3f}', '(thresh*mad) =',
-                      [abs(x) < thresh * mad for x in diff], file=f)
-        inliers = [i for i, x in enumerate(data) if abs(x - np.nanmedian(data)) < thresh * mad]
-        outliers = [i for i in range(len(data)) if i not in inliers]
-        return inliers, outliers
+            print_output = getattr(self, "print_output", False)
+
+        data = np.asarray(data, dtype=float)
+        idx_all = np.arange(data.size)       # master index tracker
+        mask    = np.isfinite(data)          # start by discarding NaNs
+        out_tot = []                         # store every removed index
+
+        # ---------------------------------------------------------------------
+        # open the diagnostics file once; append everything that follows
+        # ---------------------------------------------------------------------
+        diag_path = os.path.join(self.path, "rv_stats.txt")
+        with open(diag_path, "a") as log:
+
+            def _writeln(*args, **kwargs):
+                """Helper: write both to console and file when print_output is on."""
+                if print_output:
+                    print(*args, **kwargs)
+                    print(*args, **kwargs, file=log)
+
+            _writeln("\n=== outlier_killer call ===============================")
+            _writeln(f"input data: {[round(x,3) for x in data]}")
+            _writeln(f"threshold  : {thresh} MAD   (max_iter = {max_iter})")
+
+            for it in range(1, max_iter + 1):
+                work = data[mask]
+                if work.size == 0:
+                    break
+
+                med = np.nanmedian(work)
+                mad = 1.4826 * np.nanmedian(np.abs(work - med))
+
+                _writeln(f"\n-- iteration {it} --")
+                _writeln(f"   n (working)      = {work.size}")
+                _writeln(f"   median           = {med:.3f}")
+                _writeln(f"   MAD              = {mad:.3f}")
+
+                if mad == 0:                       # all remaining points identical
+                    _writeln("   MAD == 0 → stop.")
+                    break
+
+                z = np.abs((work - med) / mad)
+                bad_local = np.where(z > thresh)[0]             # indices in *work*
+                if bad_local.size == 0:
+                    _writeln("   no points exceed threshold → finished.")
+                    break
+
+                bad_global = idx_all[mask][bad_local]           # map to original
+                _writeln(f"   removing indices {bad_global.tolist()}  "
+                        f"(|z| = {z[bad_local].round(2).tolist()})")
+
+                mask[bad_global] = False          # mark as outlier
+                out_tot.extend(bad_global.tolist())
+
+            # summary
+            _writeln("\n   ==> kept indices   :", idx_all[mask].tolist())
+            _writeln("   ==> clipped indices :", out_tot)
+            _writeln("========================================================\n")
+
+        return idx_all[mask].tolist(), out_tot
 
     @staticmethod
     def weighted_mean(data, errors):
