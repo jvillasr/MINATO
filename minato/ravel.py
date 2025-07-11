@@ -2068,7 +2068,8 @@ def run_LS(hjd, rv, rv_err=None, probabilities=[0.5, 0.01, 0.001], method='boots
     fap = ls.false_alarm_probability(power.max(), method=method)
     return frequency, power, fap, fal
 
-def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=False, Pfold=True, fold_rv_curve=True):
+def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=False, Pfold=True, fold_rv_curve=True, 
+                 save_power_spectrum=False):
     """
     Perform Lomb–Scargle period analysis on a DataFrame of radial velocities.
     
@@ -2085,6 +2086,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
         best_lines (bool, optional): (Reserved) Whether to use best-lines selection (default is False).
         Pfold (bool, optional): If True, perform RV curve folding (default is True).
         fold_rv_curve (bool, optional): If True, compute phase-folded RV curves (default is True).
+        save_power_spectrum (bool, optional): If True, save the power spectrum data to a file (default is False).
     
     Returns:
         dict: A dictionary (`ls_results`) containing periodogram outputs, including frequency grid,
@@ -2420,10 +2422,11 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
         plt.savefig(f'{path}LS/LS_{starname}_frequency.pdf')
         plt.close()
 
-        # Stack the arrays in columns
-        pow_spec = np.column_stack((frequency1, power1))
-        # Save the data to a text file
-        np.savetxt(path+'LS/power_spectrum.txt', pow_spec)
+        if save_power_spectrum:
+            # Stack the arrays in columns
+            pow_spec = np.column_stack((frequency1, power1))
+            # Save the data to a text file
+            np.savetxt(path+'LS/power_spectrum.txt', pow_spec)
     
     #################################################################
     #               Compute phases of the observations
