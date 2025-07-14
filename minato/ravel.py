@@ -978,8 +978,10 @@ def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):
     good = np.isfinite(ferr_sub) & (ferr_sub > 0) & np.isfinite(y_flux)
 
     if not good.any():
-        raise ValueError(f"No valid pixels left for line {line}")
-
+        # raise ValueError(f"No valid pixels left for line {line}")
+        print(f"Warning: No valid pixels left for line {line}. Skipping this line.")
+        return None, None, None, None
+    
     x_wave, y_flux, ferr_sub = x_wave[good], y_flux[good], ferr_sub[good]
 
     # Initial guesses for central wavelength and width
@@ -1185,6 +1187,8 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
                 for j, (wave, flux, ferr, name, ax) in enumerate(zip(wavelengths, fluxes, f_errors, names, axes)):
                     result, x_wave, y_flux, wave_region = fit_sb1(line, wave, flux, ferr, lines_dic,
                                                                    Hlines, neblines, doubem, shift=init_guess_shift)
+                    if result is None:
+                        continue  # Skip this line if no valid pixels
                     results[i].append(result)
                     chisqr[i].append(result.chisqr)
                     
