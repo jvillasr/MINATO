@@ -557,14 +557,14 @@ def setup_fits_plots(wavelengths):
     tuple
         (fig, axes) matplotlib Figure and array of Axes objects.
     """
-    print('Setting up spectral-lines fit plots...')
+    # print('Setting up spectral-lines fit plots...')
     nplots = len(wavelengths)
     ncols = int(np.sqrt(nplots))
     nrows = nplots // ncols
     if ncols * nrows < nplots:
         nrows += 1
-    print('  Number of columns:', ncols)
-    print('  Number of rows:', nrows)
+    # print('  Number of columns:', ncols)
+    # print('  Number of rows:', nrows)
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(4 * ncols/1.2, 3 * nrows/1.2), sharey=True, sharex=True)
     fig.subplots_adjust(
         wspace=0.,   # No horizontal space between subplots
