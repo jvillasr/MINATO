@@ -484,6 +484,68 @@ def setup_star_directory_and_save_jds(names, jds, path, SB2):
 def setup_line_dictionary():
     """
     Create a dictionary of spectral lines, including regions and initial fitting parameters.
+
+    * All values under the 'centre' key are Ritz vacuum wavelengths (Å) taken from the
+      NIST Atomic Spectra Database (ASD).
+    * The 'air' key gives the corresponding air wavelengths (Å) converted with the
+      Edlén (1966) refractive index of standard air.
+    * For the He I blends at 4026 Å, 4121 Å, 4471 Å and 4713 Å the listed vacuum and air
+      wavelengths are Aₖᵢ-weighted centroids of the unresolved fine-structure components
+      (weights from the Einstein-A coefficients tabulated in NIST).  Uncertainties reflect
+      the scatter among those components (4-5 x 10-5 Å); the intrinsic Ritz uncertainties
+      are <= 5 x 10-6 Å and thus negligible here.
+    * He II wavelengths computed from the NIST He II “Levels” table (dataset L3620c107, level 
+      uncertainties included). Fine-structure doublets were J-averaged with statistical weights. 
+      Vacuum→air conversion via Edlén (1966).
+
+    Returns
+    -------
+    dict
+        A dictionary mapping spectral-line identifiers to their respective properties.
+    """
+    lines_dic = {
+        # --- Balmer centres of gravity (NIST) --------------------------------
+        4102: {  # Hδ
+            'region': [4080, 4122], 'centre': [4102.8991, 0.0024], 'air': [4101.7414, 0.0024], 'wid_ini': 6, 'title': 'H$\delta$'},
+        4340: {  # Hγ
+            'region': [4316, 4366], 'centre': [4341.691, 0.003],   'air': [4340.471, 0.003],   'wid_ini': 7, 'title': 'H$\gamma$'},
+        4861: {  # Hβ
+            'region': [4836, 4871], 'centre': [4862.691, 0.003],   'air': [4861.333, 0.003],   'wid_ini': 6, 'title': 'H$\beta$'},
+        6562: {  # Hα
+            'region': [6538, 6579], 'centre': [6564.632, 0.007],   'air': [6562.819, 0.007],   'wid_ini': 6, 'title': 'H$\alpha$'
+        },
+        # --- He I lines ------------------------------------------------
+        4009: { 'region': [4001, 4014], 'centre': [4010.3899037, 0.0000011], 'air': [4009.256516, 0.000020], 'wid_ini': 3, 'title': 'He I $\lambda$4009'},
+        4026: { 'region': [4013, 4039], 'centre': [4027.36003, 0.00004],     'air': [4026.22221, 0.00004],   'wid_ini': 3, 'title': 'He I $\lambda$4026'},
+        4121: { 'region': [4114, 4126], 'centre': [4121.99776, 0.00002],     'air': [4120.83518, 0.00002],   'wid_ini': 3, 'title': 'He I $\lambda$4121'},
+        4144: { 'region': [4131, 4166], 'centre': [4144.9276502, 0.0000012], 'air': [4143.761, 0.010],       'wid_ini': 3, 'title': 'He I $\lambda$4144'},
+        4388: { 'region': [4373, 4403], 'centre': [4389.1619053, 0.0000013], 'air': [4387.9296, 0.0006],     'wid_ini': 3, 'title': 'He I $\lambda$4388'},
+        4471: { 'region': [4454, 4487], 'centre': [4472.77309, 0.00003],     'air': [4471.51829, 0.00003],   'wid_ini': 3, 'title': 'He I $\lambda$4471'},
+        4713: { 'region': [4697, 4728], 'centre': [4714.48979, 0.00005],     'air': [4713.17111, 0.00005],   'wid_ini': 3, 'title': 'He I $\lambda$4713'},
+        4922: { 'region': [4911, 4933], 'centre': [4923.3050740, 0.0000017], 'air': [4921.931036, 0.000025], 'wid_ini': 3, 'title': 'He I $\lambda$4922'},
+        5876: { 'region': [5863, 5889], 'centre': [5877.31599825, 0.0000007],'air': [5875.687499, 0.000030], 'wid_ini': 3, 'title': 'He I $\lambda$5876'},
+        6678: { 'region': [6658, 6698], 'centre': [6679.995639, 0.000003],   'air': [6678.15174, 0.00003],   'wid_ini': 3, 'title': 'He I $\lambda$6678'},
+        # --- He II lines ------------------------------------------------
+        4542: { 'region': [4533, 4551], 'centre': [4542.912549, 0.000132], 'air': [4541.63924, 0.000132],    'wid_ini': 3, 'title': 'He II $\lambda$4542'},
+        4686: { 'region': [4672, 4700], 'centre': [4687.015247, 0.000091], 'air': [4685.70384 , 0.000091],   'wid_ini': 4, 'title': 'He II $\lambda$4686'},
+        5412: { 'region': [5401, 5415], 'centre': [5413.083151, 0.000262], 'air': [5411.57874 , 0.000262],   'wid_ini': 4, 'title': 'He II $\lambda$5412'},
+        # --- Other lines ------------------------------------------------
+        3995: { 'region': [3986, 4001], 'centre': None,                                 'wid_ini': 2, 'title': 'N II $\lambda$3995'},
+        4089: { 'region': [4075, 4095], 'centre': [4090.016, 0.1],   'air':   [4088.862, 0.10], 'wid_ini': 2, 'title': 'Si IV $\lambda$4089'},
+        4128: { 'region': [4120, 4132], 'centre': [4129.218, 0.003], 'air': [4128.054, 0.003],            'wid_ini': 2, 'title': 'Si II $\lambda$4128'},
+        4131: { 'region': [4124, 4136], 'centre': [4132.059, 0.003], 'air': [4130.894, 0.003],            'wid_ini': 2, 'title': 'Si II $\lambda$4131'},
+        4233: { 'region': [4225, 4237], 'centre': [], 'air': None,                       'wid_ini': 2, 'title': 'Fe II $\lambda$4233'},
+        4267: { 'region': [4259, 4271], 'centre': [], 'air': [4267.258, 0.007],          'wid_ini': 2, 'title': 'C II $\lambda$4267'},
+        4481: { 'region': [4474, 4486], 'centre': [4482.4766, 0.0003], 'air': [4481.2192, 0.003],          'wid_ini': 2, 'title': 'Mg II $\lambda$4481'},
+        4553: { 'region': [4543, 4558], 'centre': [4553.898, 0.001], 'air': [4552.622, 0.001], 'wid_ini': 3, 'title': 'Si III $\lambda$4553'},
+        5890: { 'region': [5875, 5905], 'centre': [], 'air': [5889.951, 0.00003],        'wid_ini': 3, 'title': 'Na I $\lambda$5890'},
+        7774: { 'region': [7758, 7782], 'centre': [], 'air': [7774.17, 0.10],            'wid_ini': 3, 'title': 'O I $\lambda$7774'}
+    }
+    return lines_dic
+
+def deprecated_setup_line_dictionary():
+    """
+    Create a dictionary of spectral lines, including regions and initial fitting parameters.
     Lines centroids are given in vacuum wavelengths (Angstroms). Alternative, the 'air' key  provides air wavelengths. 
 
     Returns:
@@ -494,28 +556,28 @@ def setup_line_dictionary():
         3995: { 'region': [3986, 4001], 'centre': None, 'wid_ini': 2, 'title': 'N II $\lambda$3995'},
         4009: { 'region': [4001, 4014], 'centre': [4010.3899037, 0.0000011], 'air': [4009.256516, 0.000020], 'wid_ini': 3, 'title': 'He I $\lambda$4009'},
         4026: { 'region': [4013, 4039], 'centre': [4027.3238176, 0.0000003], 'air': [4026.184368, 0.000020], 'wid_ini': 3, 'title': 'He I $\lambda$4026'},
-        4089: { 'region': [4075, 4095], 'centre': [4090.016, 0.1], 'air': [4088.862, 0.10], 'wid_ini': 2, 'title': 'Si IV $\lambda$4089'},
+        4089: { 'region': [4075, 4095], 'centre': [4090.016, 0.1], 'air': [4088.862, 0.10],              'wid_ini': 2, 'title': 'Si IV $\lambda$4089'},
         4102: { 'region': [4080, 4122], 'centre': [4102.92068748, 0.00000008], 'air': [4101.734, 0.006], 'wid_ini': 6, 'title': 'H$\delta$'},
         4121: { 'region': [4114, 4126], 'centre': [4121.9733416, 0.0000017], 'air': [4120.8154, 0.0012], 'wid_ini': 3, 'title': 'He I $\lambda$4121'},
-        4128: { 'region': [4120, 4132], 'centre': [], 'air': [4128.07, 0.10], 'wid_ini': 2, 'title': 'Si II $\lambda$4128'},
-        4131: { 'region': [4124, 4136], 'centre': [], 'air': [4130.89, 0.10], 'wid_ini': 2, 'title': 'Si II $\lambda$4131'},
-        4144: { 'region': [4131, 4166], 'centre': [4144.9276502, 0.0000012], 'air': [4143.761, 0.010], 'wid_ini': 3, 'title': 'He I $\lambda$4144'},
-        4233: { 'region': [4225, 4237], 'centre': [], 'air': None, 'wid_ini': 2, 'title': 'Fe II $\lambda$4233'},
-        4267: { 'region': [4259, 4271], 'centre': [], 'air': [4267.258, 0.007], 'wid_ini': 2, 'title': 'C II $\lambda$4267'},
-        4340: { 'region': [4316, 4366], 'centre': [4341.714690, 0.000004], 'air': [4340.472, 0.006], 'wid_ini': 7, 'title': 'H$\gamma$'},
+        4128: { 'region': [4120, 4132], 'centre': [], 'air': [4128.07, 0.10],                            'wid_ini': 2, 'title': 'Si II $\lambda$4128'},
+        4131: { 'region': [4124, 4136], 'centre': [], 'air': [4130.89, 0.10],                            'wid_ini': 2, 'title': 'Si II $\lambda$4131'},
+        4144: { 'region': [4131, 4166], 'centre': [4144.9276502, 0.0000012], 'air': [4143.761, 0.010],   'wid_ini': 3, 'title': 'He I $\lambda$4144'},
+        4233: { 'region': [4225, 4237], 'centre': [], 'air': None,                                       'wid_ini': 2, 'title': 'Fe II $\lambda$4233'},
+        4267: { 'region': [4259, 4271], 'centre': [], 'air': [4267.258, 0.007],                          'wid_ini': 2, 'title': 'C II $\lambda$4267'},
+        4340: { 'region': [4316, 4366], 'centre': [4341.714690, 0.000004], 'air': [4340.472, 0.006],     'wid_ini': 7, 'title': 'H$\gamma$'},
         4388: { 'region': [4373, 4403], 'centre': [4389.1619053, 0.0000013], 'air': [4387.9296, 0.0006], 'wid_ini': 3, 'title': 'He I $\lambda$4388'},
         4471: { 'region': [4454, 4487], 'centre': [4472.7291049, 0.0000004], 'air': [4471.4802, 0.0015], 'wid_ini': 3, 'title': 'He I $\lambda$4471'},
-        4481: { 'region': [4474, 4486], 'centre': [], 'air': [4481.130, 0.010], 'wid_ini': 2, 'title': 'Mg II $\lambda$4481'},
-        4542: { 'region': [4533, 4551], 'centre': [], 'air': [4541.591, 0.010], 'wid_ini': 3, 'title': 'He II $\lambda$4542'},
-        4553: { 'region': [4543, 4558], 'centre': [4553.898, 0.1], 'air': [4552.62, 0.10], 'wid_ini': 3, 'title': 'Si III $\lambda$4553'},
-        4861: { 'region': [4836, 4871], 'centre': [], 'air': [4861.35, 0.05], 'wid_ini': 5, 'title': 'H$\beta$'},
+        4481: { 'region': [4474, 4486], 'centre': [], 'air': [4481.130, 0.010],                          'wid_ini': 2, 'title': 'Mg II $\lambda$4481'},
+        4542: { 'region': [4533, 4551], 'centre': [], 'air': [4541.591, 0.010],                          'wid_ini': 3, 'title': 'He II $\lambda$4542'},
+        4553: { 'region': [4543, 4558], 'centre': [4553.898, 0.1], 'air': [4552.62, 0.10],               'wid_ini': 3, 'title': 'Si III $\lambda$4553'},
+        4861: { 'region': [4836, 4871], 'centre': [], 'air': [4861.35, 0.05],     'wid_ini': 5, 'title': 'H$\beta$'},
         4922: { 'region': [4911, 4933], 'centre': [], 'air': [4921.9313, 0.0005], 'wid_ini': 4, 'title': 'He I $\lambda$4922'},
-        5412: { 'region': [5401, 5415], 'centre': [], 'air': [5411.52, 0.10], 'wid_ini': 4, 'title': 'He II $\lambda$5412'},
-        5876: { 'region': [5863, 5889], 'centre': [], 'air': [5875.621, 0.010], 'wid_ini': 4, 'title': 'He I $\lambda$5876'},
+        5412: { 'region': [5401, 5415], 'centre': [], 'air': [5411.52, 0.10],     'wid_ini': 4, 'title': 'He II $\lambda$5412'},
+        5876: { 'region': [5863, 5889], 'centre': [], 'air': [5875.621, 0.010],   'wid_ini': 4, 'title': 'He I $\lambda$5876'},
         5890: { 'region': [5875, 5905], 'centre': [], 'air': [5889.951, 0.00003], 'wid_ini': 3, 'title': 'Na I $\lambda$5890'},
-        6562: { 'region': [6538, 6579], 'centre': [], 'air': [6562.79, 0.030], 'wid_ini': 6, 'title': 'H$\alpha$'},
-        6678: { 'region': [6658, 6698], 'centre': [], 'air': [6678.151, 0.010], 'wid_ini': 4, 'title': 'He I $\lambda$6678'},
-        7774: { 'region': [7758, 7782], 'centre': [], 'air': [7774.17, 0.10], 'wid_ini': 3, 'title': 'O I $\lambda$7774'}
+        6562: { 'region': [6538, 6579], 'centre': [], 'air': [6562.79, 0.030],    'wid_ini': 6, 'title': 'H$\alpha$'},
+        6678: { 'region': [6658, 6698], 'centre': [], 'air': [6678.151, 0.010],   'wid_ini': 4, 'title': 'He I $\lambda$6678'},
+        7774: { 'region': [7758, 7782], 'centre': [], 'air': [7774.17, 0.10],     'wid_ini': 3, 'title': 'O I $\lambda$7774'}
     }
     return lines_dic
 
