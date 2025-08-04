@@ -30,6 +30,7 @@ from exojax.special.faddeeva import rewofz
 print(f"JAX 64-bit enabled: {jax.config.jax_enable_x64}") # Verify
 # Set the number of devices to the number of available CPUs
 npro.set_host_device_count(multiprocessing.cpu_count())
+import corner
 
 pd.set_option('display.max_rows', 1000)
 pd.set_option('display.max_columns', 1000)
@@ -1094,7 +1095,7 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile):
 
 def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', instrument='FLAMES',
           plots=True, balmer=True, neblines=[], doubem=[], SB2=False, init_guess_shift=0,
-          shift_kms=0, use_init_pars=False, rm_epochs=None):
+          shift_kms=0, use_init_pars=False, rm_epochs=None, cornerplot=True):
     """
     Perform spectral line fitting on a list of spectra. This function reads the spectral data, sets up
     the output directory, initializes line dictionaries and fit variables, and then fits each spectral
@@ -1171,6 +1172,44 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
             # SB2 fitting: fit all lines using the probabilistic SB2 model and write results to CSV
             result, x_wave, y_flux = fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic,
                                                       Hlines, neblines, out_path, K=K, shift_kms=shift_kms, rm_epochs=rm_epochs)
+
+            # Optional cornerplot
+            if cornerplot:
+                try:
+                    params = ['logσ_ε', 'ε', 'wid1']
+                    samples_list = []
+                    for p in params:
+                        if p in result:
+                            arr = result[p]
+                            if arr.ndim > 1:
+                                arr = arr.reshape(arr.shape[0], -1).mean(axis=1) 
+                            samples_list.append(arr)
+
+                    dv_array = result['Δv_τk'] # For plotting fit of each component velocity in each epoch
+                    n_samples, K, _, n_epochs = dv_array.shape
+                    for k in range(K):
+                        for t in range(n_epochs):
+                            param_name = f"Δv_{k}_{t}"
+                            param_values = dv_array[:, k, 0, t]
+                            samples_list.append(param_values)
+                            params.append(param_name)
+
+                    samples = np.vstack(samples_list).T
+
+                    fig = corner.corner(samples, labels=params, show_titles=True)
+                    fig.savefig(os.path.join(out_path, "corner_plot.png"))
+                    plt.close()
+
+                    samples_dict = {
+                        'rv1': dv_array[:, 0, 0, :],  # (n_samples, n_epochs)
+                        'rv2': dv_array[:, 1, 0, :]
+                    }
+                    plot_pair_scatter(samples_dict, savepath=out_path)
+                    plot_sign_trace(samples_dict, savepath=out_path)
+
+                except Exception as e:
+                    print("Corner plot could not be generated:", str(e))
+
             writer = mcmc_results_to_file(result, names, jds, writer, csvfile)
             
             # (Optional plotting of SB2 fits is handled within fit_sb2_probmod and plot_lines_fit)
