@@ -1198,7 +1198,7 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
     print('*** SB2 set to:', SB2, '***\n')
 
     # Read in spectral data from the provided file list and data path
-    wavelengths, fluxes, f_errors, names, jds = read_spectra(spectra_list, save_path, file_type, instrument=instrument, SB2=SB2)
+    wavelengths, fluxes, f_errors, names, jds = read_spectra(spectra_list, data_path, file_type, instrument=instrument, SB2=SB2)
     # print('names:', names)
     
     # Setup the output directory and save the JD information if available
