@@ -437,9 +437,9 @@ def read_spectra(filelist, path, file_type, instrument=None, SB2=False):
         # Check if JDs.txt file with observation times exists:
         try:
             # print(f"Looking for JDs.txt file in {path}...")
-            if SB2==True:
-                path = path+'SB2/'
-            with open(path + 'JDs.txt', 'r') as f:
+            # if SB2==True:
+            #     path = path+'SB2/'
+            with open(os.path.join(path, 'JDs.txt'), 'r') as f:
                 df_jds = pd.read_csv(f, header=None, sep=r'\s+', dtype=str)
                 jds = df_jds[1].tolist()
         except FileNotFoundError:
@@ -472,8 +472,8 @@ def setup_star_directory_and_save_jds(names, jds, path, SB2):
     except IndexError:
         star = 'Unknown_Star/'
     star_path = os.path.join(path, star)
-    if SB2:
-        star_path = os.path.join(star_path, 'SB2/')
+    # if SB2:
+    #    star_path = os.path.join(star_path, 'SB2/')
     if not os.path.exists(star_path):
         os.makedirs(star_path)
     if any(jds):
@@ -806,7 +806,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         # Compute the model profiles for each component
         gaussian_profile = gaussian(λ_expanded, amp, μ, wid)
         lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
-        voigt_profile = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
+        voigt_profile = pseudo_voigt(λ_expanded, amp, cornerplot=True, μ, wid_G, wid_L)
         # Use Lorentzian for Hydrogen lines, Gaussian otherwise:
         comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
         # comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
