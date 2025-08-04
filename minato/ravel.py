@@ -885,7 +885,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # ------------------------
     # MCMC Sampling Procedure
     # ------------------------
-    comp_sep = 500.
+    comp_sep = 200.
     Δv_means = jnp.array([shift_kms - comp_sep/2, shift_kms + comp_sep/2]).reshape(K, 1, 1)
     print(f"\nFitting with Δv_means: {Δv_means}")
 
