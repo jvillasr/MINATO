@@ -807,7 +807,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         # Compute the model profiles for each component
         gaussian_profile = gaussian(λ_expanded, amp, μ, wid)
         lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
-        voigt_profile = pseudo_voigt(λ_expanded, amp, cornerplot=True, μ, wid_G, wid_L)
+        voigt_profile = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
         # Use Lorentzian for Hydrogen lines, Gaussian otherwise:
         comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
         # comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
@@ -2803,3 +2803,51 @@ def phase_rv_curve(time, rv1, rv1_er=None, rv2=None, rv2_er=None, period=None, p
     else:
         result = fit_sinusoidal_probmod(phase_expanded, rv1_expanded, rv1_err_expanded)
         return result, phase_expanded, rv1_expanded, rv1_err_expanded
+
+def plot_pair_scatter(samples, savepath=None):
+    """ Diagnostic for bimodal posterior
+        Plots each RV1 vs. RV2 from each trace for each epoch of MCMC result.
+    """
+    rv1, rv2 = samples['rv1'], samples['rv2']
+    n_samples, n_epochs = rv1.shape
+    cmap = plt.cm.get_cmap("tab10", n_epochs)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    vmin = min(rv1.min(), rv2.min())
+    vmax = max(rv1.max(), rv2.max())
+    for t in range(n_epochs):
+        ax.scatter(rv1[:, t], rv2[:, t], s=4, alpha=0.5, color=cmap(t), label=f'Epoch {t+1}')
+    ax.plot([vmin, vmax], [vmin, vmax], 'k--', lw=0.6)
+    ax.set_xlabel("RV1 [km/s]")
+    ax.set_ylabel("RV2 [km/s]")
+    ax.set_xlim(vmin, vmax)
+    ax.set_ylim(vmin, vmax)
+    ax.set_title("RV1 vs RV2 for all epochs")
+    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small', ncol=2)
+    plt.savefig(savepath + f'pair_scatter.png', bbox_inches='tight')
+    plt.close(fig)
+
+def plot_sign_trace(samples, savepath=None, ax=None):
+    """ Diagnostic for bimodal posteriod
+        Plots the sign of RV1-RV2 for each sample in each epoch to detect evidence of sign switching.
+    """
+    rv1, rv2 = samples['rv1'], samples['rv2']
+    n_samples, n_epochs = rv1.shape
+    sign_matrix = np.sign(rv1 - rv2)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    cmap = plt.cm.get_cmap("tab10", n_epochs)
+
+    for t in range(n_epochs):
+        ax.plot(sign_matrix[:, t], label=f'Epoch {t+1}', color=cmap(t), lw=0.6)
+
+    ax.set_xlabel("MCMC draw")
+    ax.set_ylabel("sign of ΔRV")
+    ax.set_ylim(-1.2, 1.2)
+    ax.set_yticks([-1, 0, 1])
+    ax.axhline(0, ls='--', color='gray', lw=0.5)
+    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small', ncol=2)
+    ax.set_title("Sign of RV1 − RV2")
+
+    plt.savefig(savepath + f'sign_trace.png', bbox_inches='tight')
+    plt.close(fig)
