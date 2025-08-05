@@ -817,8 +817,15 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         amp1_min, amp1_max = 0.05, 0.3
         amp2_min = 0.01
         with npro.plate(f'lines', nlines, dim=-2):
-            amp0 = npro.sample('amp0', dist.Uniform(amp1_min, amp1_max))
-            amp1 = npro.sample('amp1', dist.Uniform(amp2_min, 0.75 * amp0))
+            # amp0 = npro.sample('amp0', dist.Uniform(amp1_min, amp1_max))
+            # amp1 = npro.sample('amp1', dist.Uniform(amp2_min, 0.75 * amp0))
+
+            # Primary amplitude
+            amp0 = npro.sample("amp0", dist.TruncatedNormal(loc=0.18, scale=0.06, low=0.02, high=0.40))
+            # Depth ratio
+            amp_ratio = npro.sample("amp_ratio", dist.TruncatedNormal(loc=0.60, scale=0.15, low=0.25, high=0.95))
+            amp1 = amp_ratio * amp0
+
             # Stack amplitudes for two components and add extra dimensions for broadcasting
             amp = jnp.stack([amp0, amp1], axis=-3)  # Shape: (2, n_lines)
             amp = amp[:, :, None]  # Shape: (2, n_lines, 1)
