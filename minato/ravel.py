@@ -1611,7 +1611,7 @@ class GetRVs:
                     _writeln("   MAD == 0 → stop.")
                     break
 
-                z = np.abs((work - med) / mad)
+                z = (work - med) / mad
                 bad_local = np.where(z > thresh)[0]             # indices in *work*
                 if bad_local.size == 0:
                     _writeln("   no points exceed threshold → finished.")
