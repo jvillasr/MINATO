@@ -1746,7 +1746,8 @@ class GetRVs:
             out.write(f'   {line}: {stats}\n')
         out.write('\n')
 
-    def select_lines(self, error_type, lines):
+    def select_lines_old(self, error_type, lines):
+        # This method is deprecated and kept for backward compatibility.
         """
         Select the best lines for RV computation based on error criteria.
         
@@ -1773,6 +1774,62 @@ class GetRVs:
             best_lines_index = [i for i, line in enumerate(lines) if line in self.use_lines]
             rm_lines_idx = [i for i, line in enumerate(lines) if line not in self.use_lines]
             best_lines = [lines[x] for x in best_lines_index]
+        return best_lines, best_lines_index, rm_lines_idx
+
+    def select_lines(self, errors_df, lines):
+        """
+        Decide which spectral lines enter the RV average.
+
+        Parameters
+        ----------
+        errors_df : DataFrame
+            Fit-error diagnostics for *all* lines (one row per line).
+            Expected to contain percentage-error columns that end with
+            '_percer'.
+        lines : list
+            List of all candidate line identifiers (same order as errors_df).
+
+        Returns
+        -------
+        best_lines, best_lines_index, rm_lines_idx
+            • best_lines ........ identifiers of accepted lines
+            • best_lines_index .. their indices in `lines`
+            • rm_lines_idx ....... indices that were rejected
+        """
+
+        # ------------------------------------------------------------------
+        # 0.  If the user supplied a fixed whitelist, honour it and exit
+        # ------------------------------------------------------------------
+        if self.use_lines:
+            best_lines_idx = [i for i,l in enumerate(lines) if l in self.use_lines]
+            rm_lines_idx   = [i for i,l in enumerate(lines) if l not in self.use_lines]
+            best_lines     = [lines[i] for i in best_lines_idx]
+            return best_lines, best_lines_idx, rm_lines_idx
+
+        # ------------------------------------------------------------------
+        # 1.  Build a single robust quality score per line
+        # ------------------------------------------------------------------
+        err_cols = ['wid1_percer', 'cen1_percer', 'amp1_percer']
+        errors   = pd.DataFrame({ c: errors_df[c].apply(lambda lst: np.nanmedian(lst)) for c in err_cols})
+        errors = errors.dropna(how='all')
+        scaled   = errors.div(errors.median(), axis=1)
+        score    = scaled.median(axis=1, skipna=True)
+
+        # keep only lines that have at least one finite error
+        nonan_lines = score.index.tolist()
+        score_vals  = score.values           # numpy array for the clipper
+
+        # ------------------------------------------------------------------
+        # 2.  One-sided MAD clip on that score
+        # ------------------------------------------------------------------
+        best_idx_local, rm_idx_local = self.outlier_killer(
+                score_vals, thresh=self.lines_ok_thrsld)
+
+        # map local indices back to the master `lines` list
+        best_lines       = [nonan_lines[i] for i in best_idx_local]
+        best_lines_index = [i for i, line in enumerate(lines) if line in best_lines]
+        rm_lines_idx     = [i for i, line in enumerate(lines) if i not in best_lines_index]
+
         return best_lines, best_lines_index, rm_lines_idx
 
     def remove_bad_epochs(self, df, metric='mean', error_type='cen', epochs_ok_thrsld=None):
@@ -1974,6 +2031,7 @@ class GetRVs:
         all_error_types = primary_error_types + secondary_error_types
         grouped_errors = {error_type: self.df_SLfit.groupby('line')[error_type].apply(list)
                           for error_type in all_error_types}
+
         if self.print_output:
             print('\n*** Choosing the best lines ***\n-------------------------------')
             print_lines = [str(line) for line in grouped_errors['cen1_percer'].keys()]
@@ -2002,7 +2060,7 @@ class GetRVs:
                 print('   Selecting lines determined by user:')
 
         # Select the best lines based on the specified error metric.
-        best_lines, best_lines_index, rm_lines_idx = self.select_lines(grouped_errors[self.error_type], self.lines)
+        best_lines, best_lines_index, rm_lines_idx = self.select_lines(grouped_errors, self.lines)
         if self.print_output:
             print('\n   These are the best lines:', best_lines)
         nlines = len(best_lines)
