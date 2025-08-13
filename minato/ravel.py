@@ -836,20 +836,9 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         σ_Δv = 200.
 
         with npro.plate(f'epochs', nepochs, dim=-1):       
-            # Δv_raw = npro.sample("Δv_raw", dist.Normal(loc=Δv_means, scale=σ_Δv).expand([K, nepochs]))
-            # Δv_raw = npro.sample("Δv_raw", dist.Normal(loc=Δv_means, scale=σ_Δv))   # shape (K, nepochs)
-            # Δv_sorted = Δv_raw.at[:, epoch_ref].set(jnp.sort(Δv_raw[:, epoch_ref]))
-            # Δv_τk = npro.deterministic("Δv_τk", Δv_sorted) 
             Δv_τk = npro.sample("Δv_τk", dist.Normal(loc=Δv_means, scale=σ_Δv))
-            # Δv_τk shape: (K, nepochs)
 
-        # Sample amplitudes and widths for each line
-        amp1_min, amp1_max = 0.05, 0.3
-        amp2_min = 0.01
         with npro.plate(f'lines', nlines, dim=-2):
-            # amp0 = npro.sample('amp0', dist.Uniform(amp1_min, amp1_max))
-            # amp1 = npro.sample('amp1', dist.Uniform(amp2_min, 0.75 * amp0))
-
             # Primary amplitude
             amp0 = npro.sample("amp0", dist.TruncatedNormal(loc=0.18, scale=0.06, low=0.02, high=0.40))
             # Depth ratio
@@ -908,8 +897,8 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
         voigt_profile = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
         # Use Lorentzian for Hydrogen lines, Gaussian otherwise:
-        comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
-        # comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
+        # comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
+        comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
         # comp_profile = gaussian_profile
         # comp_profile = voigt_profile
         Ck = npro.deterministic("C_λk", comp_profile)
@@ -918,7 +907,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         fλ_pred = npro.deterministic("fλ_pred", ε + Ck.sum(axis=0))
         # Likelihood: compare predicted flux with observed flux
         npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
-
+    
     # ------------------------
     # MCMC Sampling Procedure
     # ------------------------
@@ -928,47 +917,211 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
     # Set a fixed random key (you can change this seed if desired)
     rng_key = random.PRNGKey(0)
-
-
-
-    # prior = Predictive(sb2_model, num_samples=200)
-    # s = prior(rng_key, λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors,
-    #         K=K, is_hline=is_hline, Δv_means=Δv_means)
-    # dv = s["Δv_τk"]        # shape (200, K, nepochs)
-    # assert (dv[:,0,epoch_ref] < dv[:,1,epoch_ref]).all()
-
-
-
-
     kernel = NUTS(sb2_model)
     mcmc = MCMC(kernel, num_warmup=1000, num_samples=2000)
     mcmc.run(rng_key, extra_fields=("potential_energy",), 
              λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means)
 
-    # Evaluate the mean log posterior probability (for diagnostic purposes)
-    potential_energy = mcmc.get_extra_fields()['potential_energy']
-    log_probs = -potential_energy  # Convert potential energy to log probability
-    log_prob = np.mean(log_probs)
-    print(f"Mean log posterior probability: {log_prob}")
-
-    # Get the MCMC trace (posterior samples)
-    trace = mcmc.get_samples()
-
-    # Optionally perform prior predictive checks (set fλ_pred_plot=True to activate)
-    fλ_pred_plot = False
-    if fλ_pred_plot:
-        num_prior_samples = 200
-        prior_predictive = Predictive(sb2_model, num_samples=num_prior_samples)
-        prior_samples = prior_predictive(rng_key, λ=x_waves, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means)
-        # Plotting code for prior predictive checks can go here...
-        plt.show()
+    # ------------------------
+    # FIRST MCMC
+    # ------------------------
+    trace1 = mcmc.get_samples()
+    log_probs1 = -mcmc.get_extra_fields()['potential_energy']
+    mean_log_prob1 = np.mean(log_probs1)
 
     # ------------------------
-    # Plotting the Fitted Profiles
+    # 1) Build 'frozen' dict from Run 1 (posterior means) so that these can be fixed!
     # ------------------------
-    plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, comp_sep, path)
+    def get_post_mean(name):  # use np.median??
+        return jnp.array(np.median(trace1[name], axis=0))
 
-    return trace, x_waves, y_fluxes
+    frozen = {
+        "logσ_ε":      get_post_mean("logσ_ε"),     # scalar
+        "ε":           get_post_mean("ε"),          # scalar
+        "amp0":        get_post_mean("amp0"),       # (n_lines,)
+        "amp_ratio":   get_post_mean("amp_ratio"),  # (n_lines,)
+        "wid1":        get_post_mean("wid1"),       # (n_lines,)
+        "delta_wid":   get_post_mean("delta_wid"),  # (n_lines,)
+        "wid_G1":      get_post_mean("wid_G1"),     # (n_lines,)
+        "wid_L1":      get_post_mean("wid_L1"),     # (n_lines,)
+        "delta_wid_G": get_post_mean("delta_wid_G"),# (n_lines,)
+        "delta_wid_L": get_post_mean("delta_wid_L") # (n_lines,)
+        # DOES NOT include 'Δv_τk'
+    }
+
+    # Prior centers for RV
+    dv_prior = np.squeeze(np.mean(np.asarray(trace1["Δv_τk"]), axis=0))  # (K,E)
+    if dv_prior.ndim != 2:
+        raise ValueError(f"dv_prior shape {dv_prior.shape}, expected (2, E)")
+    dv_prior_sw = dv_prior[::-1, :]  # swapped components
+
+    # ------------------------
+    # 2) RV-only model with swap prior
+    # ------------------------
+    def rv_only_model(λ, fλ, σ_fλ, K, is_hline, Δv_means,
+                    dv_prior, dv_prior_sw, sigma_prior=50.0):
+        """
+        Like sb2_model!
+        """
+        nlines, nepochs, ndata = λ.shape
+        c_kms = 299792.458
+
+        # --- base RV prior (broad) ---
+        # with npro.plate("epochs", nepochs, dim=-1):
+        #     Δv_τk = npro.sample("Δv_τk", dist.Normal(loc=Δv_means, scale=1000.0))
+        #         # --- base RV prior (broad) ---
+            
+        # Switched prior
+        with npro.plate("epochs", nepochs, dim=-1):
+            Δv_τk = npro.sample("Δv_τk",
+                dist.Normal(loc=jnp.array(dv_prior_sw), scale=sigma_prior)  # dv_prior_sw: (K, E)
+            )
+            # print("Δv_τk before", Δv_τk.shape)
+        Δv_τk = Δv_τk[:, None, :]
+        # print("Δv_τk after", Δv_τk.shape) 
+
+        # --- frozen parts: SAME distributions as run 1 (so condition() can pin them) ---
+        # continuum
+        logσ_ε = npro.sample('logσ_ε', dist.Uniform(-5, 0))
+        σ_ε    = jnp.exp(logσ_ε)
+        ε      = npro.sample('ε', dist.TruncatedNormal(loc=1.0, scale=σ_ε, low=0.7, high=1.1))
+
+        # wavelengths param (constant)
+        λ_rest = npro.param("λ_rest", cen_ini)  # (n_lines,)
+
+        # as before:
+        with npro.plate('lines', nlines, dim=-2):
+            amp0      = npro.sample("amp0",      dist.TruncatedNormal(loc=0.18, scale=0.06, low=0.02, high=0.40))
+            amp_ratio = npro.sample("amp_ratio", dist.TruncatedNormal(loc=0.60, scale=0.15, low=0.25, high=0.95))
+
+            wid1      = npro.sample('wid1',      dist.Uniform(0.5, 5.0))
+            delta_wid = npro.sample('delta_wid', dist.Uniform(0.1, 2.0))
+
+            wid_G1      = npro.sample('wid_G1',      dist.Uniform(0.5, 5.0))
+            wid_L1      = npro.sample('wid_L1',      dist.Uniform(0.1, 3.0))
+            delta_wid_G = npro.sample('delta_wid_G', dist.Uniform(0.1, 2.0))
+            delta_wid_L = npro.sample('delta_wid_L', dist.Uniform(0.05, 1.0))
+
+            # build shapes exactly as in run 1
+            amp1 = amp_ratio * amp0
+            amp  = jnp.stack([amp0, amp1], axis=-3)[:, :, None]     # (K, n_lines, 1)
+
+            wid2 = wid1 + delta_wid
+            wid  = jnp.stack([wid1, wid2], axis=-3)[:, :, None]     # (K, n_lines, 1)
+
+            wid_G2 = wid_G1 + delta_wid_G
+            wid_L2 = wid_L1 + delta_wid_L
+            wid_G  = jnp.stack([wid_G1, wid_G2], axis=-3)[:, :, None]
+            wid_L  = jnp.stack([wid_L1, wid_L2], axis=-3)[:, :, None]
+
+        # centers and likelihood
+        λ0 = λ_rest[None, :, None]                               # (1, n_lines, 1)
+        μ  = (λ0 * (1 + Δv_τk / c_kms))[:, :, :, None]           # (K, n_lines, n_epochs, 1)
+
+        λ_expanded        = λ[None, :, :, :]                     # (1, n_lines, n_epochs, ndata)
+        is_hline_expanded = is_hline[None, :, None, None]        # (1, n_lines, 1, 1)
+
+        gaussian_profile   = gaussian(λ_expanded, amp, μ, wid)
+        lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
+        voigt_profile      = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
+        comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
+        Ck = npro.deterministic("C_λk", comp_profile)
+
+        fλ_pred = npro.deterministic("fλ_pred", ε + comp_profile.sum(axis=0))
+        npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
+
+    # ------------------------
+    # 3) SECOND MCMC: condition (keep stuck!) on 'frozen' and refit only Δv_τk
+    # ------------------------
+    conditioned_rv_model = handlers.condition(rv_only_model, frozen)
+
+    rng_key2 = random.PRNGKey(2)
+    kernel2  = NUTS(conditioned_rv_model)
+    mcmc2    = MCMC(kernel2, num_warmup=1000, num_chains=4, num_samples=2000)
+    mcmc2.run(
+        rng_key2, extra_fields=("potential_energy",),
+        λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means,
+        dv_prior=dv_prior, dv_prior_sw=dv_prior_sw, sigma_prior=20.0
+    )
+
+    trace2     = mcmc2.get_samples()
+    log_probs2 = -mcmc2.get_extra_fields()['potential_energy']
+    mean_log_prob2 = np.mean(log_probs2)
+
+    # Get mean flux prediction from both MCMC runs
+    model_result_orig = trace_mean(trace1)["fλ_pred"][:,:,:] # model result for each epoch, shape (nlines, nepochs, ndata)
+    model_result_switched = trace_mean(trace2)["fλ_pred"][:,:,:] # model result for each epoch, shape (nlines, nepochs, ndata)
+
+    # Get chi2 values of both fits
+    chi2_orig = get_chi2(y_fluxes, model_result_orig, y_errors)
+    chi2_switched = get_chi2(y_fluxes, model_result_switched, y_errors)
+    # print(chi2_orig)
+    # print(chi2_switched)
+
+    # Where epochs should be switched
+    use_switched = chi2_switched < chi2_orig # Shape (nepochs)
+    # print(use_switched)
+
+    n_samp1 = trace1["Δv_τk"].shape[0]
+    n_samp2 = trace2["Δv_τk"].shape[0]
+    N = min(n_samp1, n_samp2)  # common sample count
+
+    # Randomly subsample to the same length for fair stitching in final sample
+    rng = np.random.default_rng(123)
+    idx1 = rng.choice(n_samp1, size=N, replace=(n_samp1 < N))
+    idx2 = rng.choice(n_samp2, size=N, replace=(n_samp2 < N))
+
+    # Get all non-deterministic sites (widths, amplitudes) from first MCMC run
+    stitched = {}
+    for k, v in trace1.items():
+        if k in ("Δv_τk", "fλ_pred", "C_λk"):   # Exclude sites affected by switch
+            continue
+        stitched[k] = np.asarray(v)[idx1]
+
+    # RV samples from both MCMC runs
+    dv1 = np.asarray(trace1["Δv_τk"])[idx1]  # (nsamples, K, 1, nepochs)
+    # print(dv1.shape)
+    dv2 = np.asarray(trace2["Δv_τk"])[idx2] # (nsamples, K, nepochs)
+    dv2 = dv2[:, :, None, :] # (nsamples, K, 1, nepochs)
+    # print(dv2.shape)
+    assert dv1.shape[2] == 1 and dv2.shape[2] == 1, f"Unexpected Δv_τk shapes: {dv1.shape}, {dv2.shape}"
+
+    # Stitch on EPOCH axis!
+    mask = np.asarray(use_switched, dtype=bool)[None, None, None, :]  # (1,1,1,nepochs)
+    dv_stitched = np.where(mask, dv2, dv1)  # (nsamples, K, 1, nepochs)
+
+    stitched["Δv_τk"] = dv_stitched
+
+    # --- recompute deterministics for final, stitched samples ---
+
+    def _model_predictive(λ, σ_fλ, K, is_hline, Δv_means):
+        return sb2_model(λ=λ, fλ=None, σ_fλ=σ_fλ, K=K, is_hline=is_hline, Δv_means=Δv_means)
+
+    pred = Predictive(
+        _model_predictive,
+        posterior_samples=stitched,
+        return_sites=("fλ_pred", "C_λk", "ε")
+    )
+
+    rng_key_pred = random.PRNGKey(42) # anything
+    preds = pred(
+        rng_key_pred,
+        λ=x_waves,
+        σ_fλ=y_errors,
+        K=K,
+        is_hline=is_hline,
+        Δv_means=Δv_means
+    )
+
+    # Merge the recomputed deterministics for final trace
+    stitched.update({k: np.asarray(v) for k, v in preds.items()})    
+
+    # ------------------------
+    # 4) Plot 
+    # ------------------------
+    plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, stitched, lines_dic, shift_kms, comp_sep, path)
+    
+    return stitched, x_waves, y_fluxes
 
 def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, comp_sep, path, n_sol=100):
     """
