@@ -1428,14 +1428,9 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
             # Optional cornerplot
             if cornerplot:
                 try:
-                    params = ['logσ_ε', 'ε', 'wid1']
+                    params = []
                     samples_list = []
-                    for p in params:
-                        if p in result:
-                            arr = result[p]
-                            if arr.ndim > 1:
-                                arr = arr.reshape(arr.shape[0], -1).mean(axis=1) 
-                            samples_list.append(arr)
+
 
                     dv_array = result['Δv_τk'] # For plotting fit of each component velocity in each epoch
                     n_samples, K, _, n_epochs = dv_array.shape
