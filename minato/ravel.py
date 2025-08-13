@@ -17,6 +17,7 @@ from scipy.interpolate import interp1d
 from scipy.special import wofz as scipy_wofz
 import multiprocessing
 import numpyro as npro
+from numpyro import handlers
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive
 from numpyro.infer.util import find_valid_initial_params
@@ -34,6 +35,35 @@ import corner
 
 pd.set_option('display.max_rows', 1000)
 pd.set_option('display.max_columns', 1000)
+
+def trace_mean(trc):
+    "Return dictionary of posterior means (numpy arrays)."
+    return {k: np.asarray(v).mean(axis=0) for k, v in trc.items()}
+
+def get_chi2(observed_flux, model_flux, flux_error):
+    """
+    Compute chi^2 for each epoch across all lines.
+
+    In:
+    observed_flux : array, shape (n_lines, n_epochs, n_data)
+    model_flux    : array, shape (n_lines, n_epochs, n_data)
+    flux_error    : array, shape (n_lines, n_epochs, n_data)
+
+    Out:
+    chi2 : array, shape (n_epochs,)
+        Chi^2 value for each epoch.
+    """
+    observed_flux = np.asarray(observed_flux, dtype=float)
+    model_flux    = np.asarray(model_flux,    dtype=float)
+    flux_error    = np.asarray(flux_error,    dtype=float)
+
+    # Standard chi^2 formula, summed over lines and data points
+    chi2_values = np.sum(
+        ((observed_flux - model_flux) / flux_error) ** 2,
+        axis=(0, 2)
+    )
+    return chi2_values
+
 
 def gaussian(x, amp, cen, wid):
     """
