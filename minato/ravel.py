@@ -1119,11 +1119,13 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # ------------------------
     # 4) Plot 
     # ------------------------
-    plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, stitched, lines_dic, shift_kms, comp_sep, path)
+    plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace1, lines_dic, shift_kms, comp_sep, path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='original') # original
+    plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace2, lines_dic, shift_kms, comp_sep, path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='switched') # 2nd run
+    plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, stitched, lines_dic, shift_kms, comp_sep, path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='stitched') # stitched
     
     return stitched, x_waves, y_fluxes
 
-def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, comp_sep, path, n_sol=100):
+def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, comp_sep, path, chi2_1, chi2_2, type_name, n_sol=100):
     """
     Plot the SB2 line-fit results based on the posterior predictions.
 
@@ -1153,9 +1155,10 @@ def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines
         Number of posterior samples to plot (default: 100).
     """
     from matplotlib.lines import Line2D 
+    from matplotlib.offsetbox import AnchoredText
 
     for idx, line in enumerate(lines):
-        print('Plotting fits for line:', line)
+        print(f'Plotting {type_name} fits for line:', line)
         fig, axes = setup_fits_plots(wavelengths)
         for epoch_idx, ax in enumerate(axes.ravel()[:n_epochs]):
             # Extract posterior predictions for this line and epoch
@@ -1179,6 +1182,12 @@ def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines
             ax.axvline(rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms + comp_sep/2), color='orange', linestyle='--', lw=1)
             # Annotate the epoch number
             ax.text(0.15, 0.86, f'Epoch {epoch_idx+1}', transform=ax.transAxes, fontsize=16)
+            if chi2_1[epoch_idx] < chi2_2[epoch_idx]:
+                text_box = AnchoredText(f'  χ2 \n *{chi2_1[epoch_idx]:.2f}*\n  {chi2_2[epoch_idx]:.2f}', frameon=True, loc=4, pad=0.5)
+            else:
+                text_box = AnchoredText(f'  χ2 \n  {chi2_1[epoch_idx]:.2f} \n*{chi2_2[epoch_idx]:.2f}*', frameon=True, loc=4, pad=0.5)
+            plt.setp(text_box.patch, facecolor='white', alpha=0.5)
+            ax.add_artist(text_box)
 
         ax.set_xlim(centre - 13, centre + 13)
         # Create a custom legend
@@ -1187,12 +1196,29 @@ def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines
             Line2D([0], [0], color='C1', alpha=0.5, lw=2),
             Line2D([0], [0], color='C0', alpha=0.5, lw=2)
         ]
-        axes[0].legend(custom_lines, ['Total Prediction', 'Component 1', 'Component 2'], 
-                       fontsize=14, frameon=False, borderaxespad=0.1)
+        #axes[0].legend(custom_lines, ['Total Prediction', 'Component 1', 'Component 2'], 
+        #               fontsize=11, frameon=False, borderaxespad=0.1)
+        # Make room at the bottom for legend + xlabel
+        fig.subplots_adjust(bottom=0.1)
+
+        # Put the legend centered in one row between the xlabel and the bottom edge
+        fig.legend(
+            custom_lines,
+            ['Total Prediction', 'Component 1', 'Component 2'],
+            loc='lower center',
+            bbox_to_anchor=(0.5, 0.04),  # closer to bottom edge
+            ncol=3,
+            frameon=False,
+            fontsize=14,
+            borderaxespad=0.0,
+            columnspacing=1.5,
+            handlelength=2.5,
+        )
+
         fig.supxlabel('Wavelength [Å]', fontsize=24)
         fig.supylabel('Flux', fontsize=24)
  
-        plt.savefig(os.path.join(path, f'{line}_fits_SB2_.png'), dpi=300)
+        plt.savefig(os.path.join(path, f'{type_name}_{line}_fits_SB2_.png'), dpi=300)
         plt.close()
 
 def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):
