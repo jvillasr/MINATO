@@ -1048,6 +1048,11 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     log_probs2 = -mcmc2.get_extra_fields()['potential_energy']
     mean_log_prob2 = np.mean(log_probs2)
 
+    # Give trace2 'ε' array from trace1 for plotting
+    eps_scalar = float(np.asarray(frozen["ε"]))
+    n2 = trace2["Δv_τk"].shape[0] # nsamples in trace2
+    trace2["ε"] = np.full((n2,), eps_scalar, dtype=float)
+
     # Get mean flux prediction from both MCMC runs
     model_result_orig = trace_mean(trace1)["fλ_pred"][:,:,:] # model result for each epoch, shape (nlines, nepochs, ndata)
     model_result_switched = trace_mean(trace2)["fλ_pred"][:,:,:] # model result for each epoch, shape (nlines, nepochs, ndata)
