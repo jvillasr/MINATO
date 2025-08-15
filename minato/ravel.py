@@ -959,7 +959,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # 2) RV-only model with swap prior
     # ------------------------
     def rv_only_model(λ, fλ, σ_fλ, K, is_hline, Δv_means,
-                    dv_prior, dv_prior_sw, sigma_prior=50.0):
+                    dv_prior, dv_prior_sw, sigma_prior):
         """
         Like sb2_model!
         """
@@ -1041,7 +1041,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     mcmc2.run(
         rng_key2, extra_fields=("potential_energy",),
         λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means,
-        dv_prior=dv_prior, dv_prior_sw=dv_prior_sw, sigma_prior=20.0
+        dv_prior=dv_prior, dv_prior_sw=dv_prior_sw, sigma_prior=sigma_prior
     )
 
     trace2     = mcmc2.get_samples()
