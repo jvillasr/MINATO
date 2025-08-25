@@ -1029,7 +1029,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
         # centers and likelihood
         λ0 = λ_rest[None, :, None]                               # (1, n_lines, 1)
-        μ  = (λ0 * (1 + Δv_τk / c_kms))[:, :, :, None]           # (K, n_lines, n_epochs, 1)
+        μ  = (λ0 * (1 + Δv_τk / c_kms))[:, :, :, None]            # (K, n_lines, n_epochs, 1)
 
         λ_expanded        = λ[None, :, :, :]                     # (1, n_lines, n_epochs, ndata)
         is_hline_expanded = is_hline[None, :, None, None]        # (1, n_lines, 1, 1)
@@ -1037,7 +1037,14 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         gaussian_profile   = gaussian(λ_expanded, amp, μ, wid)
         lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
         voigt_profile      = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
-        comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
+
+        if profile == 'Voigt':
+            comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
+        elif profile == 'Gaussian':
+            comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
+        else:
+            raise ValueError('Profile to fit must be one of Voigt or Gaussian')
+            
         Ck = npro.deterministic("C_λk", comp_profile)
 
         fλ_pred = npro.deterministic("fλ_pred", ε + comp_profile.sum(axis=0))
@@ -1054,7 +1061,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     mcmc2.run(
         rng_key2, extra_fields=("potential_energy",),
         λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means,
-        dv_prior=dv_prior, dv_prior_sw=dv_prior_sw, sigma_prior=9.0
+        dv_prior=dv_prior, dv_prior_sw=dv_prior_sw, sigma_prior=sigma_prior
     )
 
     trace2     = mcmc2.get_samples()
