@@ -710,7 +710,7 @@ def rv_shift_wavelength(lambda_emitted, v):
     return lambda_observed
 
 def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, K=2, shift_kms=0,
-                    wavelength_type='air', rm_epochs=None):
+                    wavelength_type='air', rm_epochs=None, profile='Voigt', sigma_prior=10, chi2_plots=False):
     """
     Fit SB2 (double-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
@@ -913,11 +913,15 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         gaussian_profile = gaussian(λ_expanded, amp, μ, wid)
         lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
         voigt_profile = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
+
         # Use Lorentzian for Hydrogen lines, Gaussian otherwise:
-        # comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
-        comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
-        # comp_profile = gaussian_profile
-        # comp_profile = voigt_profile
+        if profile == 'Voigt':
+            comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
+        elif profile == 'Gaussian':
+            comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
+        else:
+            raise ValueError('Profile to fit must be one of Voigt or Gaussian')
+
         Ck = npro.deterministic("C_λk", comp_profile)
 
         # Sum over components and add continuum to yield the predicted flux
