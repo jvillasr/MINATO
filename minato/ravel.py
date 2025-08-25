@@ -934,18 +934,17 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # ------------------------
     comp_sep = 200.
     Δv_means = jnp.array([shift_kms - comp_sep/2, shift_kms + comp_sep/2]).reshape(K, 1, 1)
-    print(f"\nFitting with Δv_means: {Δv_means}")
+    print(f"\nFitting with profile: {profile}, Δv_means: {Δv_means}")
 
-    # Set a fixed random key (you can change this seed if desired)
+    # ------------------------
+    # FIRST MCMC
+    # ------------------------
     rng_key = random.PRNGKey(0)
     kernel = NUTS(sb2_model)
     mcmc = MCMC(kernel, num_warmup=1000, num_chains=4, num_samples=2000)
     mcmc.run(rng_key, extra_fields=("potential_energy",), 
              λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means)
 
-    # ------------------------
-    # FIRST MCMC
-    # ------------------------
     trace1 = mcmc.get_samples()
     log_probs1 = -mcmc.get_extra_fields()['potential_energy']
     mean_log_prob1 = np.mean(log_probs1)
@@ -970,14 +969,14 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         # DOES NOT include 'Δv_τk'
     }
 
-    # Prior centers for RV
+    # Prior centers for RVs in MCMC2
     dv_prior = np.squeeze(np.mean(np.asarray(trace1["Δv_τk"]), axis=0))  # (K,E)
     if dv_prior.ndim != 2:
         raise ValueError(f"dv_prior shape {dv_prior.shape}, expected (2, E)")
     dv_prior_sw = dv_prior[::-1, :]  # swapped components
 
     # ------------------------
-    # 2) RV-only model with swap prior
+    # RV-only model with swap prior
     # ------------------------
     def rv_only_model(λ, fλ, σ_fλ, K, is_hline, Δv_means,
                     dv_prior, dv_prior_sw, sigma_prior):
@@ -987,19 +986,12 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         nlines, nepochs, ndata = λ.shape
         c_kms = 299792.458
 
-        # --- base RV prior (broad) ---
-        # with npro.plate("epochs", nepochs, dim=-1):
-        #     Δv_τk = npro.sample("Δv_τk", dist.Normal(loc=Δv_means, scale=1000.0))
-        #         # --- base RV prior (broad) ---
-            
         # Switched prior
         with npro.plate("epochs", nepochs, dim=-1):
             Δv_τk = npro.sample("Δv_τk",
                 dist.Normal(loc=jnp.array(dv_prior_sw), scale=sigma_prior)  # dv_prior_sw: (K, E)
             )
-            # print("Δv_τk before", Δv_τk.shape)
         Δv_τk = Δv_τk[:, None, :]
-        # print("Δv_τk after", Δv_τk.shape) 
 
         # --- frozen parts: SAME distributions as run 1 (so condition() can pin them) ---
         # continuum
@@ -1012,14 +1004,14 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
         # as before:
         with npro.plate('lines', nlines, dim=-2):
-            amp0      = npro.sample("amp0",      dist.TruncatedNormal(loc=0.18, scale=0.06, low=0.02, high=0.40))
+            amp0      = npro.sample("amp0", dist.TruncatedNormal(loc=0.18, scale=0.06, low=0.02, high=0.40))
             amp_ratio = npro.sample("amp_ratio", dist.TruncatedNormal(loc=0.60, scale=0.15, low=0.25, high=0.95))
 
-            wid1      = npro.sample('wid1',      dist.Uniform(0.5, 5.0))
+            wid1      = npro.sample('wid1', dist.Uniform(0.5, 5.0))
             delta_wid = npro.sample('delta_wid', dist.Uniform(0.1, 2.0))
 
-            wid_G1      = npro.sample('wid_G1',      dist.Uniform(0.5, 5.0))
-            wid_L1      = npro.sample('wid_L1',      dist.Uniform(0.1, 3.0))
+            wid_G1      = npro.sample('wid_G1', dist.Uniform(0.5, 5.0))
+            wid_L1      = npro.sample('wid_L1', dist.Uniform(0.1, 3.0))
             delta_wid_G = npro.sample('delta_wid_G', dist.Uniform(0.1, 2.0))
             delta_wid_L = npro.sample('delta_wid_L', dist.Uniform(0.05, 1.0))
 
@@ -1052,7 +1044,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
 
     # ------------------------
-    # 3) SECOND MCMC: condition (keep stuck!) on 'frozen' and refit only Δv_τk
+    # SECOND MCMC: condition on 'frozen' samples and refit only Δv_τk
     # ------------------------
     conditioned_rv_model = handlers.condition(rv_only_model, frozen)
 
@@ -1081,12 +1073,9 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # Get chi2 values of both fits
     chi2_orig = get_chi2(y_fluxes, model_result_orig, y_errors)
     chi2_switched = get_chi2(y_fluxes, model_result_switched, y_errors)
-    # print(chi2_orig)
-    # print(chi2_switched)
 
     # Where epochs should be switched
-    use_switched = chi2_switched < chi2_orig # Shape (nepochs)
-    # print(use_switched)
+    use_switched = chi2_switched < chi2_orig # Shape (nepochs
 
     n_samp1 = trace1["Δv_τk"].shape[0]
     n_samp2 = trace2["Δv_τk"].shape[0]
