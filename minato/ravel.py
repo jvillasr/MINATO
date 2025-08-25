@@ -814,8 +814,6 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # Initial guess for the rest (central) wavelength from lines_dic
     cen_ini = jnp.array([lines_dic[line][key][0] for line in lines])
 
-    epoch_ref = 1    # or choose automatically
-
     # Define the probabilistic SB2 model
     def sb2_model(λ, fλ, σ_fλ, K, is_hline, Δv_means):
         """
@@ -855,7 +853,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         σ_Δv = 200.
 
         with npro.plate(f'epochs', nepochs, dim=-1):       
-            Δv_τk = npro.sample("Δv_τk", dist.Normal(loc=Δv_means, scale=σ_Δv))
+            Δv_τk = npro.sample("Δv_τk", dist.Normal(loc=Δv_means, scale=1000))
 
         with npro.plate(f'lines', nlines, dim=-2):
             # Primary amplitude
@@ -937,7 +935,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # Set a fixed random key (you can change this seed if desired)
     rng_key = random.PRNGKey(0)
     kernel = NUTS(sb2_model)
-    mcmc = MCMC(kernel, num_warmup=1000, num_samples=2000)
+    mcmc = MCMC(kernel, num_warmup=1000, num_chains=4, num_samples=2000)
     mcmc.run(rng_key, extra_fields=("potential_energy",), 
              λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means)
 
@@ -1060,7 +1058,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     mcmc2.run(
         rng_key2, extra_fields=("potential_energy",),
         λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means,
-        dv_prior=dv_prior, dv_prior_sw=dv_prior_sw, sigma_prior=sigma_prior
+        dv_prior=dv_prior, dv_prior_sw=dv_prior_sw, sigma_prior=9.0
     )
 
     trace2     = mcmc2.get_samples()
@@ -1222,10 +1220,9 @@ def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines
         ]
         #axes[0].legend(custom_lines, ['Total Prediction', 'Component 1', 'Component 2'], 
         #               fontsize=11, frameon=False, borderaxespad=0.1)
-        # Make room at the bottom for legend + xlabel
         fig.subplots_adjust(bottom=0.1)
 
-        # Put the legend centered in one row between the xlabel and the bottom edge
+        # Legend formatting
         fig.legend(
             custom_lines,
             ['Total Prediction', 'Component 1', 'Component 2'],
@@ -1442,7 +1439,7 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
     # print('names:', names)
     
     # Setup the output directory and save the JD information if available
-    print(names, jds, save_path)
+    #print(names, jds, save_path)
     out_path = setup_star_directory_and_save_jds(names, jds, save_path, SB2)
     # print('Output path:', out_path)
     
