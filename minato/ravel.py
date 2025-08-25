@@ -1378,7 +1378,8 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile):
             # Calculate the mean RV and its error for component i at epoch j.
             # Expected trace shape for Δv_τk: (n_samples, K, ..., n_epochs)
             results_dict['mean_rv'] = np.mean(trace['Δv_τk'][:, i, :, j])
-            results_dict['mean_rv_er'] = np.std(trace['Δv_τk'][:, i, :, j])
+            q16, q84 = np.percentile(trace['Δv_τk'][:, i, :, j], [16, 84])
+            results_dict['mean_rv_er'] = 0.5 * (q84 - q16)  # 68% interval half-width
 
             # Components are 1-based for output (i.e., Component 1 and 2)
             results_dict['comp'] = i + 1
