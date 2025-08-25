@@ -950,22 +950,22 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     mean_log_prob1 = np.mean(log_probs1)
 
     # ------------------------
-    # 1) Build 'frozen' dict from Run 1 (posterior means) so that these can be fixed!
+    # Build 'frozen' dict from Run 1 (posterior means)
     # ------------------------
-    def get_post_mean(name):  # use np.median??
+    def get_post_median(name):  # use np.median??
         return jnp.array(np.median(trace1[name], axis=0))
 
     frozen = {
-        "logσ_ε":      get_post_mean("logσ_ε"),     # scalar
-        "ε":           get_post_mean("ε"),          # scalar
-        "amp0":        get_post_mean("amp0"),       # (n_lines,)
-        "amp_ratio":   get_post_mean("amp_ratio"),  # (n_lines,)
-        "wid1":        get_post_mean("wid1"),       # (n_lines,)
-        "delta_wid":   get_post_mean("delta_wid"),  # (n_lines,)
-        "wid_G1":      get_post_mean("wid_G1"),     # (n_lines,)
-        "wid_L1":      get_post_mean("wid_L1"),     # (n_lines,)
-        "delta_wid_G": get_post_mean("delta_wid_G"),# (n_lines,)
-        "delta_wid_L": get_post_mean("delta_wid_L") # (n_lines,)
+        "logσ_ε":      get_post_median("logσ_ε"),     # scalar
+        "ε":           get_post_median("ε"),          # scalar
+        "amp0":        get_post_median("amp0"),       # (n_lines,)
+        "amp_ratio":   get_post_median("amp_ratio"),  # (n_lines,)
+        "wid1":        get_post_median("wid1"),       # (n_lines,)
+        "delta_wid":   get_post_median("delta_wid"),  # (n_lines,)
+        "wid_G1":      get_post_median("wid_G1"),     # (n_lines,)
+        "wid_L1":      get_post_median("wid_L1"),     # (n_lines,)
+        "delta_wid_G": get_post_median("delta_wid_G"),# (n_lines,)
+        "delta_wid_L": get_post_median("delta_wid_L") # (n_lines,)
         # DOES NOT include 'Δv_τk'
     }
 
