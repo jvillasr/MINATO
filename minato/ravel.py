@@ -64,6 +64,91 @@ def get_chi2(observed_flux, model_flux, flux_error):
     )
     return chi2_values
 
+def hdi_summary(x, cred=0.68):
+    """Shortest cred * 100% interval; returns (center, half-width)."""
+    x = np.sort(np.asarray(x).ravel()) # sort RV samples from posterior
+    n = x.size
+    if n == 0:
+        raise ValueError('No samples in trace!')
+    k = max(1, int(np.ceil(cred * n))) # get # of samples that constitute 68% of total samples
+    widths = x[k-1:] - x[:n-k+1] # get all possible RV-space window lengths that encompass k samples
+    j = int(np.argmin(widths)) # get minimum window length (highest density interval for this cred)
+    lo, hi = x[j], x[j + k - 1]
+    return 0.5 * (lo + hi), 0.5 * (hi - lo) # return center, half-width of interval
+
+def summarize_mode_1d(samples, cred=0.68, min_sep_sigma=2, min_frac=0.2, kmeans_iters=20):
+    """
+    Mode-aware summary with automatic choice:
+      - If the marginal looks unimodal/ambiguous -> return global HDI(center, half-width).
+      - If clearly bimodal -> choose the cluster with the higher peak in the 1d marginalized posterior
+        & return that cluster’s median ± inner-68% half-width.
+      - If the HDI center already lies inside that dominant 68% band, prefer HDI results.
+    """
+    x = np.asarray(samples).ravel() # flatten sample
+    x = x[np.isfinite(x)]
+    n = x.size
+    if n == 0:
+        raise ValueError("No samples in trace!")
+
+    # Fetch Highest Density Interval (appropriate when unimodal/ambiguous)
+    hdi_center, hdi_half = hdi_summary(x, cred=cred)
+
+    # Check for bimodality
+    c_low, c_high = np.percentile(x, [33, 67]) # centers at 33rd & 67th percentile
+    labels = None
+    for _ in range(kmeans_iters):
+        # assign each sample to nearest centroid
+        labels = (np.abs(x - c_high) < np.abs(x - c_low)).astype(int) #  False (label 0) near low, True (label 1) near high)
+        if labels.sum() == 0 or labels.sum() == n: # All samples assigned to one label
+            break
+        new_low  = np.median(x[labels == 0]) # median of all labels nearer 33rd percentile
+        new_high = np.median(x[labels == 1]) # median of all labels nearer 67th percentile
+        if np.allclose([new_low, new_high], [c_low, c_high]): # break if centers = medians after current iteration
+            c_low, c_high = new_low, new_high
+            break
+        c_low, c_high = new_low, new_high # update centers of bimodal dist.
+
+    # If no usable split, use HDI
+    if labels is None or labels.sum() == 0 or labels.sum() == n:
+        # print('ALL IN ONE STACK')
+        return hdi_center, hdi_half, 'HDI'
+
+    # Analyze two separated modes
+    m0, m1 = (labels == 0), (labels == 1)
+    x0, x1 = x[m0], x[m1]
+    frac0, frac1 = x0.size/n, x1.size/n
+
+    # Separability test (gap vs pooled blur) + dominant fraction CITE
+    combined_sigmas = np.sqrt(np.var(x0, ddof=1) + np.var(x1, ddof=1) + 1e-12)
+    gap  = abs(c_high - c_low)
+    separated = (gap >= min_sep_sigma*combined_sigmas) and (max(frac0, frac1) >= min_frac)
+    if not separated:
+        # print('NOT SEPARATED')
+        return hdi_center, hdi_half, 'HDI'
+
+    # --- Choose the cluster with the higher peak height (via KDE at medians) ---
+    kde = gaussian_kde(x, bw_method='silverman') # or 'scott'?
+    med0, med1 = np.median(x0), np.median(x1)
+
+    p0, p1 = kde([med0, med1])  # KDE peak heights at each mode's median
+
+    # Pick mode with the higher peak height
+    if p1 > p0:
+        x_main, center = x1, med1
+    else:
+        x_main, center = x0, med0
+
+    half = 0.5 * (np.percentile(x_main, 84) - np.percentile(x_main, 16))
+
+    # If HDI center already sits inside this dominant 68% band, prefer HDI
+    if (center - half) <= hdi_center <= (center + half):
+        # print('HDI ALREADY SITS INSIDE DOMINANT 68% BAND')
+        return hdi_center, hdi_half, 'HDI'
+    # else:
+    #     print('MODE-AWARE METHOD USED')
+
+    return center, half, 'MODE-AWARE'
+
 
 def gaussian(x, amp, cen, wid):
     """
@@ -1073,9 +1158,33 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     n2 = trace2["Δv_τk"].shape[0] # nsamples in trace2
     trace2["ε"] = np.full((n2,), eps_scalar, dtype=float)
 
-    # Get mean flux prediction from both MCMC runs
-    model_result_orig = trace_mean(trace1)["fλ_pred"][:,:,:] # model result for each epoch, shape (nlines, nepochs, ndata)
-    model_result_switched = trace_mean(trace2)["fλ_pred"][:,:,:] # model result for each epoch, shape (nlines, nepochs, ndata)
+    # Extract chi2 from best n_sols models
+    n_sols = 100
+
+    # MCMC1
+    f1  = np.asarray(trace1["fλ_pred"])    # (n_samples, n_lines, n_epochs, n_points)
+    dv1 = np.asarray(trace1["Δv_τk"])      # (n_samples, K, 1, n_epochs)
+    S, L, E, N = f1.shape
+    model_result_orig = np.empty((L, E, N), dtype=f1.dtype)
+    for epoch in range(E):
+        rv0 = dv1[:, 0, 0, epoch]
+        center, _, _ = summarize_mode_1d(rv0, cred=0.68, min_sep_sigma=2, min_frac=0.2)
+        sols = np.argsort(np.abs(rv0 - center))[:n_sols] # get solutions closest to the center of the posterior mode
+        model_result_orig[:, epoch, :] = f1[sols, :, epoch, :].mean(axis=0)
+    
+    #MCMC2
+    f2 = np.asarray(trace2["fλ_pred"])     # (n_samples, n_lines, n_epochs, n_points)
+    dv2 = np.asarray(trace2["Δv_τk"])      # (n_samples, K, n_epochs)
+    model_result_switched = np.empty((L, E, N), dtype=f2.dtype)
+    for epoch in range(E):
+        rv0 = dv2[:, 0, epoch]
+        center, _, _ = summarize_mode_1d(rv0, cred=0.68, min_sep_sigma=2, min_frac=0.2)
+        sols = np.argsort(np.abs(rv0 - center))[:n_sols]
+        model_result_switched[:, epoch, :] = f2[sols, :, epoch, :].mean(axis=0)
+
+    # # Get mean flux prediction from both MCMC runs
+    # model_result_orig = trace_mean(trace1)["fλ_pred"][:,:,:] # model result for each epoch, shape (nlines, nepochs, ndata)
+    # model_result_switched = trace_mean(trace2)["fλ_pred"][:,:,:] # model result for each epoch, shape (nlines, nepochs, ndata)
 
     # Get chi2 values of both fits
     chi2_orig = get_chi2(y_fluxes, model_result_orig, y_errors)
