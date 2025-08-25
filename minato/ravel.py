@@ -479,38 +479,57 @@ def read_spectra(filelist, path, file_type, instrument=None, SB2=False):
 
     return wavelengths, fluxes, f_errors, names, jds
 
+# def setup_star_directory_and_save_jds(names, jds, path, SB2):
+#     """
+#     Prepare a directory for star data and save the corresponding Julian Dates.
+
+#     Parameters:
+#     names : list
+#         List of star names.
+#     jds : list
+#         List of Julian Dates for each observation.
+#     path : str
+#         Base directory to store the files.
+#     SB2 : bool
+#         If True, specifies the system as a spectroscopic binary (SB2) and modifies the path.
+
+#     Returns:
+#     str
+#         The final directory path used for saving the data.
+#     """
+#     try:
+#         basename = names[0].split('.')[0]  
+#         star = basename + '/'
+#     except IndexError:
+#         star = 'Unknown_Star/'
+#     star_path = os.path.join(path, star)
+#     # if SB2:
+#     #    star_path = os.path.join(star_path, 'SB2/')
+#     if not os.path.exists(star_path):
+#         os.makedirs(star_path)
+#     if any(jds):
+#         df_mjd = pd.DataFrame({'epoch': names, 'JD': jds})
+#         df_mjd.to_csv(os.path.join(star_path, 'JDs.txt'), index=False, header=False, sep='\t')
+#     return star_path
+
 def setup_star_directory_and_save_jds(names, jds, path, SB2):
     """
-    Prepare a directory for star data and save the corresponding Julian Dates.
-
-    Parameters:
-    names : list
-        List of star names.
-    jds : list
-        List of Julian Dates for each observation.
-    path : str
-        Base directory to store the files.
-    SB2 : bool
-        If True, specifies the system as a spectroscopic binary (SB2) and modifies the path.
-
-    Returns:
-    str
-        The final directory path used for saving the data.
+    TESTING COMPATIBILITY
     """
-    try:
-        basename = names[0].split('.')[0]  
-        star = basename + '/'
-    except IndexError:
-        star = 'Unknown_Star/'
-    star_path = os.path.join(path, star)
-    # if SB2:
-    #    star_path = os.path.join(star_path, 'SB2/')
+    import os
+    import pandas as pd
+
+    star_path = path
     if not os.path.exists(star_path):
         os.makedirs(star_path)
     if any(jds):
-        df_mjd = pd.DataFrame({'epoch': names, 'JD': jds})
-        df_mjd.to_csv(os.path.join(star_path, 'JDs.txt'), index=False, header=False, sep='\t')
+        clean_names = [os.path.basename(n) for n in names]
+        df_mjd = pd.DataFrame({'epoch': clean_names, 'JD': jds})
+        df_mjd.to_csv(os.path.join(star_path, 'JDs.txt'),
+                      index=False, header=False, sep='\t')
+
     return star_path
+
 
 def setup_line_dictionary():
     """
