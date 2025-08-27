@@ -33,6 +33,8 @@ print(f"JAX 64-bit enabled: {jax.config.jax_enable_x64}") # Verify
 npro.set_host_device_count(multiprocessing.cpu_count())
 import corner
 from scipy.stats import gaussian_kde
+from astropy.time import Time
+import gc
 
 pd.set_option('display.max_rows', 1000)
 pd.set_option('display.max_columns', 1000)
@@ -865,6 +867,273 @@ def rv_shift_wavelength(lambda_emitted, v):
     lambda_observed = lambda_emitted * (1 + (v / c_kms))
     return lambda_observed
 
+def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path,
+                    shift_kms=0, wavelength_type='air', rm_epochs=None, profile='Voigt'):
+    n_lines = len(lines)
+    n_epochs = len(wavelengths)
+    print('Number of lines:', n_lines)
+    print('Number of epochs:', n_epochs)
+
+    # Determine the key to use based on the chosen wavelength type
+    key = 'centre' if wavelength_type == 'vacuum' else 'air'
+
+    # Boolean mask for Hydrogen lines (will use Lorentzian instead of Gaussian)
+    is_hline = jnp.array([line in Hlines for line in lines])
+
+    # Interpolate fluxes and errors to a common grid
+    x_waves_interp, y_fluxes_interp, y_errors_interp = [], [], []
+    common_grid_length = 200  # Choose a consistent number of points for interpolation
+
+    for line in lines:
+        region_start, region_end = lines_dic[line]['region']
+        # Shift the region boundaries by shift_kms
+        region_start = rv_shift_wavelength(region_start, shift_kms)
+        region_end = rv_shift_wavelength(region_end, shift_kms)
+
+        x_waves_line, y_fluxes_line, y_errors_line = [], [], []
+
+        for wave_set, flux_set, error_set in zip(wavelengths, fluxes, f_errors):
+            mask = (wave_set > region_start) & (wave_set < region_end)
+            wave_masked = wave_set[mask]
+            flux_masked = flux_set[mask]
+            if error_set is not None:
+                error_masked = error_set[mask]
+            else:
+                f_err = compute_flux_err(wave_set, flux_set)
+                error_masked = f_err[mask]
+
+            # Interpolate onto a common wavelength grid for this line and epoch
+            common_wavelength_grid = np.linspace(wave_masked.min(), wave_masked.max(), common_grid_length)
+            interp_flux = interp1d(wave_masked, flux_masked, bounds_error=False, fill_value="extrapolate")(common_wavelength_grid)
+            interp_error = interp1d(wave_masked, error_masked, bounds_error=False, fill_value="extrapolate")(common_wavelength_grid)
+
+            x_waves_line.append(common_wavelength_grid)
+            y_fluxes_line.append(interp_flux)
+            y_errors_line.append(interp_error)
+
+        x_waves_interp.append(x_waves_line)
+        y_fluxes_interp.append(y_fluxes_line)
+        y_errors_interp.append(y_errors_line)
+
+    # Convert the interpolated lists to JAX arrays (all dimensions now match)
+    x_waves = jnp.array(x_waves_interp)
+    y_fluxes = jnp.array(y_fluxes_interp)
+    y_errors = jnp.array(y_errors_interp)
+
+    # Remove bad epochs along the second axis (axis=1)
+    if rm_epochs is not None:
+        x_waves = jnp.delete(x_waves, jnp.array(rm_epochs), axis=1)
+        y_fluxes = jnp.delete(y_fluxes, jnp.array(rm_epochs), axis=1)
+        y_errors = jnp.delete(y_errors, jnp.array(rm_epochs), axis=1)
+
+    # Initial guess for the rest (central) wavelength from lines_dic
+    cen_ini = jnp.array([lines_dic[line][key][0] for line in lines])
+
+    # Define the probabilistic ***SB1*** model
+    def sb1_model(λ, fλ, σ_fλ, is_hline):
+        c_kms = c.to('km/s').value
+        nlines, nepochs, ndata = λ.shape
+
+        # Sample continuum level with uncertainty
+        logσ_ε = npro.sample('logσ_ε', dist.Uniform(-5, 0))
+        σ_ε = jnp.exp(logσ_ε)
+        ε = npro.sample('ε', dist.TruncatedNormal(loc=1.0, scale=σ_ε, low=0.7, high=1.1))
+
+        # Define rest wavelengths as a parameter (one per line)
+        λ_rest = npro.param("λ_rest", cen_ini)
+
+        σ_Δv = 500. # standard deviation (spread of prior on velocity) to supply to random var. in prob. NumPyro model?
+
+        with npro.plate('epochs', nepochs, dim=-2):
+            # Δv = npro.sample("Δv", dist.Normal(loc=shift_kms, scale=σ_Δv))
+            Δv = npro.sample("Δv", dist.Uniform(-σ_Δv, σ_Δv))
+            # print('Δv (raw):', Δv.shape)   # (12, 1)
+        # make it 1-D for broadcasting 
+        Δv = jnp.squeeze(Δv, axis=-1)
+        # print('Δv (squeezed):', Δv.shape)  # (12,)
+
+        with npro.plate('lines', nlines, dim=-3):
+            amp   = npro.sample('amp',   dist.TruncatedNormal(loc=0.18, scale=0.06, low=0.02, high=0.80))
+            wid_G = npro.sample('wid_G', dist.Uniform(0.5, 5.0))
+            wid_L = npro.sample('wid_L', dist.Uniform(0.1, 3.0))
+            wid   = npro.sample('wid',   dist.Uniform(0.5, 5.0))
+            # print('amp:', amp.shape, 'wid_G:', wid_G.shape, 'wid_L:', wid_L.shape)  # (4,1,1) each
+
+        λ0 = npro.deterministic("λ0", λ_rest[:, None, None])   # (L,1,1)
+        # print('λ0:', λ0.shape)
+
+        μ = λ0 * (1 + Δv[None, :, None] / c_kms)               # (L,E,1) now broadcasts cleanly
+        # print('μ:', μ.shape)
+
+        λ_expanded = λ                                         # (L,E,N)
+        is_hline_expanded = is_hline[:, None, None]            # (L,1,1)
+
+        # IMPORTANT: don't add [:, None, None] anymore – amp/wid_* already are (L,1,1)
+        G = gaussian(λ_expanded, amp, μ, wid_G)                # -> (L,E,N)
+        L = lorentzian(λ_expanded, amp, μ, wid_L)             # -> (L,E,N)
+        V  = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)    # -> (L,E,N)
+        # print('gaussian:', G.shape, 'lorentzian:', L_.shape, 'voigt:', V.shape)
+
+        if profile =='Voigt':
+            comp = jnp.where(is_hline_expanded, L, V)             # (L,E,N)
+        elif profile =='Gaussian':
+            comp = jnp.where(is_hline_expanded, L, G)  
+        else:
+            raise ValueError('profile argument must be one of Voigt or Gaussian')
+        fλ_pred = npro.deterministic("fλ_pred", ε + comp)      # (L,E,N)
+        # npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
+        npro.sample("fλ", dist.StudentT(df=8, loc=fλ_pred, scale=σ_fλ), obs=fλ)
+
+    # ------------------------
+    # MCMC Sampling Procedure
+    # ------------------------
+    rng_key = random.PRNGKey(0)
+    kernel = NUTS(sb1_model)
+    mcmc = MCMC(kernel, num_warmup=1000, num_chains=4, num_samples=2000)
+    mcmc.run(rng_key, extra_fields=("potential_energy",),
+             λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, is_hline=is_hline) # no vmeans needed!
+
+    potential_energy = mcmc.get_extra_fields()['potential_energy'] # this causes error message??
+    log_probs = -potential_energy
+    log_prob = np.mean(log_probs)
+    # print(f"Mean log posterior probability: {log_prob}")
+
+    trace = mcmc.get_samples(group_by_chain=False)
+    # print('AFTER MCMC: fλ_pred:', trace['fλ_pred'].shape)
+
+    if rm_epochs is not None:
+        n_epochs = n_epochs - len(rm_epochs)
+    plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, n_sol=100)
+
+    # print("Δv = ", trace["Δv"].shape)
+
+    for i in range(n_epochs):
+        plt.plot(trace["Δv"][:,i,0])
+    plt.savefig('done.png')
+
+    return trace, x_waves, y_fluxes
+
+def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, n_sol=100):
+    """
+    Plot the SB1 line-fit results based on the posterior predictions.
+
+    Parameters:
+    -----------
+    wavelengths : list
+        Original wavelength arrays.
+    lines : list
+        List of spectral line identifiers.
+    x_waves : JAX array
+        Interpolated wavelength grids (per line and epoch).
+    y_fluxes : JAX array
+        Interpolated fluxes.
+    n_epochs : int
+        Number of epochs.
+    trace : dict
+        Posterior samples from MCMC.
+    lines_dic : dict
+        Dictionary with spectral line details.
+    shift_kms : float
+        The applied velocity shift (km/s).
+    path : str
+        Directory path to save the plots.
+    n_sol : int, optional
+        Number of posterior samples to plot (default: 100).
+    """
+    from matplotlib.lines import Line2D 
+
+    for idx, line in enumerate(lines):
+        print('Plotting fits for line:', line)
+        fig, axes = setup_fits_plots(wavelengths)
+        for epoch_idx, ax in enumerate(axes.ravel()[:n_epochs]):
+            f_pred = trace['fλ_pred']             # (S, ?, ?, N)
+            # print(f_pred.shape)
+            # If it came out (S, epochs, lines, N), swap to (S, lines, epochs, N)
+            if f_pred.shape[1] == n_epochs and f_pred.shape[2] == len(lines):
+                f_pred = np.swapaxes(f_pred, 1, 2)
+
+            fλ_pred_samples = f_pred[-n_sol:, idx, epoch_idx, :]
+            continuum_pred_samples = trace['ε'][-n_sol:, None]
+            ax.plot(x_waves[idx][epoch_idx], fλ_pred_samples.T, color='orangered', alpha=0.1, rasterized=True)
+            # Plot the observed data
+            ax.plot(x_waves[idx][epoch_idx], y_fluxes[idx][epoch_idx], color='k', lw=1, alpha=0.8)
+            # Plot vertical lines for the rest wavelength and component shifts
+            centre = rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms)
+            ax.axvline(centre, color='r', linestyle='--', lw=1)
+            ax.axvline(rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms), color='orange', linestyle='--', lw=1)
+            ax.axvline(rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms), color='orange', linestyle='--', lw=1)
+            # Annotate the epoch number
+            ax.text(0.1, 0.1, f'Epoch {epoch_idx+1}', transform=ax.transAxes, fontsize=16)
+
+        ax.set_xlim(centre - 13, centre + 13)
+        fig.supxlabel('Wavelength [Å]', fontsize=24, y=-0.015)
+        fig.supylabel('Flux', fontsize=24, x=-0.01)
+        
+        custom_lines = [
+            Line2D([0], [0], color='orangered', lw=2)
+        ]
+        fig.subplots_adjust(bottom=0.1)
+        # Legend formatting
+        fig.legend(
+            custom_lines,
+            ['Prediction'],
+            loc='lower center',
+            bbox_to_anchor=(0.5, 0.02),  # closer to bottom edge
+            ncol=3,
+            frameon=False,
+            fontsize=14,
+            borderaxespad=0.0,
+            columnspacing=1.5,
+            handlelength=2.5,
+        )
+
+        plt.savefig(os.path.join(path, f'{line}_fits_SB1_.png'), dpi=300,bbox_inches='tight')
+        plt.close()
+
+def mcmc_results_to_file_sb1(trace, names, jds, writer, csvfile, rm_epochs):
+    """
+    Write MCMC fit results for multiple components and epochs to a CSV file, adapted to SB1s.
+    
+    For each component (assumed to be two components) and for each epoch (from the 
+    provided 'names' list) the function calculates the mean RV and its uncertainty 
+    from the MCMC trace and writes these values alongside the epoch and MJD.
+    
+    Parameters:
+        trace (dict): Dictionary containing MCMC samples (expects key 'Δv_τk').
+        names (list): List of epoch identifiers (e.g., names of spectra or observation epochs).
+        jds (list): List of corresponding Julian Dates (or None if unavailable).
+        writer (csv.DictWriter or None): A DictWriter object or None (if first call, will be initialized).
+        csvfile: An open CSV file handle to write the output.
+        
+    Returns:
+        writer: A csv.DictWriter instance after writing the header (if initially None) and all rows.
+    """
+    # Loop over the two components (0 and 1, later converted to 1-based indexing)
+    if rm_epochs is not None:
+        names = [x for i, x in enumerate(names) if i not in rm_epochs]
+        jds = [x for i, x in enumerate(jds) if i not in rm_epochs]
+
+    # Loop over epochs (names)
+    for j, epoch_name in enumerate(names):
+        results_dict = {}
+        results_dict['epoch'] = epoch_name
+        if jds is not None and j < len(jds):
+            results_dict['MJD'] = jds[j]
+
+        # Calculate the mean RV and its error for component i at epoch j.
+        # Expected trace shape for Δv: (n_samples, K, ..., n_epochs)
+        results_dict['mean_rv'] = np.mean(trace['Δv'][:, j])
+        results_dict['mean_rv_er'] = np.std(trace['Δv'][:, j])
+
+        # Initialize the writer if not already created
+        if writer is None:
+            fieldnames = results_dict.keys()
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+        writer.writerow(results_dict)
+
+    return writer
+
 def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, sigma_prior, K=2, shift_kms=0,
                     wavelength_type='air', rm_epochs=None, profile='Voigt', chi2_plots=False):
     """
@@ -1449,112 +1718,6 @@ def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines
         plt.savefig(os.path.join(path, f'{type_name}_{line}_fits_SB2_.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
-def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):
-    """
-    Fits a single spectral line with a profile model (Gaussian or Lorentzian) 
-    plus a linear continuum using lmfit. Optionally adds one or two nebular 
-    emission components if the line is known to have nebular contamination.
-    
-    Parameters:
-        line (int): Central wavelength (or identifier) of the line to be fitted.
-        wave (array-like): Wavelength array from the spectrum.
-        flux (array-like): Flux array from the spectrum.
-        ferr (array-like): Flux errors.
-        lines_dic (dict): Dictionary with line parameters. Expected to include:
-            - 'region': [min, max] wavelength limits for the line.
-            - 'wid_ini': Initial guess for the line width.
-            - 'centre': Initial central wavelength (or a list where the first element is used).
-        Hlines (iterable): List of lines which should be fitted with a Lorentzian profile 
-                           (commonly for Hydrogen lines).
-        neblines (iterable): List of lines to fit with additional nebular emission components.
-        doubem (iterable): List of lines that require double-peak nebular emission models.
-        shift (float): Wavelength shift to apply to the central wavelength.
-
-    Returns:
-        result (ModelResult): The lmfit fit result object.
-        x_wave (array-like): The subset of the wavelength array used in the fit.
-        y_flux (array-like): The corresponding flux values.
-        wave_region (array-like): Boolean array indicating which wavelengths were used.
-    """
-    # Define the wavelength region for fitting
-    wave_region = (wave > lines_dic[line]['region'][0]) & (wave < lines_dic[line]['region'][1])
-    x_wave = wave[wave_region]
-    y_flux = flux[wave_region]
-    ferr_sub = ferr[wave_region]
-    # Filter out bad data points: NaN, negative errors, or zero flux
-    good = np.isfinite(ferr_sub) & (ferr_sub > 0) & np.isfinite(y_flux)
-
-    if not good.any():
-        # raise ValueError(f"No valid pixels left for line {line}")
-        print(f"Warning: No valid pixels left for line {line}. Skipping this line.")
-        return None, None, None, None
-    
-    x_wave, y_flux, ferr_sub = x_wave[good], y_flux[good], ferr_sub[good]
-
-    # Initial guesses for central wavelength and width
-    cen_ini = line + shift
-    wid_ini = lines_dic[line]['wid_ini']
-
-    # Define the models: continuum, profile (Gaussian or Lorentzian), and nebular emission(s)
-    pars = Parameters()
-    continuum = models.LinearModel(prefix='continuum_')
-    gauss_model = Model(gaussian, prefix='g1_')
-    loren_model = Model(lorentzian, prefix='l1_')
-    nebem_model1 = Model(nebu, prefix='neb1_')
-    nebem_model2 = Model(nebu, prefix='neb2_')
-    
-    # Setup continuum parameters, fix slope and constrain intercept near 1
-    pars.update(continuum.make_params())
-    pars['continuum_slope'].set(0, vary=False)
-    pars['continuum_intercept'].set(1, min=0.9)
-    
-    # Choose the individual line model based on whether the line is in Hlines
-    if line in Hlines:
-        prefix = 'l1'
-        indiv_mod = loren_model
-    else:
-        prefix = 'g1'
-        indiv_mod = gauss_model
-    pars.update(indiv_mod.make_params())
-    # Set initial amplitude based on the difference from the minimum flux,
-    # initial width from the dictionary (with some constraints),
-    # and set the central wavelength to the shifted value.
-    pars[f'{prefix}_amp'].set(1.0 - y_flux.min(), min=0.05, max=0.9)
-    pars[f'{prefix}_wid'].set(wid_ini, min=1, max=11)
-    pars[f'{prefix}_cen'].set(cen_ini, vary=True)
-    
-    # Combine the individual model with the continuum
-    mod = indiv_mod + continuum
-
-    # Add nebular emission components if the line is flagged as nebular
-    nebem_models = [nebem_model1, nebem_model2]
-    for i, nebem in enumerate(nebem_models, start=1):
-        if line in neblines:
-            pars.update(nebem.make_params())
-            # Set the nebular amplitude based on flux variation.
-            if line == 4102:
-                pars[f'neb{i}_amp'].set((y_flux.max() - y_flux.min()) * 0.6, min=0.01)
-            elif line == 4340:
-                pars[f'neb{i}_amp'].set(y_flux.max() - y_flux.min(), min=0.01)
-            else:
-                pars[f'neb{i}_amp'].set((y_flux.max() - y_flux.min()) * 0.6, min=0.01)
-            # Set width for nebular components with mild constraints.
-            pars[f'neb{i}_wid'].set(1, min=0.05, max=3)
-            # Offset the center of the nebular emission slightly differently
-            # for the first and potential second component.
-            if i == 2:
-                if line not in doubem:
-                    break  # Do not add a second nebular component if not flagged
-                pars[f'neb{i}_cen'].set(cen_ini + 0.2, vary=True)
-            else:
-                pars[f'neb{i}_cen'].set(cen_ini - 0.2, vary=True)
-            mod += nebem
-
-    # Fit the model to the data with weights from the flux errors
-    result = mod.fit(y_flux, pars, x=x_wave, weights=1 / ferr_sub)
-
-    return result, x_wave, y_flux, wave_region
-
 def mcmc_results_to_file(trace, names, jds, writer, csvfile, rm_epochs):
     """
     Write MCMC fit results for multiple components and epochs to a CSV file.
@@ -1692,110 +1855,13 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
             
             # (Optional plotting of SB2 fits is handled within fit_sb2_probmod and plot_lines_fit)
         else:
-            # SB1 fitting: iterate over each line and each epoch, fit the line, and write results to CSV
-            for i, line in enumerate(lines):
-                # Create plots if enabled; otherwise, use a placeholder list for axes
-                if plots:
-                    fig, axes = setup_fits_plots(wavelengths)
-                else:
-                    axes = [None] * len(wavelengths)
-                    
-                # Process each epoch separately
-                for j, (wave, flux, ferr, name, ax) in enumerate(zip(wavelengths, fluxes, f_errors, names, axes)):
-                    result, x_wave, y_flux, wave_region = fit_sb1(line, wave, flux, ferr, lines_dic,
-                                                                   Hlines, neblines, doubem, shift=init_guess_shift)
-                    if result is None:
-                        continue  # Skip this line if no valid pixels
-                    results[i].append(result)
-                    chisqr[i].append(result.chisqr)
-                    
-                    # Get component information if available (for nebular lines)
-                    if line in neblines:
-                        component = result.eval_components(result.params, x=x_wave)
-                        comps[i].append(component)
-                    else:
-                        component = None
-                        comps[i].append(component)
-                    
-                    # Write fit statistics to a per-line text file
-                    file_mode = 'w' if j == 0 else 'a'
-                    with open(out_path + str(line) + '_stats.txt', file_mode) as out_file:
-                        out_file.write(name + '\n')
-                        out_file.write('-' * len(name.strip()) + '\n')
-                        out_file.write(result.fit_report() + '\n\n')
-                    
-                    # Determine the appropriate prefix based on the fit type
-                    if 'g1_cen' in result.params:
-                        prefix = 'g1'
-                    elif 'l1_cen' in result.params:
-                        prefix = 'l1'
-                    else:
-                        raise ValueError("Unexpected fit type encountered.")
-                    
-                    # Build a dictionary of fit results for CSV output
-                    results_dict = {
-                        'epoch': name,
-                        'line': line,
-                        'cen1': result.params[f'{prefix}_cen'].value,
-                        'cen1_er': result.params[f'{prefix}_cen'].stderr,
-                        'amp1': result.params[f'{prefix}_amp'].value,
-                        'amp1_er': result.params[f'{prefix}_amp'].stderr,
-                        'wid1': result.params[f'{prefix}_wid'].value,
-                        'wid1_er': result.params[f'{prefix}_wid'].stderr,
-                        'chisqr': result.chisqr
-                    }
-                    if results_dict['cen1_er'] is None or results_dict['amp1_er'] is None:
-                        print('Error: Uncertainty computation failed for line', line, 'epoch', j + 1)
-                    # Optionally compute a 3-sigma uncertainty region (if available)
-                    if results_dict['cen1_er'] not in [0, None]:
-                        dely = result.eval_uncertainty(sigma=3)
-                    else:
-                        dely = None
-                    
-                    # Initialize CSV writer if needed and write the current row
-                    if writer is None:
-                        fieldnames = results_dict.keys()
-                        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                        writer.writeheader()
-                    writer.writerow(results_dict)
-                    
-                    # Plotting of the fit results if enabled
-                    if plots:
-                        xx = np.linspace(min(x_wave), max(x_wave), 500)
-                        result_new = result.eval(x=xx)
-                        init_new = result.eval(params=result.init_params, x=xx)
-                        ax.plot(x_wave, y_flux, 'k-', lw=3, ms=4, zorder=1,
-                                label=str(name.replace('./', '').replace('_', ' ')))
-                        ax.plot(xx, init_new, '--', c='grey', zorder=5)
-                        ax.plot(xx, result_new, 'r-', lw=2, zorder=4)
-                        
-                        if component is not None:
-                            if line in Hlines:
-                                ax.plot(x_wave, component['continuum_'] + component['l1_'],
-                                        '--', zorder=3, c='limegreen', lw=2)
-                            elif SB2 and line not in Hlines:
-                                ax.plot(x_wave, component['continuum_'] + component['g1_'],
-                                        '--', zorder=3, c='blue', lw=2)
-                                ax.plot(x_wave, component['continuum_'] + component['g2_'],
-                                        '--', zorder=3, c='blue', lw=2)
-                            if line in neblines:
-                                ax.plot(x_wave, component['continuum_'] + component['neb1_'],
-                                        '--', zorder=3, c='orange', lw=2)
-                            if line in neblines and not line in Hlines and not SB2:
-                                ax.plot(x_wave, component['continuum_'] + component['g1_'],
-                                        '--', zorder=3, c='limegreen', lw=2)
-                        
-                        if dely is not None:
-                            ax.fill_between(x_wave, result.best_fit - dely, result.best_fit + dely,
-                                            zorder=2, color="#ABABAB", alpha=0.5)
-                        ax.set_ylim(0.9 * y_flux.min(), 1.1 * y_flux.max())
-                # Save the figure for the current line after processing all epochs
-                if plots:
-                    fig.supxlabel('Wavelength', size=24)
-                    fig.supylabel('Flux', size=24)
-                    filename = out_path + str(line) + '_fits.png'
-                    plt.savefig(filename, bbox_inches='tight', dpi=150)
-                    plt.close()
+            # SB1 fitting: using probabilistic method
+            result, x_waves, y_fluxes = fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic,
+                                                        Hlines, neblines, out_path, shift_kms=shift_kms,
+                                                        rm_epochs=rm_epochs, profile=profile)
+            writer = mcmc_results_to_file_sb1(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
+
+        plt.close('all')
         
     return out_path
 
