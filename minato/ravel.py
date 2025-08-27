@@ -147,6 +147,79 @@ def summarize_mode_1d(samples, cred=0.68, min_sep_sigma=2, min_frac=0.2, kmeans_
 
     return center, half, 'MODE-AWARE'
 
+def make_rv_corner_for_component(dv, k, path, diagnostics=True):
+    """
+    Build a corner plot for the RVs of a single component k,
+    overlaying mode-aware and HDI summaries on the 1d marginalized posteriors.
+    """
+    # Build matrix of samples: columns = epochs for this component
+    n_samp, K, _, T = dv.shape
+    param_names = [f"RV_{k+1}_{t+1}" for t in range(T)]
+    cols = [dv[:, k, 0, t] for t in range(T)]
+    samples_k = np.vstack(cols).T
+    ndim = samples_k.shape[1]
+
+    # Corner plot
+    fig = corner.corner(
+        samples_k,
+        labels=param_names,
+        show_titles=True,
+        title_kwargs=dict(fontsize=10),
+        label_kwargs=dict(fontsize=16),
+        plot_datapoints=True,
+        smooth=0.0,
+        quiet=True
+    )
+
+    # Overlays: mode-aware vs HDI on the diagonal
+    mode_centers, mode_lo, mode_hi, hdi_centers, hdi_lo, hdi_hi, methods = [], [], [], [], [], [], []
+
+    for j in range(ndim):
+        x = samples_k[:, j]
+        # Mode-aware (dominant-mode) summary
+        val, err, method = summarize_mode_1d(x, cred=0.68, min_sep_sigma=2, min_frac=0.2)
+        mode_centers.append(val)
+        mode_lo.append(val - err)
+        mode_hi.append(val + err)
+        methods.append(method)
+
+        # Global HDI (shortest 68% interval)
+        c_hdi, e_hdi = hdi_summary(x, cred=0.68)
+        hdi_centers.append(c_hdi)
+        hdi_lo.append(c_hdi - e_hdi)
+        hdi_hi.append(c_hdi + e_hdi)
+
+    axes = np.array(fig.axes).reshape((ndim, ndim))
+    for j in range(ndim):
+        ax = axes[j, j]
+        # Mode-aware
+        ax.axvline(mode_centers[j], color='C3', lw=2, alpha=0.95, label='Mode-aware center')
+        ax.axvspan(mode_lo[j], mode_hi[j], color='C3', alpha=0.20, label='Mode-aware 68%')
+        # HDI
+        ax.axvline(hdi_centers[j], color='0.25', lw=1.2, ls='--', alpha=0.9, label='Global HDI center')
+        ax.axvspan(hdi_lo[j], hdi_hi[j], color='0.25', alpha=0.10, label='Global HDI 68%')
+
+        # Small numeric annotation
+        if diagnostics == True:
+            ax.text(
+                1.5, 0.95,
+                f"Modal {mode_centers[j]:.1f}±{(mode_hi[j]-mode_lo[j])/2:.1f}\n"
+                f"HDI  {hdi_centers[j]:.1f}±{(hdi_hi[j]-hdi_lo[j])/2:.1f}\n"
+                f"method = {methods[j]}",
+                transform=ax.transAxes, ha='right', va='top',
+                fontsize=8, bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', pad=2)
+            )
+
+    # One legend in top-left panel
+    axes[0, 0].legend(loc='center left', bbox_to_anchor=(1, 0.5),
+                      fontsize=8, frameon=True, framealpha=0.6)
+
+    fig.suptitle(f"RV posteriors (component {k+1})",
+                 y=0.995, fontsize=35)
+    fig.savefig(os.path.join(path, f"corner_rv_comp{k+1}.pdf"),
+                bbox_inches='tight')
+    plt.close()
+
 
 def gaussian(x, amp, cen, wid):
     """
@@ -792,8 +865,8 @@ def rv_shift_wavelength(lambda_emitted, v):
     lambda_observed = lambda_emitted * (1 + (v / c_kms))
     return lambda_observed
 
-def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, K=2, shift_kms=0,
-                    wavelength_type='air', rm_epochs=None, profile='Voigt', sigma_prior=10, chi2_plots=False):
+def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, sigma_prior, K=2, shift_kms=0,
+                    wavelength_type='air', rm_epochs=None, profile='Voigt', chi2_plots=False):
     """
     Fit SB2 (double-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
@@ -936,7 +1009,7 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         σ_Δv = 200.
 
         with npro.plate(f'epochs', nepochs, dim=-1):       
-            Δv_τk = npro.sample("Δv_τk", dist.Normal(loc=Δv_means, scale=1000))
+            Δv_τk = npro.sample("Δv_τk", dist.Normal(loc=Δv_means, scale=σ_Δv))
 
         with npro.plate(f'lines', nlines, dim=-2):
             # Primary amplitude
@@ -1010,7 +1083,8 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         # Sum over components and add continuum to yield the predicted flux
         fλ_pred = npro.deterministic("fλ_pred", ε + Ck.sum(axis=0))
         # Likelihood: compare predicted flux with observed flux
-        npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
+        #npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
+        npro.sample("fλ", dist.StudentT(df=8, loc=fλ_pred, scale=σ_fλ), obs=fλ)
     
     # ------------------------
     # MCMC Sampling Procedure
@@ -1131,7 +1205,8 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         Ck = npro.deterministic("C_λk", comp_profile)
 
         fλ_pred = npro.deterministic("fλ_pred", ε + comp_profile.sum(axis=0))
-        npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
+        # npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
+        npro.sample("fλ", dist.StudentT(df=8, loc=fλ_pred, scale=σ_fλ), obs=fλ)
 
     # ------------------------
     # SECOND MCMC: condition on 'frozen' samples and refit only Δv_τk
@@ -1248,13 +1323,22 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # ------------------------
     # 4) Plot 
     # ------------------------
-    plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace1, lines_dic, shift_kms, comp_sep, path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='original') # original
-    plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace2, lines_dic, shift_kms, comp_sep, path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='switched') # 2nd run
-    plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, stitched, lines_dic, shift_kms, comp_sep, path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='stitched') # stitched
-    
+    plot_path = path + 'Line_plots'
+    os.makedirs(plot_path, exist_ok=True)
+
+    if rm_epochs is not None:
+        n_epochs = n_epochs - len(rm_epochs)
+        
+    if chi2_plots:
+        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace1, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='original') # original
+        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace2, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='switched') # 2nd run
+        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final') # stitched
+    else:
+        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final', show_chi2=False)
+
     return stitched, x_waves, y_fluxes
 
-def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, comp_sep, path, chi2_1, chi2_2, type_name, n_sol=100):
+def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, comp_sep, path, chi2_1, chi2_2, type_name, n_sol=100, show_chi2=True):
     """
     Plot the SB2 line-fit results based on the posterior predictions.
 
@@ -1290,13 +1374,27 @@ def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines
         print(f'Plotting {type_name} fits for line:', line)
         fig, axes = setup_fits_plots(wavelengths)
         for epoch_idx, ax in enumerate(axes.ravel()[:n_epochs]):
-            # Extract posterior predictions for this line and epoch
-            fλ_pred_samples = trace['fλ_pred'][-n_sol:, idx, epoch_idx, :]  # (n_sol, ndata)
+
+            # --- NEW: choose exactly n_sol samples closest to the mode center (component 0 RVs) ---
+            dv = np.asarray(trace['Δv_τk'])              # (n_samples, K, 1, n_epochs)
+            if len(dv.shape) == 4:
+                rv0 = dv[:, 0, 0, epoch_idx]                 # component 0 RV samples for this epoch
+            elif len(dv.shape) == 3:
+                rv0 = dv[:, 0, epoch_idx]
+            else:
+                raise ValueError('Unexpected shape of Δv_τk samples from fit_sb2_probmod')    
+            center, _, _ = summarize_mode_1d(rv0, cred=0.68, min_sep_sigma=2, min_frac=0.2)
+            sel = np.argsort(np.abs(rv0 - center))[:min(n_sol, rv0.size)]
+            # --------------------------------------------------------------------------------------
+
+            # Extract posterior predictions for this line and epoch (only selected samples)
+            fλ_pred_samples = np.asarray(trace['fλ_pred'])[sel, idx, epoch_idx, :]  # (n_sel, ndata)
             # Extract continuum predictions
-            continuum_pred_samples = trace['ε'][-n_sol:, None]
+            continuum_pred_samples = np.asarray(trace['ε'])[sel, None]
             # Extract the posterior samples for each component
-            fλ_pred_comp1_samples = continuum_pred_samples + trace['C_λk'][-n_sol:, 0, idx, epoch_idx, :]
-            fλ_pred_comp2_samples = continuum_pred_samples + trace['C_λk'][-n_sol:, 1, idx, epoch_idx, :]
+            C_λk = np.asarray(trace['C_λk'])
+            fλ_pred_comp1_samples = continuum_pred_samples + C_λk[sel, 0, idx, epoch_idx, :]
+            fλ_pred_comp2_samples = continuum_pred_samples + C_λk[sel, 1, idx, epoch_idx, :]
 
             # Plot posterior predictive samples for each component and the total prediction
             ax.plot(x_waves[idx][epoch_idx], fλ_pred_comp1_samples.T, color='C1', alpha=0.1, rasterized=True)
@@ -1311,22 +1409,24 @@ def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines
             ax.axvline(rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms + comp_sep/2), color='orange', linestyle='--', lw=1)
             # Annotate the epoch number
             ax.text(0.15, 0.86, f'Epoch {epoch_idx+1}', transform=ax.transAxes, fontsize=16)
-            if chi2_1[epoch_idx] < chi2_2[epoch_idx]:
-                text_box = AnchoredText(f'  χ2 \n *{chi2_1[epoch_idx]:.2f}*\n  {chi2_2[epoch_idx]:.2f}', frameon=True, loc=4, pad=0.5)
-            else:
-                text_box = AnchoredText(f'  χ2 \n  {chi2_1[epoch_idx]:.2f} \n*{chi2_2[epoch_idx]:.2f}*', frameon=True, loc=4, pad=0.5)
-            plt.setp(text_box.patch, facecolor='white', alpha=0.5)
-            ax.add_artist(text_box)
+            if show_chi2:
+                if chi2_1[epoch_idx] < chi2_2[epoch_idx]:
+                    text_box = AnchoredText(f'  χ2 \n *{chi2_1[epoch_idx]:.2f}*\n  {chi2_2[epoch_idx]:.2f}', frameon=True, loc=4, pad=0.5)
+                else:
+                    text_box = AnchoredText(f'  χ2 \n  {chi2_1[epoch_idx]:.2f} \n*{chi2_2[epoch_idx]:.2f}*', frameon=True, loc=4, pad=0.5)
+                plt.setp(text_box.patch, facecolor='white', alpha=0.5)
+                ax.add_artist(text_box)
 
         ax.set_xlim(centre - 13, centre + 13)
+        min_y = fλ_pred_samples.min() - 0.2
+        max_y = fλ_pred_samples.max() + 0.2
+        ax.set_ylim(min_y, max_y)
         # Create a custom legend
         custom_lines = [
             Line2D([0], [0], color='C2', alpha=0.5, lw=2),
             Line2D([0], [0], color='C1', alpha=0.5, lw=2),
             Line2D([0], [0], color='C0', alpha=0.5, lw=2)
         ]
-        #axes[0].legend(custom_lines, ['Total Prediction', 'Component 1', 'Component 2'], 
-        #               fontsize=11, frameon=False, borderaxespad=0.1)
         fig.subplots_adjust(bottom=0.1)
 
         # Legend formatting
@@ -1334,7 +1434,7 @@ def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines
             custom_lines,
             ['Total Prediction', 'Component 1', 'Component 2'],
             loc='lower center',
-            bbox_to_anchor=(0.5, 0.04),  # closer to bottom edge
+            bbox_to_anchor=(0.5, 0.03),  # closer to bottom edge
             ncol=3,
             frameon=False,
             fontsize=14,
@@ -1343,10 +1443,10 @@ def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines
             handlelength=2.5,
         )
 
-        fig.supxlabel('Wavelength [Å]', fontsize=24)
-        fig.supylabel('Flux', fontsize=24)
- 
-        plt.savefig(os.path.join(path, f'{type_name}_{line}_fits_SB2_.png'), dpi=300)
+        fig.supxlabel('Wavelength [Å]', fontsize=24, y=-0.005)
+        fig.supylabel('Flux', fontsize=24, x=0.01)
+        plt.tight_layout()
+        plt.savefig(os.path.join(path, f'{type_name}_{line}_fits_SB2_.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
 def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):
@@ -1455,7 +1555,7 @@ def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):
 
     return result, x_wave, y_flux, wave_region
 
-def mcmc_results_to_file(trace, names, jds, writer, csvfile):
+def mcmc_results_to_file(trace, names, jds, writer, csvfile, rm_epochs):
     """
     Write MCMC fit results for multiple components and epochs to a CSV file.
     
@@ -1473,25 +1573,29 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile):
     Returns:
         writer: A csv.DictWriter instance after writing the header (if initially None) and all rows.
     """
-    # Loop over the two components (0 and 1, later converted to 1-based indexing)
+    if rm_epochs is not None:
+        names = [x for i, x in enumerate(names) if i not in rm_epochs]
+        jds = [x for i, x in enumerate(jds) if i not in rm_epochs]
+
+    n_epochs_to_write = len(names)
+    # Loop over the two components (0 and 1, output as 1 and 2)
     for i in range(2):
-        # Loop over epochs (names)
-        for j, epoch_name in enumerate(names):
+        for j in range(n_epochs_to_write):
             results_dict = {}
-            results_dict['epoch'] = epoch_name
+            results_dict['epoch'] = names[j]
             if jds is not None and j < len(jds):
                 results_dict['MJD'] = jds[j]
 
-            # Calculate the mean RV and its error for component i at epoch j.
-            # Expected trace shape for Δv_τk: (n_samples, K, ..., n_epochs)
-            results_dict['mean_rv'] = np.mean(trace['Δv_τk'][:, i, :, j])
-            q16, q84 = np.percentile(trace['Δv_τk'][:, i, :, j], [16, 84])
-            results_dict['mean_rv_er'] = 0.5 * (q84 - q16)  # 68% interval half-width
+            # Extract 1D samples for component i, epoch j
+            vals = np.squeeze(np.asarray(trace['Δv_τk'][:, i, :, j]))
+            rv_val, rv_err, mode = summarize_mode_1d(vals, cred=0.68)
+            # print(f'comp {i}, epoch {j}, mode = {mode}')
 
-            # Components are 1-based for output (i.e., Component 1 and 2)
+            results_dict['mean_rv'] = rv_val
+            results_dict['mean_rv_er'] = rv_err
             results_dict['comp'] = i + 1
+            results_dict['posterior_method'] = mode
 
-            # Initialize the writer if not already created
             if writer is None:
                 fieldnames = results_dict.keys()
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -1501,8 +1605,8 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile):
     return writer
 
 def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', instrument='FLAMES',
-          plots=True, balmer=True, neblines=[], doubem=[], SB2=False, init_guess_shift=0,
-          shift_kms=0, use_init_pars=False, rm_epochs=None, cornerplot=True):
+          plots=True, balmer=True, neblines=[], doubem=[], SB2=False, init_guess_shift=0, sigma_prior=20,
+          shift_kms=0, use_init_pars=False, rm_epochs=None, cornerplots=True, chi2_plots=False, profile='Voigt'):
     """
     Perform spectral line fitting on a list of spectra. This function reads the spectral data, sets up
     the output directory, initializes line dictionaries and fit variables, and then fits each spectral
@@ -1578,41 +1682,13 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
         if SB2:
             # SB2 fitting: fit all lines using the probabilistic SB2 model and write results to CSV
             result, x_wave, y_flux = fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic,
-                                                      Hlines, neblines, out_path, K=K, shift_kms=shift_kms, rm_epochs=rm_epochs)
+                                                      Hlines, neblines, out_path, K=K, shift_kms=shift_kms, 
+                                                      rm_epochs=rm_epochs, chi2_plots=chi2_plots, profile=profile, sigma_prior=sigma_prior)
+            writer = mcmc_results_to_file(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
 
-            # Optional cornerplot
-            if cornerplot:
-                try:
-                    params = []
-                    samples_list = []
-
-
-                    dv_array = result['Δv_τk'] # For plotting fit of each component velocity in each epoch
-                    n_samples, K, _, n_epochs = dv_array.shape
-                    for k in range(K):
-                        for t in range(n_epochs):
-                            param_name = f"Δv_{k}_{t}"
-                            param_values = dv_array[:, k, 0, t]
-                            samples_list.append(param_values)
-                            params.append(param_name)
-
-                    samples = np.vstack(samples_list).T
-
-                    fig = corner.corner(samples, labels=params, show_titles=True)
-                    fig.savefig(os.path.join(out_path, "corner_plot.png"))
-                    plt.close()
-
-                    samples_dict = {
-                        'rv1': dv_array[:, 0, 0, :],  # (n_samples, n_epochs)
-                        'rv2': dv_array[:, 1, 0, :]
-                    }
-                    plot_pair_scatter(samples_dict, savepath=out_path)
-                    plot_sign_trace(samples_dict, savepath=out_path)
-
-                except Exception as e:
-                    print("Corner plot could not be generated:", str(e))
-
-            writer = mcmc_results_to_file(result, names, jds, writer, csvfile)
+            if cornerplots == True:
+                for k in range(K):   # typically K=2, but robust if different
+                    make_rv_corner_for_component(result['Δv_τk'], k, out_path)
             
             # (Optional plotting of SB2 fits is handled within fit_sb2_probmod and plot_lines_fit)
         else:
