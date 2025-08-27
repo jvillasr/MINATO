@@ -2603,7 +2603,7 @@ def run_LS(hjd, rv, rv_err=None, probabilities=[0.5, 0.01, 0.001], method='boots
     return frequency, power, fap, fal
 
 def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=False, Pfold=True, fold_rv_curve=True, 
-                 save_power_spectrum=False):
+                 save_power_spectrum=False, starname=None):
     """
     Perform Lomb–Scargle period analysis on a DataFrame of radial velocities.
     
@@ -2638,8 +2638,9 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
         hjd1, rv1 = df['MJD'][df['comp'] == 1], df['mean_rv'][df['comp'] == 1]
     
     rv1_err = df['mean_rv_er'][df['comp'] == 1] if 'mean_rv_er' in df.columns else None
-    starname = df['epoch'][0].split('_')[0] + '_' + df['epoch'][0].split('_')[1]
-    starname = starname.split('/')[-1]
+    if starname == None:
+        starname = df['epoch'][0].split('_')[0] + '_' + df['epoch'][0].split('_')[1]
+        starname = starname.split('/')[-1]
     nepochs = len(hjd1)
     
     # Write header information
