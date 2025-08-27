@@ -32,6 +32,7 @@ print(f"JAX 64-bit enabled: {jax.config.jax_enable_x64}") # Verify
 # Set the number of devices to the number of available CPUs
 npro.set_host_device_count(multiprocessing.cpu_count())
 import corner
+from scipy.stats import gaussian_kde
 
 pd.set_option('display.max_rows', 1000)
 pd.set_option('display.max_columns', 1000)
@@ -142,10 +143,7 @@ def summarize_mode_1d(samples, cred=0.68, min_sep_sigma=2, min_frac=0.2, kmeans_
 
     # If HDI center already sits inside this dominant 68% band, prefer HDI
     if (center - half) <= hdi_center <= (center + half):
-        # print('HDI ALREADY SITS INSIDE DOMINANT 68% BAND')
         return hdi_center, hdi_half, 'HDI'
-    # else:
-    #     print('MODE-AWARE METHOD USED')
 
     return center, half, 'MODE-AWARE'
 
@@ -2847,7 +2845,8 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
         fig, ax = plt.subplots(figsize=(8, 6))
         ax.errorbar(hjd1, rv1, yerr=rv1_err, fmt='o', color='dodgerblue')
         ax.set(xlabel='MJD', ylabel='RV [km/s]')
-        plt.savefig(f'{path}LS/RVs_MJD_{starname}.png', dpi=300, bbox_inches='tight')
+        plt.tight_layout()
+        plt.savefig(f'{path}LS/RVs_MJD_{starname}.png', dpi=300)
         plt.close()
 
         bins = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
@@ -2889,6 +2888,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
                     leg = plt.legend(labels, loc='best', markerscale=0, handletextpad=0, handlelength=0)
                     for item in leg.legendHandles:
                         item.set_visible(False)
+                plt.tight_layout()
                 plt.savefig(f'{path}LS/LS_{starname}_period_{comp}_{str(len(rv1))}_epochs.png', dpi=300)
                 plt.close()
 
@@ -2914,6 +2914,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
                 else:
                     ax.get_yaxis().set_major_formatter(StrMethodFormatter('{x:.1f}'))
                 plt.title(starname+' '+comp)
+                plt.tight_layout()
                 plt.savefig(f'{path}LS/{starname}_paper_LS_{comp}.pdf')
                 plt.close()
 
@@ -2930,7 +2931,8 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
         ax.tick_params(which='both', width=0.6, labelsize=14)
         ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
         ax.get_yaxis().set_major_formatter(StrMethodFormatter('{x:,.0f}'))
-        plt.savefig(f'{path}LS/LS_{starname}_points.png', dpi=300)
+        plt.tight_layout()
+        plt.savefig(f'{path}LS/LS_{starname}_points.png', dpi=300, bbox_inches='tight')
         plt.close()
 
         # vs frequency
@@ -2955,6 +2957,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
         ax.tick_params(which='both', width=0.6, labelsize=14)
         ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
         ax.get_yaxis().set_major_formatter(StrMethodFormatter('{x:,.0f}'))
+        plt.tight_layout()
         plt.savefig(f'{path}LS/LS_{starname}_frequency.pdf')
         plt.close()
 
