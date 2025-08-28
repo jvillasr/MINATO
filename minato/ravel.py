@@ -1090,7 +1090,7 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
         plt.savefig(os.path.join(path, f'{line}_fits_SB1_.png'), dpi=300,bbox_inches='tight')
         plt.close()
 
-def mcmc_results_to_file_sb1(trace, names, jds, writer, csvfile, rm_epochs):
+def mcmc_results_to_file_sb1(trace, names, jds, writer, csvfile, rm_epochs=None):
     """
     Write MCMC fit results for multiple components and epochs to a CSV file, adapted to SB1s.
     
