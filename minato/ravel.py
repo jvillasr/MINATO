@@ -1096,7 +1096,7 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # If specific epochs have bene provided to discard from the fitting procedure
     if rm_epochs is not None:
         n_epochs = n_epochs - len(rm_epochs)
-    plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, n_sol=100)
+    plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path)
 
     # Output cornerplot of recovered RV posteriors
     if cornerplot:
@@ -1127,7 +1127,7 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
     return trace, x_waves, y_fluxes
 
-def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path):
+def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, n_sol=100):
     """
     Plot the SB1 line-fit results based on the posterior predictions by plotting the best-fitting sample
     across all epochs & lines, as determined by a χ2 test.
@@ -1152,8 +1152,9 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
         The applied velocity shift (km/s).
     path : str
         Directory path to save the plots.
+    n_sol : int
+        Number of posterior samples ot plot
     """
-
     from matplotlib.lines import Line2D 
 
     for idx, line in enumerate(lines):
