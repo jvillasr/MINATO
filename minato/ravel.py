@@ -2281,7 +2281,7 @@ def run_LS(hjd, rv, rv_err=None, probabilities=[0.5, 0.01, 0.001], method='boots
     fap = ls.false_alarm_probability(power.max(), method=method)
     return frequency, power, fap, fal
 
-def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=False, Pfold=True, fold_rv_curve=True, 
+def lomb_scargle(df, path, P_ini=1.2, P_end=500, samples_per_peak=5000, SB2=False, print_output=True, plots=True, best_lines=False, Pfold=True, fold_rv_curve=True, 
                  save_power_spectrum=False):
     """
     Perform Lomb–Scargle period analysis on a DataFrame of radial velocities.
@@ -2330,7 +2330,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
     #################################################################
     #                Running the Lomb-Scargle periodogram
     #################################################################
-    frequency1, power1, fap1, fal1 = run_LS(hjd1, rv1, rv1_err)
+    frequency1, power1, fap1, fal1 = run_LS(hjd1, rv1, rv1_err, P_ini=P_ini, P_end=P_end, samples_per_peak=samples_per_peak)
     fal1_50pc, fal1_1pc, fal1_01pc = fal1[0].value, fal1[1].value, fal1[2].value
     freq1_at_max_power = frequency1[np.argmax(power1)]
     period1_at_max_power = 1 / freq1_at_max_power
