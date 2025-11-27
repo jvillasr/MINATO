@@ -17,6 +17,7 @@ from scipy.interpolate import interp1d
 from scipy.special import wofz as scipy_wofz
 import multiprocessing
 import numpyro as npro
+from numpyro import handlers
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive
 from numpyro.infer.util import find_valid_initial_params
@@ -30,9 +31,235 @@ from exojax.special.faddeeva import rewofz
 print(f"JAX 64-bit enabled: {jax.config.jax_enable_x64}") # Verify
 # Set the number of devices to the number of available CPUs
 npro.set_host_device_count(multiprocessing.cpu_count())
+import corner
+from scipy.stats import gaussian_kde
+from astropy.time import Time
+import gc
 
 pd.set_option('display.max_rows', 1000)
 pd.set_option('display.max_columns', 1000)
+
+def trace_mean(trc):
+    """
+    Return dictionary of posterior means from trace as a numpy array.
+    """
+    return {k: np.asarray(v).mean(axis=0) for k, v in trc.items()}
+
+def get_chi2(observed_flux, model_flux, flux_error):
+    """
+    Compute chi^2 for each epoch across all lines.
+
+    In:
+    observed_flux : array, shape (n_lines, n_epochs, n_data)
+    model_flux    : array, shape (n_lines, n_epochs, n_data)
+    flux_error    : array, shape (n_lines, n_epochs, n_data)
+
+    Out:
+    chi2 : array, shape (n_epochs,)
+        Chi^2 value for each epoch.
+    """
+    observed_flux = np.asarray(observed_flux, dtype=float)
+    model_flux    = np.asarray(model_flux,    dtype=float)
+    flux_error    = np.asarray(flux_error,    dtype=float)
+
+    # Standard chi^2 formula, summed over lines and data points
+    chi2_values = np.sum(
+        ((observed_flux - model_flux) / flux_error) ** 2,
+        axis=(0, 2)
+    )
+    return chi2_values
+
+def hdi_summary(x, cred=0.68):
+    """
+    Determine the Highest Density Interval - containing (cred*100) % of samples - from MCMC posterior.
+    In:
+    x    : array-like oflength (n_samples)
+        Flattened RV samples from MCMC posterior result (via fit_sb2_probmod, fit_sb1_probmod).
+    cred : float, optional, default = 0.68
+        Fraction of samples that must be contained in the credible interval for the HDI/mode-aware analysis.
+    
+    Out:
+    Center, half-width of HDI for each epoch [km/s].
+    """
+    x = np.sort(np.asarray(x).ravel()) # sort RV samples from posterior
+    n = x.size
+    if n == 0:
+        raise ValueError('No samples in trace!')
+    k = max(1, int(np.ceil(cred * n))) # get # of samples that constitute 68% of total samples
+    widths = x[k-1:] - x[:n-k+1] # get all possible RV-space window lengths that encompass k samples
+    j = int(np.argmin(widths)) # get minimum window length (highest density interval for this cred)
+    lo, hi = x[j], x[j + k - 1]
+    return 0.5 * (lo + hi), 0.5 * (hi - lo) # return center, half-width of interval
+
+def summarize_mode_1d(samples, cred=0.68, min_sep_sigma=3, min_frac=0.2, kmeans_iters=20):
+    """
+    Mode-aware summary with automatic choice:
+      - If the marginal looks unimodal/ambiguous -> return HDI (center, half-width).
+      - If clearly bimodal -> choose the cluster with the higher peak in the 1d marginalized posterior
+        & return that cluster's median ± inner-68% half-width.
+      - If the HDI center already lies inside the HDI (68%) band, default to HDI results.
+    
+    In:
+    samples : array-like of length (n_samples)
+        The posterior RV samples for one line & epoch.
+    cred : float, optional
+        Fraction of samples that must be contained in the credible interval for the HDI/mode-aware analysis.
+    min_sep_sigma : float, optional
+        Defining a combined σ as the σs of both modes added in quadrature, this parameter determines
+        the minimum separation (in terms of the combined σ) for which the mode-aware summary will be utilized.
+        This can be fine-tuned by considering the results of the RV cornerplots.
+    min_frac: float on interval (0,1), optional
+        Minimum threshold of fraction of total samples that must be present in the dominant mode.
+    kmeans_iters : int
+        Number of iterations executed in attempting to clearly define mode centers.
+
+    Out:
+    center, half-width of dominant RV mode [km/s] : floats
+    posterior_method : str ('HDI' or 'MODE-AWARE')
+        Flags which method was used in analyzing posterior to write out to fit_values.csv.
+    """
+    x = np.asarray(samples).ravel() # flatten sample
+    x = x[np.isfinite(x)]
+    n = x.size
+    if n == 0:
+        raise ValueError("No samples in trace!")
+
+    # Fetch Highest Density Interval (appropriate when unimodal/ambiguous)
+    hdi_center, hdi_half = hdi_summary(x, cred=cred)
+
+    # Check for bimodality
+    c_low, c_high = np.percentile(x, [33, 67]) # centers at 33rd & 67th percentile
+    labels = None
+    for _ in range(kmeans_iters):
+        # assign each sample to nearest centroid
+        labels = (np.abs(x - c_high) < np.abs(x - c_low)).astype(int) #  False (label 0) near low, True (label 1) near high)
+        if labels.sum() == 0 or labels.sum() == n: # All samples assigned to one label
+            break
+        new_low  = np.median(x[labels == 0]) # median of all labels nearer 33rd percentile
+        new_high = np.median(x[labels == 1]) # median of all labels nearer 67th percentile
+        if np.allclose([new_low, new_high], [c_low, c_high]): # break if centers = medians after current iteration
+            c_low, c_high = new_low, new_high
+            break
+        c_low, c_high = new_low, new_high # update centers of bimodal dist.
+
+    # If no usable split, use HDI
+    if labels is None or labels.sum() == 0 or labels.sum() == n:
+        return hdi_center, hdi_half, 'HDI'
+
+    # Analyze two separated modes
+    m0, m1 = (labels == 0), (labels == 1)
+    x0, x1 = x[m0], x[m1]
+    frac0, frac1 = x0.size/n, x1.size/n
+
+    # Separability test (gap vs pooled blur) + dominant fraction CITE
+    combined_sigmas = np.sqrt(np.var(x0, ddof=1) + np.var(x1, ddof=1) + 1e-12)
+    gap  = abs(c_high - c_low)
+    separated = (gap >= min_sep_sigma*combined_sigmas) and (max(frac0, frac1) >= min_frac)
+    if not separated:
+        return hdi_center, hdi_half, 'HDI'
+
+    # --- Choose the cluster with the higher peak height (via KDE at medians) ---
+    kde = gaussian_kde(x, bw_method='silverman') # or 'scott'?
+    med0, med1 = np.median(x0), np.median(x1)
+
+    p0, p1 = kde([med0, med1])  # KDE peak heights at each mode's median
+
+    # Pick mode with the higher peak height
+    if p1 > p0:
+        x_main, center = x1, med1
+    else:
+        x_main, center = x0, med0
+
+    half = 0.5 * (np.percentile(x_main, 84) - np.percentile(x_main, 16))
+
+    # If HDI center already sits inside this dominant 68% band, prefer HDI
+    if (center - half) <= hdi_center <= (center + half):
+        return hdi_center, hdi_half, 'HDI'
+
+    return center, half, 'MODE-AWARE'
+
+def make_rv_corner_for_component(dv, k, path, diagnostics=True):
+    """
+    Build a corner plot for the RVs of a single component k,
+    overlaying mode-aware and HDI summaries on the 1d marginalized posteriors.
+    In:
+    dv : array of length n_samples
+        RV samples from MCMC trace for one epoch
+    k : int (0 = primary component, 1 = secondary component)
+        Select the component to plot (assume formatting of SB2 output trace).
+    path : str
+        Output path to save figure to.
+    diagnostics : bool
+        Add annotations to each epoch indicated which method (HDI/mode aware) was used.
+    """
+    # Build matrix of samples: columns = epochs for this component
+    n_samp, K, _, T = dv.shape
+    param_names = [f"RV_{k+1}_{t+1}" for t in range(T)]
+    cols = [dv[:, k, 0, t] for t in range(T)]
+    samples_k = np.vstack(cols).T
+    ndim = samples_k.shape[1]
+
+    # Corner plot
+    fig = corner.corner(
+        samples_k,
+        labels=param_names,
+        show_titles=True,
+        title_kwargs=dict(fontsize=10),
+        label_kwargs=dict(fontsize=16),
+        plot_datapoints=True,
+        smooth=0.0,
+        quiet=True
+    )
+
+    # Overlays: mode-aware vs HDI on the diagonal
+    mode_centers, mode_lo, mode_hi, hdi_centers, hdi_lo, hdi_hi, methods = [], [], [], [], [], [], []
+
+    for j in range(ndim):
+        x = samples_k[:, j]
+        # Mode-aware (dominant-mode) summary
+        val, err, method = summarize_mode_1d(x)
+        mode_centers.append(val)
+        mode_lo.append(val - err)
+        mode_hi.append(val + err)
+        methods.append(method)
+
+        # Global HDI (shortest 68% interval)
+        c_hdi, e_hdi = hdi_summary(x, cred=0.68)
+        hdi_centers.append(c_hdi)
+        hdi_lo.append(c_hdi - e_hdi)
+        hdi_hi.append(c_hdi + e_hdi)
+
+    axes = np.array(fig.axes).reshape((ndim, ndim))
+    for j in range(ndim):
+        ax = axes[j, j]
+        # Mode-aware
+        ax.axvline(mode_centers[j], color='C3', lw=2, alpha=0.95, label='Mode-aware center')
+        ax.axvspan(mode_lo[j], mode_hi[j], color='C3', alpha=0.20, label='Mode-aware 68%')
+        # HDI
+        ax.axvline(hdi_centers[j], color='0.25', lw=1.2, ls='--', alpha=0.9, label='Global HDI center')
+        ax.axvspan(hdi_lo[j], hdi_hi[j], color='0.25', alpha=0.10, label='Global HDI 68%')
+
+        # Small annotation
+        if diagnostics == True:
+            ax.text(
+                1.05, 0.95,
+                f"Modal {mode_centers[j]:.1f}±{(mode_hi[j]-mode_lo[j])/2:.1f}\n"
+                f"HDI  {hdi_centers[j]:.1f}±{(hdi_hi[j]-hdi_lo[j])/2:.1f}\n"
+                f"method = {methods[j]}",
+                transform=ax.transAxes, ha='left', va='top',
+                fontsize=8, bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', pad=2)
+            )
+
+    # Single legend in top-left panel
+    axes[0, 0].legend(loc='center left', bbox_to_anchor=(1, 0.5),
+                      fontsize=8, frameon=True, framealpha=0.6)
+
+    fig.suptitle(f"RV posteriors (component {k+1})",
+                 y=0.995, fontsize=35)
+    fig.savefig(os.path.join(path, f"corner_rv_comp{k+1}.pdf"),
+                bbox_inches='tight')
+    plt.close()
+
 
 def gaussian(x, amp, cen, wid):
     """
@@ -317,9 +544,7 @@ def read_fits(fits_file, instrument):
         (wavelength, flux, flux_error, star_epoch, mjd)
     """
     with fits.open(fits_file) as hdul:
-        # print(hdul.info())
         header = hdul[0].header
-        # print(repr(header))
         try:
             if instrument == 'FLAMES':
                 # BLOeM
@@ -436,10 +661,7 @@ def read_spectra(filelist, path, file_type, instrument=None, SB2=False):
     if file_type in ['dat', 'txt', 'csv']:
         # Check if JDs.txt file with observation times exists:
         try:
-            # print(f"Looking for JDs.txt file in {path}...")
-            if SB2==True:
-                path = path+'SB2/'
-            with open(path + 'JDs.txt', 'r') as f:
+            with open(os.path.join(path, 'JDs.txt'), 'r') as f:
                 df_jds = pd.read_csv(f, header=None, sep=r'\s+', dtype=str)
                 jds = df_jds[1].tolist()
         except FileNotFoundError:
@@ -447,6 +669,39 @@ def read_spectra(filelist, path, file_type, instrument=None, SB2=False):
             jds.append(None)
 
     return wavelengths, fluxes, f_errors, names, jds
+
+# def setup_star_directory_and_save_jds(names, jds, path, SB2):
+#     """
+#     Prepare a directory for star data and save the corresponding Julian Dates.
+
+#     Parameters:
+#     names : list
+#         List of star names.
+#     jds : list
+#         List of Julian Dates for each observation.
+#     path : str
+#         Base directory to store the files.
+#     SB2 : bool
+#         If True, specifies the system as a spectroscopic binary (SB2) and modifies the path.
+
+#     Returns:
+#     str
+#         The final directory path used for saving the data.
+#     """
+#     try:
+#         basename = names[0].split('.')[0]  
+#         star = basename + '/'
+#     except IndexError:
+#         star = 'Unknown_Star/'
+#     star_path = os.path.join(path, star)
+#     # if SB2:
+#     #    star_path = os.path.join(star_path, 'SB2/')
+#     if not os.path.exists(star_path):
+#         os.makedirs(star_path)
+#     if any(jds):
+#         df_mjd = pd.DataFrame({'epoch': names, 'JD': jds})
+#         df_mjd.to_csv(os.path.join(star_path, 'JDs.txt'), index=False, header=False, sep='\t')
+#     return star_path
 
 def setup_star_directory_and_save_jds(names, jds, path, SB2):
     """
@@ -466,20 +721,20 @@ def setup_star_directory_and_save_jds(names, jds, path, SB2):
     str
         The final directory path used for saving the data.
     """
-    try:
-        basename = names[0].split('.')[0]  
-        star = basename + '/'
-    except IndexError:
-        star = 'Unknown_Star/'
-    star_path = os.path.join(path, star)
-    if SB2:
-        star_path = os.path.join(star_path, 'SB2/')
+    import os
+    import pandas as pd
+
+    star_path = path
     if not os.path.exists(star_path):
         os.makedirs(star_path)
     if any(jds):
-        df_mjd = pd.DataFrame({'epoch': names, 'JD': jds})
-        df_mjd.to_csv(os.path.join(star_path, 'JDs.txt'), index=False, header=False, sep='\t')
+        clean_names = [os.path.basename(n) for n in names]
+        df_mjd = pd.DataFrame({'epoch': clean_names, 'JD': jds})
+        df_mjd.to_csv(os.path.join(star_path, 'JDs.txt'),
+                      index=False, header=False, sep='\t')
+
     return star_path
+
 
 def setup_line_dictionary():
     """
@@ -619,14 +874,11 @@ def setup_fits_plots(wavelengths):
     tuple
         (fig, axes) matplotlib Figure and array of Axes objects.
     """
-    # print('Setting up spectral-lines fit plots...')
     nplots = len(wavelengths)
     ncols = int(np.sqrt(nplots))
     nrows = nplots // ncols
     if ncols * nrows < nplots:
         nrows += 1
-    # print('  Number of columns:', ncols)
-    # print('  Number of rows:', nrows)
     fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(4 * ncols/1.2, 3 * nrows/1.2), sharey=True, sharex=True)
     fig.subplots_adjust(
         wspace=0.,   # No horizontal space between subplots
@@ -659,10 +911,10 @@ def rv_shift_wavelength(lambda_emitted, v):
     lambda_observed = lambda_emitted * (1 + (v / c_kms))
     return lambda_observed
 
-def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, K=2, shift_kms=0,
-                    wavelength_type='air', rm_epochs=None):
+def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path,
+                    shift_kms=0, wavelength_type='air', rm_epochs=None, profile='Voigt', cornerplot=True):
     """
-    Fit SB2 (double-lined spectroscopic binary) spectral lines using a probabilistic
+    Fit SB1 (single-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
     constructs a Bayesian model for the line profiles, and samples the posterior via
     MCMC (using NUTS).
@@ -685,12 +937,362 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         (Currently unused) List of nebular lines.
     path : str
         Path for storing output plots.
+    sigma_prior : float
+        Sigma on Gaussian priors for RV fitting in the second MCMC run [km/s].
     K : int, optional
         Number of components (default 2).
     shift_kms : float, optional
         The overall velocity shift in km/s. For example, use 172 km/s for the SMC.
     wavelength_type : str, optional
         Type of wavelength to use ('air' or 'vacuum'). Default is 'air'.
+    rm_epochs : list, optional
+        The indices (0-based) of the epochs to remove from the fitting.
+    profile : str, optional ('Voigt' or 'Gaussian)
+        Profile type used for all components in the spectral line fitting.
+    chi2_plots : bool
+        Enable/disable seperate plotting of first, second, and final (stitched) MCMC results.
+    cornerplot : bool
+        Enable/disable automatic cornerplot of RV posteriors for each epoch.
+
+    Returns:
+    --------
+    trace : dict
+        The MCMC trace (posterior samples).
+    x_waves : array (JAX)
+        The interpolated wavelength grid for each line and epoch.
+    y_fluxes : array (JAX)
+        The interpolated fluxes.
+    """
+    n_lines = len(lines)
+    n_epochs = len(wavelengths)
+    print('Number of lines:', n_lines)
+    print('Number of epochs:', n_epochs)
+
+    # Determine the key to use based on the chosen wavelength type
+    key = 'centre' if wavelength_type == 'vacuum' else 'air'
+
+    # Boolean mask for Hydrogen lines (will use Lorentzian instead of Gaussian)
+    is_hline = jnp.array([line in Hlines for line in lines])
+
+    # Interpolate fluxes and errors to a common grid
+    x_waves_interp, y_fluxes_interp, y_errors_interp = [], [], []
+    common_grid_length = 200  # Choose a consistent number of points for interpolation
+
+    for line in lines:
+        region_start, region_end = lines_dic[line]['region']
+        # Shift the region boundaries by shift_kms
+        region_start = rv_shift_wavelength(region_start, shift_kms)
+        region_end = rv_shift_wavelength(region_end, shift_kms)
+
+        x_waves_line, y_fluxes_line, y_errors_line = [], [], []
+
+        for wave_set, flux_set, error_set in zip(wavelengths, fluxes, f_errors):
+            mask = (wave_set > region_start) & (wave_set < region_end)
+            wave_masked = wave_set[mask]
+            flux_masked = flux_set[mask]
+            if error_set is not None:
+                error_masked = error_set[mask]
+            else:
+                f_err = compute_flux_err(wave_set, flux_set)
+                error_masked = f_err[mask]
+
+            # Interpolate onto a common wavelength grid for this line and epoch
+            common_wavelength_grid = np.linspace(wave_masked.min(), wave_masked.max(), common_grid_length)
+            interp_flux = interp1d(wave_masked, flux_masked, bounds_error=False, fill_value="extrapolate")(common_wavelength_grid)
+            interp_error = interp1d(wave_masked, error_masked, bounds_error=False, fill_value="extrapolate")(common_wavelength_grid)
+
+            x_waves_line.append(common_wavelength_grid)
+            y_fluxes_line.append(interp_flux)
+            y_errors_line.append(interp_error)
+
+        x_waves_interp.append(x_waves_line)
+        y_fluxes_interp.append(y_fluxes_line)
+        y_errors_interp.append(y_errors_line)
+
+    # Convert the interpolated lists to JAX arrays (all dimensions now match)
+    x_waves = jnp.array(x_waves_interp)
+    y_fluxes = jnp.array(y_fluxes_interp)
+    y_errors = jnp.array(y_errors_interp)
+
+    # Remove bad epochs along the second axis (axis=1)
+    if rm_epochs is not None:
+        x_waves = jnp.delete(x_waves, jnp.array(rm_epochs), axis=1)
+        y_fluxes = jnp.delete(y_fluxes, jnp.array(rm_epochs), axis=1)
+        y_errors = jnp.delete(y_errors, jnp.array(rm_epochs), axis=1)
+
+    # Initial guess for the rest (central) wavelength from lines_dic
+    cen_ini = jnp.array([lines_dic[line][key][0] for line in lines])
+
+    # Define the probabilistic SB1 model
+    def sb1_model(λ, fλ, σ_fλ, is_hline):
+        c_kms = c.to('km/s').value
+        nlines, nepochs, ndata = λ.shape
+
+        # Sample continuum level with uncertainty
+        logσ_ε = npro.sample('logσ_ε', dist.Uniform(-5, 0))
+        σ_ε = jnp.exp(logσ_ε)
+        ε = npro.sample('ε', dist.TruncatedNormal(loc=1.0, scale=σ_ε, low=0.7, high=1.1))
+
+        # Define rest wavelengths as a parameter (one per line)
+        λ_rest = npro.param("λ_rest", cen_ini)
+
+        σ_Δv = 500. # standard deviation (spread of prior on velocity) to supply to random var. in prob. NumPyro model?
+
+        with npro.plate('epochs', nepochs, dim=-2):
+            Δv = npro.sample("Δv", dist.Uniform(-σ_Δv, σ_Δv))
+        # make it 1-D for broadcasting 
+        Δv = jnp.squeeze(Δv, axis=-1)
+
+        with npro.plate('lines', nlines, dim=-3):
+            amp   = npro.sample('amp',   dist.TruncatedNormal(loc=0.18, scale=0.06, low=0.02, high=0.80))   # (L,1,1)
+            wid_G = npro.sample('wid_G', dist.Uniform(0.5, 5.0))   # (L,1,1)
+            wid_L = npro.sample('wid_L', dist.Uniform(0.1, 3.0))   # (L,1,1)
+            wid   = npro.sample('wid',   dist.Uniform(0.5, 5.0))   # (L,1,1)
+
+        # Make λ_rest a deterministic variable and reshape for broadcasting
+        λ0 = npro.deterministic("λ0", λ_rest[:, None, None])   # (L,1,1)
+
+        # Compute shifted wavelengths for each epoch
+        μ = λ0 * (1 + Δv[None, :, None] / c_kms)               # (L,E,1)
+
+        # Prepare the observed wavelengths for model evaluation
+        λ_expanded = λ                                         # (L,E,N)
+        is_hline_expanded = is_hline[:, None, None]            # (L,1,1)
+
+        # Compute the model profiles
+        G = gaussian(λ_expanded, amp, μ, wid_G)                # (L,E,N)
+        L = lorentzian(λ_expanded, amp, μ, wid_L)             # (L,E,N)
+        V  = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)    # (L,E,N)
+
+        # Use Lorentzian for Hydrogen lines, Gaussian or Voigt otherwise:
+        if profile =='Voigt':
+            comp = jnp.where(is_hline_expanded, L, V)             # (L,E,N)
+        elif profile =='Gaussian':
+            comp = jnp.where(is_hline_expanded, L, G)  
+        else:
+            raise ValueError('profile argument must be one of Voigt or Gaussian')
+
+        # Sum component profile and add continuum to yield the predicted flux
+        fλ_pred = npro.deterministic("fλ_pred", ε + comp)      # (L,E,N)
+
+        # Likelihood: compare predicted flux with observed flux
+        npro.sample("fλ", dist.StudentT(df=8, loc=fλ_pred, scale=σ_fλ), obs=fλ)
+
+    # ------------------------
+    # MCMC Sampling Procedure
+    # ------------------------
+    rng_key = random.PRNGKey(0)
+    kernel = NUTS(sb1_model)
+    mcmc = MCMC(kernel, num_warmup=1000, num_chains=4, num_samples=2000)
+    mcmc.run(rng_key, extra_fields=("potential_energy",),
+             λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, is_hline=is_hline)
+
+    potential_energy = mcmc.get_extra_fields()['potential_energy']
+    log_probs = -potential_energy
+    log_prob = np.mean(log_probs)
+
+    trace = mcmc.get_samples(group_by_chain=False)
+
+    # If specific epochs have bene provided to discard from the fitting procedure
+    if rm_epochs is not None:
+        n_epochs = n_epochs - len(rm_epochs)
+    plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path)
+
+    # Output cornerplot of recovered RV posteriors
+    if cornerplot:
+        dv = np.asarray(trace["Δv"])   # shape (S, E)
+        S, E, _ = dv.shape
+        data = jnp.squeeze(dv)
+        n_samp, E, _ = dv.shape
+        param_names = [f"RV_{e+1}" for e in range(E)]
+        cols = [dv[:, e, 0] for e in range(E)]
+        samples_k = np.vstack(cols).T
+        ndim = samples_k.shape[1]
+
+        # Corner plot
+        fig = corner.corner(
+            samples_k,
+            labels=param_names,
+            show_titles=True,
+            title_kwargs=dict(fontsize=10),
+            label_kwargs=dict(fontsize=16),
+            plot_datapoints=True,
+            smooth=0.0,
+            quiet=True
+        )
+
+        out_png = os.path.join(path, "cornerplot.png")
+        fig.savefig(out_png, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+    return trace, x_waves, y_fluxes
+
+def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, n_sol=100):
+    """
+    Plot the SB1 line-fit results based on the posterior predictions by plotting the best-fitting sample
+    across all epochs & lines, as determined by a χ2 test.
+
+    Parameters:
+    -----------
+    wavelengths : list
+        Original wavelength arrays.
+    lines : list
+        List of spectral line identifiers.
+    x_waves : JAX array
+        Interpolated wavelength grids (per line and epoch).
+    y_fluxes : JAX array
+        Interpolated fluxes.
+    n_epochs : int
+        Number of epochs.
+    trace : dict
+        Posterior samples from MCMC.
+    lines_dic : dict
+        Dictionary with spectral line details.
+    shift_kms : float
+        The applied velocity shift (km/s).
+    path : str
+        Directory path to save the plots.
+    n_sol : int
+        Number of posterior samples ot plot
+    """
+    from matplotlib.lines import Line2D 
+
+    for idx, line in enumerate(lines):
+        print('Plotting fits for line:', line)
+        fig, axes = setup_fits_plots(wavelengths)
+        for epoch_idx, ax in enumerate(axes.ravel()[:n_epochs]):
+            f_pred = trace['fλ_pred']
+            # If it came out (S, epochs, lines, N), swap to (S, lines, epochs, N)
+            if f_pred.shape[1] == n_epochs and f_pred.shape[2] == len(lines):
+                f_pred = np.swapaxes(f_pred, 1, 2)
+
+            fλ_pred_samples = f_pred[-n_sol:, idx, epoch_idx, :]
+            continuum_pred_samples = trace['ε'][-n_sol:, None]
+            ax.plot(x_waves[idx][epoch_idx], fλ_pred_samples.T, color='orangered', alpha=0.1, rasterized=True)
+            # Plot the observed data
+            ax.plot(x_waves[idx][epoch_idx], y_fluxes[idx][epoch_idx], color='k', lw=1, alpha=0.8)
+            # Plot vertical lines for the rest wavelength and component shifts
+            centre = rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms)
+            ax.axvline(centre, color='r', linestyle='--', lw=1)
+            ax.axvline(rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms), color='orange', linestyle='--', lw=1)
+            ax.axvline(rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms), color='orange', linestyle='--', lw=1)
+            # Annotate the epoch number
+            ax.text(0.1, 0.1, f'Epoch {epoch_idx+1}', transform=ax.transAxes, fontsize=16)
+
+        ax.set_xlim(centre - 13, centre + 13)
+        fig.supxlabel('Wavelength [Å]', fontsize=24, y=-0.015)
+        fig.supylabel('Flux', fontsize=24, x=-0.01)
+        
+        custom_lines = [
+            Line2D([0], [0], color='orangered', lw=2)
+        ]
+        fig.subplots_adjust(bottom=0.1)
+
+        # Legend formatting
+        fig.legend(
+            custom_lines,
+            ['Prediction'],
+            loc='lower center',
+            bbox_to_anchor=(0.5, 0.02),  # closer to bottom edge
+            ncol=3,
+            frameon=False,
+            fontsize=14,
+            borderaxespad=0.0,
+            columnspacing=1.5,
+            handlelength=2.5,
+        )
+
+        plt.savefig(os.path.join(path, f'{line}_fits_SB1_.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+
+def mcmc_results_to_file_sb1(trace, names, jds, writer, csvfile, rm_epochs=None):
+    """
+    Write MCMC fit results for an SB1 (single component) to a CSV file.
+    
+    The function utilizes either HDI or mode-aware analysis (see  summarize_mode_1d) to define RV results from 
+    the posterior, and writes out to a file called fit_values.csv.
+    
+    Parameters:
+        trace (dict): Dictionary containing MCMC samples (expects key 'Δv_τk').
+        names (list): List of epoch identifiers (e.g., names of spectra or observation epochs).
+        jds (list): List of corresponding Julian Dates (or None if unavailable).
+        writer (csv.DictWriter or None): A DictWriter object or None (if first call, will be initialized).
+        csvfile: An open CSV file handle to write the output.
+        rm_epochs (list): indices of epochs discounted from the fitting procedure.
+        
+    Returns:
+        writer: A csv.DictWriter instance after writing the header (if initially None) and all rows.
+    """
+    # Loop over the two components (0 and 1, later converted to 1-based indexing)
+    if rm_epochs is not None:
+        names = [x for i, x in enumerate(names) if i not in rm_epochs]
+        jds = [x for i, x in enumerate(jds) if i not in rm_epochs]
+
+    # Loop over epochs (names)
+    for j, epoch_name in enumerate(names):
+        results_dict = {}
+        results_dict['epoch'] = epoch_name
+        if jds is not None and j < len(jds):
+            results_dict['MJD'] = jds[j]
+
+        # Calculate the mean RV and its error at epoch j.
+        vals = (np.asarray(trace['Δv'][:, j]))
+        rv_val, rv_err, mode = summarize_mode_1d(vals)
+        results_dict['mean_rv'] = rv_val
+        results_dict['mean_rv_er'] = rv_err
+        results_dict['posterior_method'] = mode # method used to fetch results from posterior
+
+        # Initialize the writer if not already created
+        if writer is None:
+            fieldnames = results_dict.keys()
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+        writer.writerow(results_dict)
+
+    return writer
+
+def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, sigma_prior, K=2, shift_kms=0,
+                    wavelength_type='air', rm_epochs=None, profile='Voigt', chi2_plots=False):
+    """
+    Fit SB2 (double-lined spectroscopic binary) spectral lines using a probabilistic
+    model with Numpyro. The function interpolates spectral data onto a common grid,
+    constructs a Bayesian model for the line profiles, and samples the posterior via
+    MCMC (using NUTS). To improve robustness against switching, a second model is constructed
+    that re-samples only the RV posteriors. The best-fitting result between both runs is 
+    determined via a χ2 comparison.
+    
+    Parameters:
+    -----------
+    lines : list
+        List of spectral line identifiers (keys from lines_dic) to be fitted.
+    wavelengths : list
+        List (per epoch) of wavelength arrays.
+    fluxes : list
+        List (per epoch) of flux arrays.
+    f_errors : list
+        List (per epoch) of flux error arrays.
+    lines_dic : dict
+        Dictionary containing spectral line regions, initial centre guesses, etc.
+    Hlines : list
+        List of lines (subset of `lines`) that are Hydrogen lines.
+    neblines : list
+        (Currently unused) List of nebular lines.
+    path : str
+        Path for storing output plots.
+    sigma_prior : float
+        Sigma on Gaussian priors for RV fitting in the second MCMC run [km/s].
+    K : int, optional
+        Number of components (default 2).
+    shift_kms : float, optional
+        The overall velocity shift in km/s. For example, use 172 km/s for the SMC.
+    wavelength_type : str, optional
+        Type of wavelength to use ('air' or 'vacuum'). Default is 'air'.
+    rm_epochs : list, optional
+        The indices (0-based) of the epochs to remove from the fitting.
+    profile : str, optional ('Voigt' or 'Gaussian)
+        Profile type used for all components in the spectral line fitting.
+    chi2_plots : bool
+        Enable/disable seperate plotting of first, second, and final (stitched) MCMC results.
 
     Returns:
     --------
@@ -764,8 +1366,6 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # Initial guess for the rest (central) wavelength from lines_dic
     cen_ini = jnp.array([lines_dic[line][key][0] for line in lines])
 
-    epoch_ref = 1    # or choose automatically
-
     # Define the probabilistic SB2 model
     def sb2_model(λ, fλ, σ_fλ, K, is_hline, Δv_means):
         """
@@ -805,19 +1405,15 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         σ_Δv = 200.
 
         with npro.plate(f'epochs', nepochs, dim=-1):       
-            # Δv_raw = npro.sample("Δv_raw", dist.Normal(loc=Δv_means, scale=σ_Δv).expand([K, nepochs]))
-            # Δv_raw = npro.sample("Δv_raw", dist.Normal(loc=Δv_means, scale=σ_Δv))   # shape (K, nepochs)
-            # Δv_sorted = Δv_raw.at[:, epoch_ref].set(jnp.sort(Δv_raw[:, epoch_ref]))
-            # Δv_τk = npro.deterministic("Δv_τk", Δv_sorted) 
             Δv_τk = npro.sample("Δv_τk", dist.Normal(loc=Δv_means, scale=σ_Δv))
-            # Δv_τk shape: (K, nepochs)
 
-        # Sample amplitudes and widths for each line
-        amp1_min, amp1_max = 0.05, 0.3
-        amp2_min = 0.01
         with npro.plate(f'lines', nlines, dim=-2):
-            amp0 = npro.sample('amp0', dist.Uniform(amp1_min, amp1_max))
-            amp1 = npro.sample('amp1', dist.Uniform(amp2_min, 0.75 * amp0))
+            # Primary amplitude
+            amp0 = npro.sample("amp0", dist.TruncatedNormal(loc=0.18, scale=0.06, low=0.02, high=0.40))
+            # Depth ratio
+            amp_ratio = npro.sample("amp_ratio", dist.TruncatedNormal(loc=0.60, scale=0.15, low=0.25, high=0.95))
+            amp1 = amp_ratio * amp0
+
             # Stack amplitudes for two components and add extra dimensions for broadcasting
             amp = jnp.stack([amp0, amp1], axis=-3)  # Shape: (2, n_lines)
             amp = amp[:, :, None]  # Shape: (2, n_lines, 1)
@@ -869,254 +1465,382 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         gaussian_profile = gaussian(λ_expanded, amp, μ, wid)
         lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
         voigt_profile = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
-        # Use Lorentzian for Hydrogen lines, Gaussian otherwise:
-        comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
-        # comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
-        # comp_profile = gaussian_profile
-        # comp_profile = voigt_profile
+
+        # Use Lorentzian for Hydrogen lines, Gaussian or Voigt otherwise:
+        if profile == 'Voigt':
+            comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
+        elif profile == 'Gaussian':
+            comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
+        else:
+            raise ValueError('Profile to fit must be one of Voigt or Gaussian')
+
         Ck = npro.deterministic("C_λk", comp_profile)
 
         # Sum over components and add continuum to yield the predicted flux
         fλ_pred = npro.deterministic("fλ_pred", ε + Ck.sum(axis=0))
-        # Likelihood: compare predicted flux with observed flux
-        npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
 
+        # Likelihood: compare predicted flux with observed flux
+        npro.sample("fλ", dist.StudentT(df=8, loc=fλ_pred, scale=σ_fλ), obs=fλ)
+    
     # ------------------------
     # MCMC Sampling Procedure
     # ------------------------
-    comp_sep = 500.
+    comp_sep = 200. # initially proposed component separation
     Δv_means = jnp.array([shift_kms - comp_sep/2, shift_kms + comp_sep/2]).reshape(K, 1, 1)
-    print(f"\nFitting with Δv_means: {Δv_means}")
+    print(f"\nFitting with profile: {profile}, Δv_means: {Δv_means}")
 
-    # Set a fixed random key (you can change this seed if desired)
+    # ------------------------
+    # FIRST MCMC
+    # ------------------------
     rng_key = random.PRNGKey(0)
-
-
-
-    # prior = Predictive(sb2_model, num_samples=200)
-    # s = prior(rng_key, λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors,
-    #         K=K, is_hline=is_hline, Δv_means=Δv_means)
-    # dv = s["Δv_τk"]        # shape (200, K, nepochs)
-    # assert (dv[:,0,epoch_ref] < dv[:,1,epoch_ref]).all()
-
-
-
-
     kernel = NUTS(sb2_model)
-    mcmc = MCMC(kernel, num_warmup=1000, num_samples=2000)
+    mcmc = MCMC(kernel, num_warmup=1000, num_chains=4, num_samples=2000)
     mcmc.run(rng_key, extra_fields=("potential_energy",), 
              λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means)
 
-    # Evaluate the mean log posterior probability (for diagnostic purposes)
-    potential_energy = mcmc.get_extra_fields()['potential_energy']
-    log_probs = -potential_energy  # Convert potential energy to log probability
-    log_prob = np.mean(log_probs)
-    print(f"Mean log posterior probability: {log_prob}")
+    trace1 = mcmc.get_samples()
 
-    # Get the MCMC trace (posterior samples)
-    trace = mcmc.get_samples()
+    # ---------------------------------------------------------
+    # Build frozen dict from first MCMC posterior means
+    # ---------------------------------------------------------
+    def get_post_median(name):
+        return jnp.array(np.median(trace1[name], axis=0))
 
-    # Optionally perform prior predictive checks (set fλ_pred_plot=True to activate)
-    fλ_pred_plot = False
-    if fλ_pred_plot:
-        num_prior_samples = 200
-        prior_predictive = Predictive(sb2_model, num_samples=num_prior_samples)
-        prior_samples = prior_predictive(rng_key, λ=x_waves, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means)
-        # Plotting code for prior predictive checks can go here...
-        plt.show()
+    frozen = {
+        "logσ_ε":      get_post_median("logσ_ε"),     # scalar
+        "ε":           get_post_median("ε"),          # scalar
+        "amp0":        get_post_median("amp0"),       # (n_lines,)
+        "amp_ratio":   get_post_median("amp_ratio"),  # (n_lines,)
+        "wid1":        get_post_median("wid1"),       # (n_lines,)
+        "delta_wid":   get_post_median("delta_wid"),  # (n_lines,)
+        "wid_G1":      get_post_median("wid_G1"),     # (n_lines,)
+        "wid_L1":      get_post_median("wid_L1"),     # (n_lines,)
+        "delta_wid_G": get_post_median("delta_wid_G"),# (n_lines,)
+        "delta_wid_L": get_post_median("delta_wid_L") # (n_lines,)
+        # DOES NOT include 'Δv_τk'
+    }
+
+    # RV priors for second MCMC run, switched relative to the first
+    dv_prior = np.squeeze(np.mean(np.asarray(trace1["Δv_τk"]), axis=0))  # (K,E)
+    if dv_prior.ndim != 2:
+        raise ValueError(f"dv_prior shape {dv_prior.shape}, expected (2, E)")
+    dv_prior_sw = dv_prior[::-1, :]  # swapping component RVs
+
+    # ------------------------------------
+    # RV-only model with swapped prior
+    # ------------------------------------
+    def rv_only_model(λ, fλ, σ_fλ, K, is_hline,
+                    dv_prior_sw, sigma_prior):
+        """
+        Numpyro model for SB2 RV-only fitting.
+
+        Parameters:
+        -----------
+        λ : JAX array
+            Interpolated wavelengths with shape (n_lines, n_epochs, ndata).
+        fλ : JAX array
+            Observed fluxes with shape (n_lines, n_epochs, ndata).
+        σ_fλ : JAX array
+            Flux uncertainties with shape (n_lines, n_epochs, ndata).
+        K : int
+            Number of velocity components.
+        is_hline : JAX array
+            Boolean mask for Hydrogen lines.
+
+        Returns:
+        --------
+        Samples are observed via npro.sample("fλ", ...).
+        """
+        nlines, nepochs, ndata = λ.shape
+        c_kms = 299792.458
+
+        # Switched prior
+        with npro.plate("epochs", nepochs, dim=-1):
+            Δv_τk = npro.sample("Δv_τk",
+                dist.Normal(loc=jnp.array(dv_prior_sw), scale=sigma_prior)  # dv_prior_sw: (K, E)
+            )
+        Δv_τk = Δv_τk[:, None, :]
+
+        # From the first 
+        logσ_ε = npro.sample('logσ_ε', dist.Uniform(-5, 0))
+        σ_ε    = jnp.exp(logσ_ε)
+        ε      = npro.sample('ε', dist.TruncatedNormal(loc=1.0, scale=σ_ε, low=0.7, high=1.1))
+
+        # wavelengths param (constant)
+        λ_rest = npro.param("λ_rest", cen_ini)  # (n_lines,)
+
+        # as before:
+        with npro.plate('lines', nlines, dim=-2):
+            amp0      = npro.sample("amp0", dist.TruncatedNormal(loc=0.18, scale=0.06, low=0.02, high=0.40))
+            amp_ratio = npro.sample("amp_ratio", dist.TruncatedNormal(loc=0.60, scale=0.15, low=0.25, high=0.95))
+
+            wid1      = npro.sample('wid1', dist.Uniform(0.5, 5.0))
+            delta_wid = npro.sample('delta_wid', dist.Uniform(0.1, 2.0))
+
+            wid_G1      = npro.sample('wid_G1', dist.Uniform(0.5, 5.0))
+            wid_L1      = npro.sample('wid_L1', dist.Uniform(0.1, 3.0))
+            delta_wid_G = npro.sample('delta_wid_G', dist.Uniform(0.1, 2.0))
+            delta_wid_L = npro.sample('delta_wid_L', dist.Uniform(0.05, 1.0))
+
+            # build shapes exactly as in run 1
+            amp1 = amp_ratio * amp0
+            amp  = jnp.stack([amp0, amp1], axis=-3)[:, :, None]     # (K, n_lines, 1)
+
+            wid2 = wid1 + delta_wid
+            wid  = jnp.stack([wid1, wid2], axis=-3)[:, :, None]     # (K, n_lines, 1)
+
+            wid_G2 = wid_G1 + delta_wid_G
+            wid_L2 = wid_L1 + delta_wid_L
+            wid_G  = jnp.stack([wid_G1, wid_G2], axis=-3)[:, :, None]
+            wid_L  = jnp.stack([wid_L1, wid_L2], axis=-3)[:, :, None]
+
+        # centers and likelihood
+        λ0 = λ_rest[None, :, None]                               # (1, n_lines, 1)
+        μ  = (λ0 * (1 + Δv_τk / c_kms))[:, :, :, None]            # (K, n_lines, n_epochs, 1)
+
+        λ_expanded        = λ[None, :, :, :]                     # (1, n_lines, n_epochs, ndata)
+        is_hline_expanded = is_hline[None, :, None, None]        # (1, n_lines, 1, 1)
+
+        gaussian_profile   = gaussian(λ_expanded, amp, μ, wid)
+        lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
+        voigt_profile      = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
+
+        if profile == 'Voigt':
+            comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, voigt_profile)
+        elif profile == 'Gaussian':
+            comp_profile = jnp.where(is_hline_expanded, lorentzian_profile, gaussian_profile)
+        else:
+            raise ValueError('Profile to fit must be one of Voigt or Gaussian')
+            
+        Ck = npro.deterministic("C_λk", comp_profile)
+
+        fλ_pred = npro.deterministic("fλ_pred", ε + comp_profile.sum(axis=0))
+        # npro.sample("fλ", dist.Normal(fλ_pred, σ_fλ), obs=fλ)
+        npro.sample("fλ", dist.StudentT(df=8, loc=fλ_pred, scale=σ_fλ), obs=fλ)
+
+    # ----------------------------------------------------------------
+    # SECOND MCMC: condition on frozen samples and refit only Δv_τk
+    # ----------------------------------------------------------------
+    conditioned_rv_model = handlers.condition(rv_only_model, frozen)
+
+    rng_key2 = random.PRNGKey(2)
+    kernel2  = NUTS(conditioned_rv_model)
+    mcmc2    = MCMC(kernel2, num_warmup=1000, num_chains=4, num_samples=2000)
+    mcmc2.run(
+        rng_key2, extra_fields=("potential_energy",),
+        λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, 
+        dv_prior_sw=dv_prior_sw, sigma_prior=sigma_prior
+    )
+
+    trace2 = mcmc2.get_samples()
+
+    # Give trace2 'ε' array from trace1 for plotting
+    eps_scalar = float(np.asarray(frozen["ε"]))
+    n2 = trace2["Δv_τk"].shape[0] # nsamples in trace2
+    trace2["ε"] = np.full((n2,), eps_scalar, dtype=float)
+
+    # Extract chi2 from best n_sols models
+    n_sols = 100
+
+    # MCMC1
+    f1  = np.asarray(trace1["fλ_pred"])    # (n_samples, n_lines, n_epochs, n_points)
+    dv1 = np.asarray(trace1["Δv_τk"])      # (n_samples, K, 1, n_epochs)
+    S, L, E, N = f1.shape
+    model_result_orig = np.empty((L, E, N), dtype=f1.dtype)
+    for epoch in range(E):
+        rv0 = dv1[:, 0, 0, epoch]
+        center, _, _ = summarize_mode_1d(rv0)
+        sols = np.argsort(np.abs(rv0 - center))[:n_sols] # get solutions closest to the center of the posterior mode
+        model_result_orig[:, epoch, :] = f1[sols, :, epoch, :].mean(axis=0)
+    
+    #MCMC2
+    f2 = np.asarray(trace2["fλ_pred"])     # (n_samples, n_lines, n_epochs, n_points)
+    dv2 = np.asarray(trace2["Δv_τk"])      # (n_samples, K, n_epochs)
+    model_result_switched = np.empty((L, E, N), dtype=f2.dtype)
+    for epoch in range(E):
+        rv0 = dv2[:, 0, epoch]
+        center, _, _ = summarize_mode_1d(rv0)
+        sols = np.argsort(np.abs(rv0 - center))[:n_sols]
+        model_result_switched[:, epoch, :] = f2[sols, :, epoch, :].mean(axis=0)
+
+    # Get chi2 values of both fits
+    chi2_orig = get_chi2(y_fluxes, model_result_orig, y_errors)
+    chi2_switched = get_chi2(y_fluxes, model_result_switched, y_errors)
+
+    # Where epochs should be switched
+    use_switched = chi2_switched < chi2_orig # (n_epochs)
+
+    n_samp1 = trace1["Δv_τk"].shape[0]
+    n_samp2 = trace2["Δv_τk"].shape[0]
+    N = min(n_samp1, n_samp2)  # common sample count
+
+    # Randomly subsample to the same length for fair stitching in final sample
+    rng = np.random.default_rng(123)
+    idx1 = rng.choice(n_samp1, size=N, replace=(n_samp1 < N))
+    idx2 = rng.choice(n_samp2, size=N, replace=(n_samp2 < N))
+
+    # Get all non-deterministic sites (widths, amplitudes) from first MCMC run
+    stitched = {}
+    for k, v in trace1.items():
+        if k in ("Δv_τk", "fλ_pred", "C_λk"):   # Exclude sites affected by switch
+            continue
+        stitched[k] = np.asarray(v)[idx1]
+
+    # RV samples from both MCMC runs
+    dv1 = np.asarray(trace1["Δv_τk"])[idx1]  # (n_samples, K, 1, n_epochs)
+    dv2 = np.asarray(trace2["Δv_τk"])[idx2] # (n_samples, K, n_epochs)
+    dv2 = dv2[:, :, None, :] # (n_samples, K, 1, n_epochs)
+    assert dv1.shape[2] == 1 and dv2.shape[2] == 1, f"Unexpected Δv_τk shapes: {dv1.shape}, {dv2.shape}"
+
+    # Stitch on EPOCH axis!
+    mask = np.asarray(use_switched, dtype=bool)[None, None, None, :]  # (1, 1, 1, n_epochs)
+    dv_stitched = np.where(mask, dv2, dv1)  # (n_samples, K, 1, n_epochs)
+
+    stitched["Δv_τk"] = dv_stitched
+
+    # Recompute deterministics for final, stitched samples
+    def _model_predictive(λ, σ_fλ, K, is_hline, Δv_means):
+        return sb2_model(λ=λ, fλ=None, σ_fλ=σ_fλ, K=K, is_hline=is_hline, Δv_means=Δv_means)
+
+    pred = Predictive(
+        _model_predictive,
+        posterior_samples=stitched,
+        return_sites=("fλ_pred", "C_λk", "ε")
+    )
+
+    rng_key_pred = random.PRNGKey(42) # anything
+    preds = pred(
+        rng_key_pred,
+        λ=x_waves,
+        σ_fλ=y_errors,
+        K=K,
+        is_hline=is_hline,
+        Δv_means=Δv_means
+    )
+
+    # Merge the recomputed deterministics for final trace
+    stitched.update({k: np.asarray(v) for k, v in preds.items()})    
 
     # ------------------------
-    # Plotting the Fitted Profiles
+    # 4) Plot 
     # ------------------------
-    plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, comp_sep, path)
+    plot_path = path + 'Line_plots'
+    os.makedirs(plot_path, exist_ok=True)
 
-    return trace, x_waves, y_fluxes
+    if rm_epochs is not None:
+        n_epochs = n_epochs - len(rm_epochs)
+        
+    if chi2_plots:
+        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace1, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='original', show_chi2=True) # MCMC1 result
+        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace2, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='switched', show_chi2=True) # MCMC2 result
+        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final', show_chi2=True) # stitched final result
+    else:
+        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final', show_chi2=False)
+    return stitched, x_waves, y_fluxes
 
-def plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, comp_sep, path, n_sol=100):
+def plot_lines_fit(
+    wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace, lines_dic, shift_kms, comp_sep, path,
+    chi2_1, chi2_2, type_name, show_chi2=True):
     """
-    Plot the SB2 line-fit results based on the posterior predictions.
-
-    Parameters:
-    -----------
-    wavelengths : list
-        Original wavelength arrays.
-    lines : list
-        List of spectral line identifiers.
-    x_waves : JAX array
-        Interpolated wavelength grids (per line and epoch).
-    y_fluxes : JAX array
-        Interpolated fluxes.
-    n_epochs : int
-        Number of epochs.
-    trace : dict
-        Posterior samples from MCMC.
-    lines_dic : dict
-        Dictionary with spectral line details.
-    shift_kms : float
-        The applied velocity shift (km/s).
-    comp_sep : float
-        Component separation used in the model.
-    path : str
-        Directory path to save the plots.
-    n_sol : int, optional
-        Number of posterior samples to plot (default: 100).
+    Plot SB2 line-fit results using ONE global best posterior sample (s_star),
+    chosen by minimizing total χ² across all epochs. For each epoch, we plot
+    that sample's direct predictions (total and components). No reference epoch
+    or template shifting is used.
     """
-    from matplotlib.lines import Line2D 
+    from matplotlib.lines import Line2D
+    from matplotlib.offsetbox import AnchoredText
 
+    f_pred = np.asarray(trace['fλ_pred'])   # (S, L, E, N) total flux prediction
+    C_lk   = np.asarray(trace['C_λk'])      # (S, 2, L, E, N) components profiles (no continuum)
+    eps    = np.asarray(trace['ε'])         # (S,) continuum
+
+    S, L, E, N = f_pred.shape
+
+    # stack data & weights for chi^2 determination
+    y_arr = np.stack([np.asarray(y_fluxes[li]) for li in range(L)], axis=0)  # (L, E, N)
+    y_err = np.stack([np.asarray(y_errors[li]) for li in range(L)], axis=0)  # (L, E, N)
+    w     = 1.0 / np.clip(y_err, 1e-12, None)**2
+
+    # per-sample, per-epoch chi^2 across all lines
+    resid = f_pred - y_arr[None, ...]                     # (S, L, E, N)
+    chi2  = np.sum(resid * resid * w[None, ...], axis=(1, 3))  # (S, E)
+
+    # choose single global best sample (min total chi^2 over epochs)
+    s_star = int(np.argmin(np.sum(chi2, axis=1)))
+
+    # ======================== PLOT ========================
     for idx, line in enumerate(lines):
-        print('Plotting fits for line:', line)
+        print(f'Plotting {type_name} fits for line:', line)
         fig, axes = setup_fits_plots(wavelengths)
-        for epoch_idx, ax in enumerate(axes.ravel()[:n_epochs]):
-            # Extract posterior predictions for this line and epoch
-            fλ_pred_samples = trace['fλ_pred'][-n_sol:, idx, epoch_idx, :]  # (n_sol, ndata)
-            # Extract continuum predictions
-            continuum_pred_samples = trace['ε'][-n_sol:, None]
-            # Extract the posterior samples for each component
-            fλ_pred_comp1_samples = continuum_pred_samples + trace['C_λk'][-n_sol:, 0, idx, epoch_idx, :]
-            fλ_pred_comp2_samples = continuum_pred_samples + trace['C_λk'][-n_sol:, 1, idx, epoch_idx, :]
 
-            # Plot posterior predictive samples for each component and the total prediction
-            ax.plot(x_waves[idx][epoch_idx], fλ_pred_comp1_samples.T, color='C1', alpha=0.1, rasterized=True)
-            ax.plot(x_waves[idx][epoch_idx], fλ_pred_comp2_samples.T, color='C0', alpha=0.1, rasterized=True)
-            ax.plot(x_waves[idx][epoch_idx], fλ_pred_samples.T, color='C2', alpha=0.1, rasterized=True)
-            # Plot the observed data
-            ax.plot(x_waves[idx][epoch_idx], y_fluxes[idx][epoch_idx], color='k', lw=1, alpha=0.8)
-            # Plot vertical lines for the rest wavelength and component shifts
-            centre = rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms)
-            ax.axvline(centre, color='r', linestyle='--', lw=1)
-            ax.axvline(rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms - comp_sep/2), color='orange', linestyle='--', lw=1)
-            ax.axvline(rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms + comp_sep/2), color='orange', linestyle='--', lw=1)
-            # Annotate the epoch number
-            ax.text(0.15, 0.86, f'Epoch {epoch_idx+1}', transform=ax.transAxes, fontsize=16)
+        centre = rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms)
 
-        ax.set_xlim(centre - 13, centre + 13)
-        # Create a custom legend
+        for e, ax in enumerate(axes.ravel()[:n_epochs]):
+            x = x_waves[idx, e, :]
+            y = y_fluxes[idx, e, :]
+
+            # s_star results
+            tot  = f_pred[s_star, idx, e, :] # total prediction
+            cont = float(np.squeeze(eps[s_star]))
+            c1   = cont + C_lk[s_star, 0, idx, e, :] # component 1 prediction (profile + continuum)
+            c2   = cont + C_lk[s_star, 1, idx, e, :] # component 2 prediction (profile + continuum)
+
+            # plot data
+            ax.plot(x, y, color='k', lw=1, alpha=0.9, antialiased=False, zorder=5)
+
+            # plot models
+            ax.plot(x, c1, alpha=0.95, color='C1', antialiased=False, lw=2, zorder=2)
+            ax.plot(x, c2, alpha=0.95, color='C0', antialiased=False, lw=2, zorder=1)
+            ax.plot(x, tot, alpha=0.95, color='C2', antialiased=False, lw=3)
+
+            # reference line, labels
+            ax.axvline(centre, color='r', linestyle='--', lw=1, alpha=0.8)
+            ax.set_xlim(centre - 13, centre + 13)
+            ax.text(0.1, 0.1, f'Epoch {e+1}', transform=ax.transAxes, fontsize=16)
+            ax.set_rasterization_zorder(0)
+
+            if show_chi2: # OPTIONAL: Display results of chi^2 comparison between MCMC runs from fit_sb2_probmod
+                if chi2_1[e] < chi2_2[e]:
+                    text_box = AnchoredText(f'  χ2 \n *{chi2_1[e]:.2f}*\n  {chi2_2[e]:.2f}', frameon=True, loc=4, pad=0.5)
+                else:
+                    text_box = AnchoredText(f'  χ2 \n  {chi2_1[e]:.2f} \n*{chi2_2[e]:.2f}*', frameon=True, loc=4, pad=0.5)
+                plt.setp(text_box.patch, facecolor='white', alpha=0.5)
+                ax.add_artist(text_box)
+
+        # Legend
         custom_lines = [
-            Line2D([0], [0], color='C2', alpha=0.5, lw=2),
-            Line2D([0], [0], color='C1', alpha=0.5, lw=2),
-            Line2D([0], [0], color='C0', alpha=0.5, lw=2)
+            Line2D([0], [0], color='C2', lw=2),
+            Line2D([0], [0], color='C1', lw=2),
+            Line2D([0], [0], color='C0', lw=2)
         ]
-        axes[0].legend(custom_lines, ['Total Prediction', 'Component 1', 'Component 2'], 
-                       fontsize=14, frameon=False, borderaxespad=0.1)
-        fig.supxlabel('Wavelength [Å]', fontsize=24)
-        fig.supylabel('Flux', fontsize=24)
- 
-        plt.savefig(os.path.join(path, f'{line}_fits_SB2_.png'), dpi=300)
+        fig.legend(
+            custom_lines,
+            ['Total Prediction', 'Component 1', 'Component 2'],
+            loc='lower center',
+            bbox_to_anchor=(0.5, 0.03),
+            ncol=3,
+            frameon=False,
+            fontsize=14,
+            borderaxespad=0.0,
+            columnspacing=1.5,
+            handlelength=2.5,
+        )
+
+        fig.supxlabel('Wavelength [Å]', fontsize=24, y=-0.005)
+        fig.supylabel('Flux', fontsize=24, x=0.01)
+        plt.tight_layout()
+        fig.subplots_adjust(bottom=0.118, wspace=0, hspace=0)
+        plt.savefig(os.path.join(path, f'{type_name}_{line}_fits_SB2_.png'), dpi=400, bbox_inches='tight')
         plt.close()
 
-def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):
-    """
-    Fits a single spectral line with a profile model (Gaussian or Lorentzian) 
-    plus a linear continuum using lmfit. Optionally adds one or two nebular 
-    emission components if the line is known to have nebular contamination.
-    
-    Parameters:
-        line (int): Central wavelength (or identifier) of the line to be fitted.
-        wave (array-like): Wavelength array from the spectrum.
-        flux (array-like): Flux array from the spectrum.
-        ferr (array-like): Flux errors.
-        lines_dic (dict): Dictionary with line parameters. Expected to include:
-            - 'region': [min, max] wavelength limits for the line.
-            - 'wid_ini': Initial guess for the line width.
-            - 'centre': Initial central wavelength (or a list where the first element is used).
-        Hlines (iterable): List of lines which should be fitted with a Lorentzian profile 
-                           (commonly for Hydrogen lines).
-        neblines (iterable): List of lines to fit with additional nebular emission components.
-        doubem (iterable): List of lines that require double-peak nebular emission models.
-        shift (float): Wavelength shift to apply to the central wavelength.
-
-    Returns:
-        result (ModelResult): The lmfit fit result object.
-        x_wave (array-like): The subset of the wavelength array used in the fit.
-        y_flux (array-like): The corresponding flux values.
-        wave_region (array-like): Boolean array indicating which wavelengths were used.
-    """
-    # Define the wavelength region for fitting
-    wave_region = (wave > lines_dic[line]['region'][0]) & (wave < lines_dic[line]['region'][1])
-    x_wave = wave[wave_region]
-    y_flux = flux[wave_region]
-    ferr_sub = ferr[wave_region]
-    # Filter out bad data points: NaN, negative errors, or zero flux
-    good = np.isfinite(ferr_sub) & (ferr_sub > 0) & np.isfinite(y_flux)
-
-    if not good.any():
-        # raise ValueError(f"No valid pixels left for line {line}")
-        print(f"Warning: No valid pixels left for line {line}. Skipping this line.")
-        return None, None, None, None
-    
-    x_wave, y_flux, ferr_sub = x_wave[good], y_flux[good], ferr_sub[good]
-
-    # Initial guesses for central wavelength and width
-    cen_ini = line + shift
-    wid_ini = lines_dic[line]['wid_ini']
-
-    # Define the models: continuum, profile (Gaussian or Lorentzian), and nebular emission(s)
-    pars = Parameters()
-    continuum = models.LinearModel(prefix='continuum_')
-    gauss_model = Model(gaussian, prefix='g1_')
-    loren_model = Model(lorentzian, prefix='l1_')
-    nebem_model1 = Model(nebu, prefix='neb1_')
-    nebem_model2 = Model(nebu, prefix='neb2_')
-    
-    # Setup continuum parameters, fix slope and constrain intercept near 1
-    pars.update(continuum.make_params())
-    pars['continuum_slope'].set(0, vary=False)
-    pars['continuum_intercept'].set(1, min=0.9)
-    
-    # Choose the individual line model based on whether the line is in Hlines
-    if line in Hlines:
-        prefix = 'l1'
-        indiv_mod = loren_model
-    else:
-        prefix = 'g1'
-        indiv_mod = gauss_model
-    pars.update(indiv_mod.make_params())
-    # Set initial amplitude based on the difference from the minimum flux,
-    # initial width from the dictionary (with some constraints),
-    # and set the central wavelength to the shifted value.
-    pars[f'{prefix}_amp'].set(1.0 - y_flux.min(), min=0.05, max=0.9)
-    pars[f'{prefix}_wid'].set(wid_ini, min=1, max=11)
-    pars[f'{prefix}_cen'].set(cen_ini, vary=True)
-    
-    # Combine the individual model with the continuum
-    mod = indiv_mod + continuum
-
-    # Add nebular emission components if the line is flagged as nebular
-    nebem_models = [nebem_model1, nebem_model2]
-    for i, nebem in enumerate(nebem_models, start=1):
-        if line in neblines:
-            pars.update(nebem.make_params())
-            # Set the nebular amplitude based on flux variation.
-            if line == 4102:
-                pars[f'neb{i}_amp'].set((y_flux.max() - y_flux.min()) * 0.6, min=0.01)
-            elif line == 4340:
-                pars[f'neb{i}_amp'].set(y_flux.max() - y_flux.min(), min=0.01)
-            else:
-                pars[f'neb{i}_amp'].set((y_flux.max() - y_flux.min()) * 0.6, min=0.01)
-            # Set width for nebular components with mild constraints.
-            pars[f'neb{i}_wid'].set(1, min=0.05, max=3)
-            # Offset the center of the nebular emission slightly differently
-            # for the first and potential second component.
-            if i == 2:
-                if line not in doubem:
-                    break  # Do not add a second nebular component if not flagged
-                pars[f'neb{i}_cen'].set(cen_ini + 0.2, vary=True)
-            else:
-                pars[f'neb{i}_cen'].set(cen_ini - 0.2, vary=True)
-            mod += nebem
-
-    # Fit the model to the data with weights from the flux errors
-    result = mod.fit(y_flux, pars, x=x_wave, weights=1 / ferr_sub)
-
-    return result, x_wave, y_flux, wave_region
-
-def mcmc_results_to_file(trace, names, jds, writer, csvfile):
+def mcmc_results_to_file(trace, names, jds, writer, csvfile, rm_epochs):
     """
     Write MCMC fit results for multiple components and epochs to a CSV file.
     
     For each component (assumed to be two components) and for each epoch (from the 
     provided 'names' list) the function calculates the mean RV and its uncertainty 
-    from the MCMC trace and writes these values alongside the epoch and MJD.
+    from the MCMC trace and writes these values alongside the epoch, MJD, and strategy
+    used to extract values from the posterior (HDI or mode-aware, see hdi_summary and summarize_mode_1d).
     
     Parameters:
         trace (dict): Dictionary containing MCMC samples (expects key 'Δv_τk').
@@ -1124,28 +1848,33 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile):
         jds (list): List of corresponding Julian Dates (or None if unavailable).
         writer (csv.DictWriter or None): A DictWriter object or None (if first call, will be initialized).
         csvfile: An open CSV file handle to write the output.
+        rm_epochs (list): indices of epochs discounted from the fitting procedure.
         
     Returns:
         writer: A csv.DictWriter instance after writing the header (if initially None) and all rows.
     """
-    # Loop over the two components (0 and 1, later converted to 1-based indexing)
+    if rm_epochs is not None:
+        names = [x for i, x in enumerate(names) if i not in rm_epochs]
+        jds = [x for i, x in enumerate(jds) if i not in rm_epochs]
+
+    n_epochs_to_write = len(names)
+    # Loop over the two components (0 and 1, output as 1 and 2)
     for i in range(2):
-        # Loop over epochs (names)
-        for j, epoch_name in enumerate(names):
+        for j in range(n_epochs_to_write):
             results_dict = {}
-            results_dict['epoch'] = epoch_name
+            results_dict['epoch'] = names[j]
             if jds is not None and j < len(jds):
                 results_dict['MJD'] = jds[j]
 
-            # Calculate the mean RV and its error for component i at epoch j.
-            # Expected trace shape for Δv_τk: (n_samples, K, ..., n_epochs)
-            results_dict['mean_rv'] = np.mean(trace['Δv_τk'][:, i, :, j])
-            results_dict['mean_rv_er'] = np.std(trace['Δv_τk'][:, i, :, j])
+            # Extract 1D samples for component i, epoch j
+            vals = np.squeeze(np.asarray(trace['Δv_τk'][:, i, :, j]))
+            rv_val, rv_err, mode = summarize_mode_1d(vals)
 
-            # Components are 1-based for output (i.e., Component 1 and 2)
+            results_dict['mean_rv'] = rv_val
+            results_dict['mean_rv_er'] = rv_err
             results_dict['comp'] = i + 1
+            results_dict['posterior_method'] = mode
 
-            # Initialize the writer if not already created
             if writer is None:
                 fieldnames = results_dict.keys()
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -1155,8 +1884,8 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile):
     return writer
 
 def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', instrument='FLAMES',
-          plots=True, balmer=True, neblines=[], doubem=[], SB2=False, init_guess_shift=0,
-          shift_kms=0, use_init_pars=False, rm_epochs=None):
+          plots=True, balmer=True, neblines=[], doubem=[], SB2=False, init_guess_shift=0, sigma_prior=20,
+          shift_kms=0, use_init_pars=False, rm_epochs=None, cornerplots=True, chi2_plots=False, profile='Voigt'):
     """
     Perform spectral line fitting on a list of spectra. This function reads the spectral data, sets up
     the output directory, initializes line dictionaries and fit variables, and then fits each spectral
@@ -1197,13 +1926,10 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
     print('*** SB2 set to:', SB2, '***\n')
 
     # Read in spectral data from the provided file list and data path
-    wavelengths, fluxes, f_errors, names, jds = read_spectra(spectra_list, save_path, file_type, instrument=instrument, SB2=SB2)
-    # print('names:', names)
+    wavelengths, fluxes, f_errors, names, jds = read_spectra(spectra_list, data_path, file_type, instrument=instrument, SB2=SB2)
     
     # Setup the output directory and save the JD information if available
-    print(names, jds, save_path)
     out_path = setup_star_directory_and_save_jds(names, jds, save_path, SB2)
-    # print('Output path:', out_path)
     
     # Get the dictionary with line regions and initial parameters
     lines_dic = setup_line_dictionary()
@@ -1228,119 +1954,27 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
     with open(out_path + 'fit_values.csv', 'w', newline='') as csvfile:
         writer = None
         
-        print('Fitting all lines simultaneously' if SB2 else 'Fitting lines individually')
+        print('Fitting all lines simultaneously')
         if SB2:
             # SB2 fitting: fit all lines using the probabilistic SB2 model and write results to CSV
             result, x_wave, y_flux = fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic,
-                                                      Hlines, neblines, out_path, K=K, shift_kms=shift_kms, rm_epochs=rm_epochs)
-            writer = mcmc_results_to_file(result, names, jds, writer, csvfile)
+                                                      Hlines, neblines, out_path, K=K, shift_kms=shift_kms, 
+                                                      rm_epochs=rm_epochs, chi2_plots=chi2_plots, profile=profile, sigma_prior=sigma_prior)
+            writer = mcmc_results_to_file(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
+
+            if cornerplots == True:
+                for k in range(K):   # typically K=2, but robust if different
+                    make_rv_corner_for_component(result['Δv_τk'], k, out_path)
             
             # (Optional plotting of SB2 fits is handled within fit_sb2_probmod and plot_lines_fit)
         else:
-            # SB1 fitting: iterate over each line and each epoch, fit the line, and write results to CSV
-            for i, line in enumerate(lines):
-                # Create plots if enabled; otherwise, use a placeholder list for axes
-                if plots:
-                    fig, axes = setup_fits_plots(wavelengths)
-                else:
-                    axes = [None] * len(wavelengths)
-                    
-                # Process each epoch separately
-                for j, (wave, flux, ferr, name, ax) in enumerate(zip(wavelengths, fluxes, f_errors, names, axes)):
-                    result, x_wave, y_flux, wave_region = fit_sb1(line, wave, flux, ferr, lines_dic,
-                                                                   Hlines, neblines, doubem, shift=init_guess_shift)
-                    if result is None:
-                        continue  # Skip this line if no valid pixels
-                    results[i].append(result)
-                    chisqr[i].append(result.chisqr)
-                    
-                    # Get component information if available (for nebular lines)
-                    if line in neblines:
-                        component = result.eval_components(result.params, x=x_wave)
-                        comps[i].append(component)
-                    else:
-                        component = None
-                        comps[i].append(component)
-                    
-                    # Write fit statistics to a per-line text file
-                    file_mode = 'w' if j == 0 else 'a'
-                    with open(out_path + str(line) + '_stats.txt', file_mode) as out_file:
-                        out_file.write(name + '\n')
-                        out_file.write('-' * len(name.strip()) + '\n')
-                        out_file.write(result.fit_report() + '\n\n')
-                    
-                    # Determine the appropriate prefix based on the fit type
-                    if 'g1_cen' in result.params:
-                        prefix = 'g1'
-                    elif 'l1_cen' in result.params:
-                        prefix = 'l1'
-                    else:
-                        raise ValueError("Unexpected fit type encountered.")
-                    
-                    # Build a dictionary of fit results for CSV output
-                    results_dict = {
-                        'epoch': name,
-                        'line': line,
-                        'cen1': result.params[f'{prefix}_cen'].value,
-                        'cen1_er': result.params[f'{prefix}_cen'].stderr,
-                        'amp1': result.params[f'{prefix}_amp'].value,
-                        'amp1_er': result.params[f'{prefix}_amp'].stderr,
-                        'wid1': result.params[f'{prefix}_wid'].value,
-                        'wid1_er': result.params[f'{prefix}_wid'].stderr,
-                        'chisqr': result.chisqr
-                    }
-                    if results_dict['cen1_er'] is None or results_dict['amp1_er'] is None:
-                        print('Error: Uncertainty computation failed for line', line, 'epoch', j + 1)
-                    # Optionally compute a 3-sigma uncertainty region (if available)
-                    if results_dict['cen1_er'] not in [0, None]:
-                        dely = result.eval_uncertainty(sigma=3)
-                    else:
-                        dely = None
-                    
-                    # Initialize CSV writer if needed and write the current row
-                    if writer is None:
-                        fieldnames = results_dict.keys()
-                        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                        writer.writeheader()
-                    writer.writerow(results_dict)
-                    
-                    # Plotting of the fit results if enabled
-                    if plots:
-                        xx = np.linspace(min(x_wave), max(x_wave), 500)
-                        result_new = result.eval(x=xx)
-                        init_new = result.eval(params=result.init_params, x=xx)
-                        ax.plot(x_wave, y_flux, 'k-', lw=3, ms=4, zorder=1,
-                                label=str(name.replace('./', '').replace('_', ' ')))
-                        ax.plot(xx, init_new, '--', c='grey', zorder=5)
-                        ax.plot(xx, result_new, 'r-', lw=2, zorder=4)
-                        
-                        if component is not None:
-                            if line in Hlines:
-                                ax.plot(x_wave, component['continuum_'] + component['l1_'],
-                                        '--', zorder=3, c='limegreen', lw=2)
-                            elif SB2 and line not in Hlines:
-                                ax.plot(x_wave, component['continuum_'] + component['g1_'],
-                                        '--', zorder=3, c='blue', lw=2)
-                                ax.plot(x_wave, component['continuum_'] + component['g2_'],
-                                        '--', zorder=3, c='blue', lw=2)
-                            if line in neblines:
-                                ax.plot(x_wave, component['continuum_'] + component['neb1_'],
-                                        '--', zorder=3, c='orange', lw=2)
-                            if line in neblines and not line in Hlines and not SB2:
-                                ax.plot(x_wave, component['continuum_'] + component['g1_'],
-                                        '--', zorder=3, c='limegreen', lw=2)
-                        
-                        if dely is not None:
-                            ax.fill_between(x_wave, result.best_fit - dely, result.best_fit + dely,
-                                            zorder=2, color="#ABABAB", alpha=0.5)
-                        ax.set_ylim(0.9 * y_flux.min(), 1.1 * y_flux.max())
-                # Save the figure for the current line after processing all epochs
-                if plots:
-                    fig.supxlabel('Wavelength', size=24)
-                    fig.supylabel('Flux', size=24)
-                    filename = out_path + str(line) + '_fits.png'
-                    plt.savefig(filename, bbox_inches='tight', dpi=150)
-                    plt.close()
+            # SB1 fitting: using probabilistic method
+            result, x_waves, y_fluxes = fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic,
+                                                        Hlines, neblines, out_path, shift_kms=shift_kms,
+                                                        rm_epochs=rm_epochs, profile=profile)
+            writer = mcmc_results_to_file_sb1(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
+
+        plt.close('all')
         
     return out_path
 
@@ -2282,7 +2916,7 @@ def run_LS(hjd, rv, rv_err=None, probabilities=[0.5, 0.01, 0.001], method='boots
     return frequency, power, fap, fal
 
 def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=False, Pfold=True, fold_rv_curve=True, 
-                 save_power_spectrum=False):
+                 save_power_spectrum=False, starname=None):
     """
     Perform Lomb–Scargle period analysis on a DataFrame of radial velocities.
     
@@ -2311,14 +2945,20 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
         os.makedirs(ls_path)
     
     # Select times and RVs from DataFrame; try both 'JD' and 'MJD'
-    try:
-        hjd1, rv1 = df['JD'][df['comp'] == 1], df['mean_rv'][df['comp'] == 1]
-    except:
-        hjd1, rv1 = df['MJD'][df['comp'] == 1], df['mean_rv'][df['comp'] == 1]
+    if 'comp' not in df.columns:
+        hjd1, rv1 = df['MJD'], df['mean_rv']
+        rv1_err = df['mean_rv_er'] if 'mean_rv_er' in df.columns else None
+    else:
+        try:
+            hjd1, rv1 = df['JD'][df['comp'] == 1], df['mean_rv'][df['comp'] == 1]
+            rv1_err = df['mean_rv_er'][df['comp'] == 1] if 'mean_rv_er' in df.columns else None
+        except:
+            hjd1, rv1 = df['MJD'][df['comp'] == 1], df['mean_rv'][df['comp'] == 1]
+            rv1_err = df['mean_rv_er'][df['comp'] == 1] if 'mean_rv_er' in df.columns else None
     
-    rv1_err = df['mean_rv_er'][df['comp'] == 1] if 'mean_rv_er' in df.columns else None
-    starname = df['epoch'][0].split('_')[0] + '_' + df['epoch'][0].split('_')[1]
-    starname = starname.split('/')[-1]
+    if starname == None:
+        starname = df['epoch'][0].split('_')[0] + '_' + df['epoch'][0].split('_')[1]
+        starname = starname.split('/')[-1]
     nepochs = len(hjd1)
     
     # Write header information
@@ -2524,7 +3164,8 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
         fig, ax = plt.subplots(figsize=(8, 6))
         ax.errorbar(hjd1, rv1, yerr=rv1_err, fmt='o', color='dodgerblue')
         ax.set(xlabel='MJD', ylabel='RV [km/s]')
-        plt.savefig(f'{path}LS/RVs_MJD_{starname}.png', dpi=300, bbox_inches='tight')
+        plt.tight_layout()
+        plt.savefig(f'{path}LS/RVs_MJD_{starname}.png', dpi=300)
         plt.close()
 
         bins = [0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]
@@ -2566,6 +3207,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
                     leg = plt.legend(labels, loc='best', markerscale=0, handletextpad=0, handlelength=0)
                     for item in leg.legendHandles:
                         item.set_visible(False)
+                plt.tight_layout()
                 plt.savefig(f'{path}LS/LS_{starname}_period_{comp}_{str(len(rv1))}_epochs.png', dpi=300)
                 plt.close()
 
@@ -2591,6 +3233,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
                 else:
                     ax.get_yaxis().set_major_formatter(StrMethodFormatter('{x:.1f}'))
                 plt.title(starname+' '+comp)
+                plt.tight_layout()
                 plt.savefig(f'{path}LS/{starname}_paper_LS_{comp}.pdf')
                 plt.close()
 
@@ -2607,7 +3250,8 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
         ax.tick_params(which='both', width=0.6, labelsize=14)
         ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
         ax.get_yaxis().set_major_formatter(StrMethodFormatter('{x:,.0f}'))
-        plt.savefig(f'{path}LS/LS_{starname}_points.png', dpi=300)
+        plt.tight_layout()
+        plt.savefig(f'{path}LS/LS_{starname}_points.png', dpi=300, bbox_inches='tight')
         plt.close()
 
         # vs frequency
@@ -2632,6 +3276,7 @@ def lomb_scargle(df, path, SB2=False, print_output=True, plots=True, best_lines=
         ax.tick_params(which='both', width=0.6, labelsize=14)
         ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
         ax.get_yaxis().set_major_formatter(StrMethodFormatter('{x:,.0f}'))
+        plt.tight_layout()
         plt.savefig(f'{path}LS/LS_{starname}_frequency.pdf')
         plt.close()
 
@@ -2884,3 +3529,51 @@ def phase_rv_curve(time, rv1, rv1_er=None, rv2=None, rv2_er=None, period=None, p
     else:
         result = fit_sinusoidal_probmod(phase_expanded, rv1_expanded, rv1_err_expanded)
         return result, phase_expanded, rv1_expanded, rv1_err_expanded
+
+def plot_pair_scatter(samples, savepath=None):
+    """ Diagnostic for bimodal posterior
+        Plots each RV1 vs. RV2 from each trace for each epoch of MCMC result.
+    """
+    rv1, rv2 = samples['rv1'], samples['rv2']
+    n_samples, n_epochs = rv1.shape
+    cmap = plt.cm.get_cmap("tab10", n_epochs)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    vmin = min(rv1.min(), rv2.min())
+    vmax = max(rv1.max(), rv2.max())
+    for t in range(n_epochs):
+        ax.scatter(rv1[:, t], rv2[:, t], s=4, alpha=0.5, color=cmap(t), label=f'Epoch {t+1}')
+    ax.plot([vmin, vmax], [vmin, vmax], 'k--', lw=0.6)
+    ax.set_xlabel("RV1 [km/s]")
+    ax.set_ylabel("RV2 [km/s]")
+    ax.set_xlim(vmin, vmax)
+    ax.set_ylim(vmin, vmax)
+    ax.set_title("RV1 vs RV2 for all epochs")
+    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small', ncol=2)
+    plt.savefig(savepath + f'pair_scatter.png', bbox_inches='tight')
+    plt.close(fig)
+
+def plot_sign_trace(samples, savepath=None, ax=None):
+    """ Diagnostic for bimodal posteriod
+        Plots the sign of RV1-RV2 for each sample in each epoch to detect evidence of sign switching.
+    """
+    rv1, rv2 = samples['rv1'], samples['rv2']
+    n_samples, n_epochs = rv1.shape
+    sign_matrix = np.sign(rv1 - rv2)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    cmap = plt.cm.get_cmap("tab10", n_epochs)
+
+    for t in range(n_epochs):
+        ax.plot(sign_matrix[:, t], label=f'Epoch {t+1}', color=cmap(t), lw=0.6)
+
+    ax.set_xlabel("MCMC draw")
+    ax.set_ylabel("sign of ΔRV")
+    ax.set_ylim(-1.2, 1.2)
+    ax.set_yticks([-1, 0, 1])
+    ax.axhline(0, ls='--', color='gray', lw=0.5)
+    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fontsize='small', ncol=2)
+    ax.set_title("Sign of RV1 − RV2")
+
+    plt.savefig(savepath + f'sign_trace.png', bbox_inches='tight')
+    plt.close(fig)

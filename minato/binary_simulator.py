@@ -15,17 +15,22 @@ from multiprocess import Pool as MP_Pool
 class BinarySimulations:
     def __init__(self):
         # Default parameters
+        # Primary mass
         self.M1_min = 8
         self.M1_max = 20
+        self.gamma = -2.35
+        # Mass ratio
         self.q_min = 0.01
         self.q_max = 1.0
+        self.kappa = 0.0
+        # Log period
         self.logP_min = -0.15
         self.logP_max = 3.5
+        self.pi = 0.0
+        # Systemic velocity
         self.gamma_range = (-1, 1)
-        # self.pi = 0.0
-        # self.kappa = 0.0
-        # self.eta = -0.5
-        # self.gamma = -2.35
+        # Eccentricity
+        self.eta = -0.5
         
         # Storage for data and results
         self.coverage_dict = None
@@ -55,7 +60,7 @@ class BinarySimulations:
         return self.coverage_dict
 
     def simulate_mock_observations(self, pi=0.0, kappa=0.0, eta=-0.5, gamma=-2.35, 
-                                N=100, f_bin=0.5, save_file=False, intrinsic_sample=None):
+                                N=100, f_bin=0.5, save_sample=False, intrinsic_sample=None, ideal_sampling=False):
         """
         Parent function to generate (or load) the intrinsic mock sample and simulate observations.
         
@@ -80,44 +85,39 @@ class BinarySimulations:
         if intrinsic_sample is None:
             # print("Generating intrinsic sample ...")
             intrinsic_sample = self.generate_intrinsic_sample_vectorized(N=N, f_bin=f_bin, 
-                                                            pi=pi, kappa=kappa, eta=eta, gamma=gamma,
-                                                            save_file=save_file)
+                                                            save_sample=save_sample)
             # intrinsic_sample_nonvec = generate_intrinsic_sample(N=N, f_bin=f_bin, 
             #                                                 pi=pi, kappa=kappa, eta=eta, gamma=gamma,
             #                                                 save_file=save_file)
         else:
             print("Using provided intrinsic sample ...")
-            intrinsic_sample = pd.read_pickle(intrinsic_sample)
+            # intrinsic_sample = pd.read_pickle(intrinsic_sample)
 
         # plot_sampled_params(intrinsic_sample)
 
         # Now simulate observations using the chosen observing strategy.
-        self.obs_results_df = self.compute_rvs(intrinsic_sample)
+        self.obs_results_df = self.compute_rvs(intrinsic_sample, ideal_sampling)
         return self.obs_results_df
 
-    def generate_intrinsic_sample_vectorized(self, N=100, f_bin=0.5, pi=0.0, kappa=0.0, eta=-0.5, gamma=-2.35, save_file=False):
+    def generate_intrinsic_sample_vectorized(self, N=100, f_bin=0.5, save_sample=False):
         # Number of binaries
         n_bin = int(np.round(f_bin * N))
         
         # 1) For the binary stars, sample all parameters in one go:
-        # M1_array = self.sample_primary_mass(n_bin, Mmin=self.M1_min, Mmax=self.M1_max, gamma=gamma)      # shape (n_bin,)
-        # logP_array = self.sample_logP(n_bin, pi=pi, logP_min=self.logP_min, logP_max=self.logP_max)     # shape (n_bin,)
-        # q_array = self.sample_q(n_bin, kappa=kappa, q_min=self.q_min, q_max=self.q_max)           # shape (n_bin,)
-
-        M1_array = self.sample_MOB(n_bin)
-        logP_array = self.sample_logP_bh(n_bin) 
-        q_array = self.sample_q_bh(n_bin)
+        M1_array = self.sample_primary_mass(n_bin)      # shape (n_bin,)
+        logP_array = self.sample_logP(n_bin)     # shape (n_bin,)
+        q_array = self.sample_q(n_bin)           # shape (n_bin,)
 
         # Eccentricities might depend on period, so:
         P_array = 10 ** logP_array
-        e_array = [self.sample_ecc(P_val, eta=eta) for P_val in P_array]  # still a loop, but only length n_bin
+        e_array = [self.sample_ecc(P_val) for P_val in P_array]  # still a loop, but only length n_bin
         tol = 1e-5
         e_array = np.asarray(e_array)
         e_array[np.abs(e_array) < tol] = 0.0
 
         # 2) Sample additional orbital parameters for all n_bin at once
         orb_data = self.sample_orbital_extras_vectorized(M1_array, logP_array, q_array, e_array, 
-                                                    gamma_range=(-1,1)) # for BLOeM: (100,240)
+                                                    gamma_range=self.gamma_range) # for BLOeM: (100,240)
         
         # 3) Build a DataFrame for binary stars:
         df_binaries = pd.DataFrame({
@@ -140,13 +140,13 @@ class BinarySimulations:
         n_singles = N - n_bin
         # You can sample single-star masses if needed, or just fill placeholders:
         df_singles = pd.DataFrame({
-            'M1'       : self.sample_primary_mass(n_singles, Mmin=self.M1_min, Mmax=self.M1_max, gamma=gamma),
+            'M1'       : self.sample_primary_mass(n_singles),
             'M2'       : np.nan,  # or zero, if you prefer
             'q'        : np.nan,
             'i'        : np.nan,
             'P'        : np.nan,
             'e'        : np.nan,
-            'gamma'    : np.random.uniform(-1, 1, size=n_singles),
+            'gamma': np.random.uniform(self.gamma_range[0], self.gamma_range[1], size=n_singles),
             'is_binary': False,
             'synthetic_ID': [f"SYN_{(n_bin + i):04d}" for i in range(n_singles)]
         })
@@ -154,8 +154,8 @@ class BinarySimulations:
         # 5) Combine them:
         intrinsic_df = pd.concat([df_binaries, df_singles], ignore_index=True)
         
-        if save_file:
-            intrinsic_df.to_pickle(f'mock_sample_N{N}_fbin{int(f_bin*100)}_pi{int(pi)}.pkl')
+        if save_sample:
+            intrinsic_df.to_pickle(f'mock_sample_N{N}_fbin{int(f_bin*100)}_pi{int(self.pi)}.pkl')
 
         return intrinsic_df
 
@@ -167,7 +167,14 @@ class BinarySimulations:
         sigma = diff / err
         return np.max(sigma)
 
-    def compute_rvs(self, intrinsic_df):
+    def two_quadratures(self, P, Tp, e, omega_deg, n=500):
+        t_grid = Tp + np.linspace(0, P, n, endpoint=False)
+        v1 = self.rvcurve(t_grid, P, Tp, e, omega_deg,
+                            gamma=0., K1=1., K2=0., SB2=False)
+        i_max, i_min = np.argmax(v1), np.argmin(v1)
+        return np.array([t_grid[i_max], t_grid[i_min]])
+
+    def compute_rvs(self, intrinsic_df, ideal_sampling=False):
         """
         Simulate RV observations for each star in the intrinsic sample based on the specified observing strategy.
         
@@ -192,33 +199,46 @@ class BinarySimulations:
         
         for idx, row in intrinsic_df.iterrows():
             chosen_id = np.random.choice(real_star_ids)
-            t_array, rv_errors = self.coverage_dict[chosen_id]
 
             rv_obs1 = None
             rv_obs2 = None # Initialize secondary RV array
             
-            # Generate noise once per epoch set
-            noise = np.random.normal(0, rv_errors, size=len(t_array))
+            if row['is_binary'] and ideal_sampling:
+                # use two-quadrature epochs instead of real cadence
+                t_array = self.two_quadratures(row['P'], row['Tp'], row['e'], row['omega_deg'])
+                _, rv_errors_full = self.coverage_dict[chosen_id]
+                # select two random errors
+                rv_errors = np.random.choice(rv_errors_full, size=len(t_array), replace=True)
 
-            # For binaries, compute the "true" RV curve; for singles, assume constant RV.
+            else:
+                # real survey cadence (also covers single stars)
+                t_array, rv_errors = self.coverage_dict[chosen_id]
+
+            # For binary stars, compute the RV curve; for single stars, use gamma.
             if row['is_binary']:
-                v_orbit = self.rvcurve(t_array, row['P'], row['Tp'], row['e'], 
-                                row['omega_deg'], row['gamma'], row['K1'], row['K2'], SB2=True)
+                # Calculate the true RV curve. We pass SB2=True so that for binaries rvcurve returns a tuple.
+                v_orbit = self.rvcurve(t_array, row['P'], row['Tp'], row['e'],
+                                        row['omega_deg'], row['gamma'],
+                                        row['K1'], row['K2'], SB2=True)
+            else:
+                # For single stars, there are no orbital variations.
+                v_orbit = np.full(t_array.shape, row['gamma'], dtype=float)
 
-                # Check if rvcurve returned one or two components
-                if isinstance(v_orbit, tuple): # SB2 case
-                    v1, v2 = v_orbit
-                    rv_obs1 = v1 + noise
-                    rv_obs2 = v2 + noise # Store secondary RVs
-                else: # SB1 case (assuming rvcurve returns only v1 if SB2=False or K2=0)
-                    v1 = v_orbit
-                    rv_obs1 = v1 + noise
-                    rv_obs2 = np.full_like(rv_obs1, np.nan) # Fill secondary with NaN for SB1
+            # Generate Gaussian noise once per epoch set
+            noise   = np.random.normal(0, rv_errors, size=len(t_array))
 
-            else: # Single star case
-                # print('Single star:', row['synthetic_ID'], row['gamma'])
-                rv_obs1 = row['gamma'] + noise
-                rv_obs2 = np.full_like(rv_obs1, np.nan) # Fill secondary with NaN for singles
+            # If rvcurve returned two components -> SB2
+            if isinstance(v_orbit, tuple):
+                v1_true, v2_true = v_orbit
+                rv_obs1 = v1_true + noise
+                rv_obs2 = v2_true + noise
+            else:                        # SB1 or single star
+                v1_true = v_orbit
+                v2_true = np.full_like(v1_true, np.nan)  # No secondary RV for single stars
+                rv_obs1 = v1_true + noise
+                rv_obs2 = np.full_like(rv_obs1, np.nan)
+
+            dRV_true = np.ptp(v1_true)
 
             n_eps = len(t_array)
             rv_mean = np.mean(rv_obs1)
@@ -234,10 +254,13 @@ class BinarySimulations:
                 'P': row['P'], 'Tp': row['Tp'], 'e': row['e'], 'omega_deg': row['omega_deg'], 
                 'gamma': row['gamma'], 'K1': row['K1'], 'K2': row['K2'], 
                 'i_deg': row['i'], 'a': row['a'],
+                'dRV_true': dRV_true,
                 'dRV_max': dRV,
                 'sigma_d': sigma_detect,
                 'rv_mean': rv_mean,
                 'n_eps': n_eps,
+                'rv_true': v1_true,
+                'rv_true2': v2_true,
                 'rv_array': rv_obs1,
                 'rv_array2': rv_obs2,  # Store secondary RVs
                 # additional parameters if needed
@@ -317,75 +340,75 @@ class BinarySimulations:
         df = self.obs_results_df
 
         # Create a figure with multiple subplots
-        fig, axs = plt.subplots(3, 3, figsize=(20, 14))
-
+        fig, axs = plt.subplots(3, 3, figsize=(20, 12))
+        fig.subplots_adjust(hspace=0.35)
         # Plot the distribution of P
         axs[0, 0].hist(df['P'].dropna(), bins=15, edgecolor='black', alpha=0.7)
-        axs[0, 0].set_xlabel('Orbital Period (P) [days]')
-        axs[0, 0].set_ylabel('Number of Binaries')
+        axs[0, 0].set_xlabel(r'$P_{\rm orb}$ [d]')
+        axs[0, 0].set_ylabel('Number')
         # axs[0, 0].set_title('Distribution of Orbital Period (P)')
         axs[0, 0].grid(True)
 
         # Plot the distribution of M1
         axs[0, 1].hist(df['M1'].dropna(), bins=15, edgecolor='black', alpha=0.7)
-        axs[0, 1].set_xlabel('Primary Mass (M1) [M_sun]')
-        axs[0, 1].set_ylabel('Number of Binaries')
+        axs[0, 1].set_xlabel('$M_1$ [M$_{\odot}$]')
+        # axs[0, 1].set_ylabel('Number')
         # axs[0, 1].set_title('Distribution of Primary Mass (M1)')
         axs[0, 1].grid(True)
 
         # Plot the distribution of Tp
         axs[0, 2].hist(df['Tp'].dropna(), bins=15, edgecolor='black', alpha=0.7)
         # axs[0, 2].hist(intrinsic_sample_nonvec['Tp'].dropna(), bins=15, histtype='step', edgecolor='red', alpha=0.7)
-        axs[0, 2].set_xlabel('Time of Periastron Passage (Tp) [days]')
-        axs[0, 2].set_ylabel('Number of Binaries')
+        axs[0, 2].set_xlabel('$T_p$ [d]')
+        # axs[0, 2].set_ylabel('Number')
         # axs[0, 2].set_title('Distribution of Time of Periastron Passage (Tp)')
         axs[0, 2].grid(True)
 
         # Plot the distribution of q
         axs[1, 0].hist(df['q'].dropna(), bins=15, edgecolor='black', alpha=0.7)
         # axs[1, 0].hist(intrinsic_sample_nonvec['q'].dropna(), bins=15, histtype='step', edgecolor='red', alpha=0.7)
-        axs[1, 0].set_xlabel('Mass Ratio (q)')
-        axs[1, 0].set_ylabel('Number of Binaries')
+        axs[1, 0].set_xlabel('Mass Ratio ($q$)')
+        axs[1, 0].set_ylabel('Number')
         # axs[1, 0].set_title('Distribution of Mass Ratio (q)')
         axs[1, 0].grid(True)
 
         # Plot the distribution of i
         axs[1, 1].hist(df['i_deg'].dropna(), bins=15, edgecolor='black', alpha=0.7)
         # axs[1, 1].hist(intrinsic_sample_nonvec['i'].dropna(), bins=15, histtype='step', edgecolor='red', alpha=0.7)
-        axs[1, 1].set_xlabel('Inclination (i) [degrees]')
-        axs[1, 1].set_ylabel('Number of Binaries')
+        axs[1, 1].set_xlabel('Inclination ($i$) [deg]')
+        # axs[1, 1].set_ylabel('Number')
         # axs[1, 1].set_title('Distribution of Inclination (i)')
         axs[1, 1].grid(True)
 
         # Plot the distribution of omega_deg
         axs[1, 2].hist(df['omega_deg'].dropna(), bins=15, edgecolor='black', alpha=0.7)
         # axs[1, 2].hist(intrinsic_sample_nonvec['omega_deg'].dropna(), bins=15, histtype='step', edgecolor='red', alpha=0.7)
-        axs[1, 2].set_xlabel('Argument of Periastron (omega) [degrees]')
-        axs[1, 2].set_ylabel('Number of Binaries')
+        axs[1, 2].set_xlabel('Argument of Periastron ($\omega$) [deg]')
+        # axs[1, 2].set_ylabel('Number')
         # axs[1, 2].set_title('Distribution of Argument of Periastron (omega)')
         axs[1, 2].grid(True)
 
         # Plot the distribution of K1
         axs[2, 0].hist(df['K1'].dropna(), bins=15, edgecolor='black', alpha=0.7)
         # axs[2, 0].hist(intrinsic_sample_nonvec['K1'].dropna(), bins=15, histtype='step', edgecolor='red', alpha=0.7)
-        axs[2, 0].set_xlabel('Radial Velocity Semi-Amplitude (K1) [km/s]')
-        axs[2, 0].set_ylabel('Number of Binaries')
+        axs[2, 0].set_xlabel('$K_1$ [km\,s$^{-1}$]')
+        axs[2, 0].set_ylabel('Number')
         # axs[2, 0].set_title('Distribution of Radial Velocity Semi-Amplitude (K1)')
         axs[2, 0].grid(True)
 
         # Plot the distribution of e
         axs[2, 1].hist(df['e'].dropna(), bins=15, edgecolor='black', alpha=0.7)
         # axs[2, 1].hist(intrinsic_sample_nonvec['e'].dropna(), bins=15, histtype='step', edgecolor='red', alpha=0.7)
-        axs[2, 1].set_xlabel('Eccentricity (e)')
-        axs[2, 1].set_ylabel('Number of Binaries')
+        axs[2, 1].set_xlabel('Eccentricity ($e$)')
+        # axs[2, 1].set_ylabel('Number of Binaries')
         # axs[2, 1].set_title('Distribution of Eccentricity (e)')
         axs[2, 1].grid(True)
 
         # Plot the distribution of gamma
         axs[2, 2].hist(df['gamma'].dropna(), bins=15, edgecolor='black', alpha=0.7)
         # axs[2, 2].hist(intrinsic_sample_nonvec['gamma'].dropna(), bins=15, histtype='step', edgecolor='red', alpha=0.7)
-        axs[2, 2].set_xlabel('Systemic Velocity (gamma) [km/s]')
-        axs[2, 2].set_ylabel('Number of Binaries')
+        axs[2, 2].set_xlabel('Systemic Velocity ($\gamma$) [km\,s$^{-1}$]')
+        # axs[2, 2].set_ylabel('Number of Binaries')
         # axs[2, 2].set_title('Distribution of Systemic Velocity (gamma)')
         axs[2, 2].grid(True)
 
@@ -399,62 +422,14 @@ class BinarySimulations:
     # Sampling functions
     ######################################################################
 
-    # Sampling for OB+BH population
-    def sample_MOB(self, N):
-        """
-        Draw N OB-star masses from a truncated log-normal that peaks
-        near 14 M☉ but has a substantial high-mass tail up to ~50 M☉.
-        
-        Distribution parameters:
-        - median = 14 M☉  (mu = ln(14))
-        - shape  = 0.5 dex (sigma = 0.5)
-        - truncated to [8, 50] M☉
-        """
-        mu, sigma = np.log(14), 0.3
-        M = np.random.lognormal(mean=mu, sigma=sigma, size=N)
-        # rejection‐sample to enforce [8,50]
-        bad = (M < 8) | (M > 50)
-        while bad.any():
-            M[bad] = np.random.lognormal(mean=mu, sigma=sigma, size=bad.sum())
-            bad = (M < 8) | (M > 50)
-        return M
-    
-    def sample_q_bh(self, N, mu=0.67, sigma=0.3):
-        """
-        Draw N OB-BH mass ratios from a truncated log-normal that peaks
-        near 0.7 but has a substantial high-q tail up to ~1.7.
-        """
-        mu, sigma = np.log(mu), sigma
-        q = np.random.lognormal(mean=mu, sigma=sigma, size=N) + np.random.lognormal(0.7, 1.5, size=N)
-        # rejection‐sample to enforce [8,50]
-        bad = (q < 0.3) | (q > 1.7)
-        while bad.any():
-            q[bad] = np.random.lognormal(mean=mu, sigma=sigma, size=bad.sum())
-            bad = (q < 0.3) | (q > 1.7)
-        return q
-    
-    def sample_logP_bh(self, N):
-        """
-        Approximate the bimodal log‐period PDF (Fig. 6, top):
-        – Case A bump at P~5 d → log10P~0.7
-        – Case B bump at P~150 d → log10P~2.2
-        We take weights wA=30%, wB=70%, sigmas ≃0.2–0.3 dex.
-        """
-        wA, wB = 0.2, 0.8
-        # draw which mode each sample comes from
-        isA = np.random.rand(N) < wA
-        logP = np.empty(N)
-        logP[isA] = np.random.lognormal(np.log(0.9), 0.25, size=isA.sum())
-        logP[~isA] = np.random.normal(2.1, 0.45, size=(~isA).sum())
-        return logP
-    # End of OB+BH sampling functions
-    #################################
-
-    def sample_primary_mass(self, N, Mmin=8, Mmax=16, gamma=-2.35):
+    def sample_primary_mass(self, N):
         """
         Sample primary masses from a Salpeter-like IMF 
-        dN/dM ~ M^gamma, with M in [Mmin, Mmax].
+        dN/dM ~ M^gamma, with M in [self.M1_min, self.M1_max].
         """
+        Mmin = self.M1_min
+        Mmax = self.M1_max
+        gamma = self.gamma
         # Inverse-transform sampling for a power law:
         # Cumulative distribution for M^(gamma+1).
         # If gamma != -1, the formula is:
@@ -469,11 +444,7 @@ class BinarySimulations:
         masses = ((u * A) + Mmin**alpha)**(1./alpha)
         return masses
 
-    def sample_logP(self, 
-        N: int,
-        pi: float = 0.0,
-        logP_min: float = -0.3,
-        logP_max: float = 3.5) -> np.ndarray:
+    def sample_logP(self, N):
         """
         Sample x = log10(P) from a PDF:
             f(y) ~ y^pi,  where y = x - logP_min in [0, y_max],
@@ -518,7 +489,10 @@ class BinarySimulations:
         # 2) Uniform in logP (Öpik's law), from 0.5 d to 3162 d:
         #>>> logP_samples = sample_logP(1000, pi=0.0, logP_min=-0.3, logP_max=3.5)
         """
-        
+        pi = self.pi
+        logP_min = self.logP_min
+        logP_max = self.logP_max
+
         if pi <= -1.0:
             raise ValueError(
                 f"pi={pi} <= -1 is not integrable with logP_min={logP_min} at y=0. "
@@ -547,7 +521,7 @@ class BinarySimulations:
         
         return x_samples
 
-    def sample_eccentricity(self, N, eta=-0.5, e_max=0.95):
+    def sample_eccentricity(self, N, e_max=0.95):
         """
         Sample eccentricities in the interval [0, e_max], following a power-law:
             f(e) ~ e^eta   for 0 <= e <= e_max
@@ -573,6 +547,8 @@ class BinarySimulations:
         - For 0 <= e < 2 days orbits (very short period) you often set e=0 manually in code elsewhere.
         - This function assumes 0 <= e_max <= 1, typical for eccentricities.
         """
+        eta = self.eta
+
         if not (0.0 <= e_max < 1.0):
             raise ValueError(f"e_max must be between 0 and 0.99; got {e_max}")
         if abs(eta + 1) < 1e-9:
@@ -593,27 +569,31 @@ class BinarySimulations:
         """
         return 1.0 - (P / 2)**(-2.0/3.0)
 
-    def sample_ecc(self, P, eta):
+    def sample_ecc(self, P):
         """
         Draw eccentricity based on the orbital period P.
         - For P < 2 days, assume circular (e = 0).
         - For P >= 2 days, use sample_eccentricity() with rejection sampling to ensure e < e_max(P).
         """
+        eta = self.eta
         if P < 2:
             return 0.0  # Circularized for short-period binaries
         
         else:
             # Rejection sampling for P >= 2 days
             while True:
-                e_draw = self.sample_eccentricity(1, eta=eta)
+                e_draw = self.sample_eccentricity(1)
                 if e_draw < self.e_max(P):
                     return e_draw[0]
 
-    def sample_q(self, N, kappa=0.0, q_min=0.1, q_max=1.0):
+    def sample_q(self, N):
         """
         Sample mass ratio q in [q_min, q_max], 
         possibly with a mild power law q^kappa.
         """
+        kappa = self.kappa
+        q_min = self.q_min
+        q_max = self.q_max
         # If kappa=0 => uniform in [q_min, q_max]
         # For kappa != 0 => f(q) ~ q^kappa
         
@@ -631,7 +611,7 @@ class BinarySimulations:
             return qvals
 
     def sample_orbital_extras_vectorized(self, M1_array, logP_array, q_array, e_array,
-                                        gamma_range=(100, 240),
+                                        gamma_range=None,
                                         inc_mode='random'):
         """
         Vectorized version of sample_orbital_extras.
@@ -656,6 +636,9 @@ class BinarySimulations:
             K1         : shape (N,)
             K2         : shape (N,)
         """
+
+        if gamma_range is None:
+            gamma_range = self.gamma_range
 
         # 1) Convert logP => P in days
         P_array = 10.0 ** logP_array  # shape (N,)
