@@ -28,6 +28,11 @@ if _ldc == 1 and multiprocessing.cpu_count() > 1:
         RuntimeWarning,
     )
 npro.set_host_device_count(_ldc)
+print(
+    f"JAX local devices: {_ldc}. "
+    "To change, set XLA_FLAGS=--xla_force_host_platform_device_count=<n_cpus> "
+    "before importing ravel."
+)
 
 import matplotlib
 import csv
