@@ -1160,6 +1160,16 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
     for idx, line in enumerate(lines):
         print('Plotting fits for line:', line)
         fig, axes = setup_fits_plots(wavelengths)
+        centre = rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms)
+        region_limits = lines_dic.get(line, {}).get('region')
+        if region_limits is not None:
+            region_start, region_end = region_limits
+            region_start = rv_shift_wavelength(region_start, shift_kms)
+            region_end = rv_shift_wavelength(region_end, shift_kms)
+        else:
+            # fallback ±13 Å if no explicit region stored
+            region_start, region_end = centre - 13, centre + 13
+
         for epoch_idx, ax in enumerate(axes.ravel()[:n_epochs]):
             f_pred = trace['fλ_pred']
             # If it came out (S, epochs, lines, N), swap to (S, lines, epochs, N)
@@ -1179,7 +1189,7 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
             # Annotate the epoch number
             ax.text(0.1, 0.1, f'Epoch {epoch_idx+1}', transform=ax.transAxes, fontsize=16)
 
-        ax.set_xlim(centre - 13, centre + 13)
+        ax.set_xlim(region_start, region_end)
         fig.supxlabel('Wavelength [Å]', fontsize=24, y=-0.015)
         fig.supylabel('Flux', fontsize=24, x=-0.01)
         
@@ -2916,7 +2926,7 @@ def run_LS(hjd, rv, rv_err=None, probabilities=[0.5, 0.01, 0.001], method='boots
     return frequency, power, fap, fal
 
 def lomb_scargle(df, path, P_ini=1.2, P_end=500, samples_per_peak=5000, SB2=False, print_output=True, plots=True, best_lines=False, Pfold=True, fold_rv_curve=True, 
-                 save_power_spectrum=False):
+                 save_power_spectrum=False, starname=None):
     """
     Perform Lomb–Scargle period analysis on a DataFrame of radial velocities.
     
