@@ -1,5 +1,34 @@
 import os
-os.environ["JAX_ENABLE_X64"] = "True"
+import sys
+import warnings
+import multiprocessing
+
+# Encourage multi-device CPU use and 64-bit precision before JAX initializes.
+if "jax" not in sys.modules:
+    os.environ.setdefault("JAX_ENABLE_X64", "True")
+    os.environ.setdefault(
+        "XLA_FLAGS",
+        f"--xla_force_host_platform_device_count={multiprocessing.cpu_count()}",
+    )
+else:
+    warnings.warn(
+        "JAX was already imported before ravel; to enable parallel CPU chains set "
+        "XLA_FLAGS=--xla_force_host_platform_device_count=<n_cpus> and restart the runtime.",
+        RuntimeWarning,
+    )
+
+import jax
+import numpyro as npro
+# Set the number of devices to the number of available CPUs (or as configured via XLA_FLAGS)
+_ldc = jax.local_device_count()
+if _ldc == 1 and multiprocessing.cpu_count() > 1:
+    warnings.warn(
+        "JAX sees only 1 CPU device. Set XLA_FLAGS=--xla_force_host_platform_device_count=<n_cpus> "
+        "before importing ravel to enable parallel chains.",
+        RuntimeWarning,
+    )
+npro.set_host_device_count(_ldc)
+
 import matplotlib
 import csv
 import numpy as np
@@ -15,22 +44,16 @@ from datetime import date
 from scipy.signal import find_peaks
 from scipy.interpolate import interp1d
 from scipy.special import wofz as scipy_wofz
-import multiprocessing
-import numpyro as npro
 from numpyro import handlers
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS, Predictive
 from numpyro.infer.util import find_valid_initial_params
 from numpyro.infer.initialization import init_to_uniform 
-import jax
 from jax import numpy as jnp
 from jax import random
 from jax import vmap
 from jax import jit
 from exojax.special.faddeeva import rewofz
-print(f"JAX 64-bit enabled: {jax.config.jax_enable_x64}") # Verify
-# Set the number of devices to the number of available CPUs
-npro.set_host_device_count(multiprocessing.cpu_count())
 import corner
 from scipy.stats import gaussian_kde
 from astropy.time import Time
@@ -912,7 +935,8 @@ def rv_shift_wavelength(lambda_emitted, v):
     return lambda_observed
 
 def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path,
-                    shift_kms=0, wavelength_type='air', rm_epochs=None, profile='Voigt', cornerplot=True):
+                    shift_kms=0, wavelength_type='air', rm_epochs=None, profile='Voigt', cornerplot=True,
+                    num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel'):
     """
     Fit SB1 (single-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
@@ -974,9 +998,25 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # Boolean mask for Hydrogen lines (will use Lorentzian instead of Gaussian)
     is_hline = jnp.array([line in Hlines for line in lines])
 
+    # Determine a common grid length that matches the native sampling as closely as possible.
+    # For each line, count the native points inside the masked region across epochs, take
+    # the median per line, then use the maximum of those medians as the shared length.
+    common_lengths = []
+    for line in lines:
+        region_start, region_end = lines_dic[line]['region']
+        region_start = rv_shift_wavelength(region_start, shift_kms)
+        region_end = rv_shift_wavelength(region_end, shift_kms)
+        masked_lengths = []
+        for wave_set in wavelengths:
+            mask = (wave_set > region_start) & (wave_set < region_end)
+            masked_lengths.append(int(mask.sum()))
+        if masked_lengths:
+            common_lengths.append(int(np.median(masked_lengths)))
+    common_grid_length = max(common_lengths) if common_lengths else 200
+    common_grid_length = max(common_grid_length, 2)  # at least two points
+
     # Interpolate fluxes and errors to a common grid
     x_waves_interp, y_fluxes_interp, y_errors_interp = [], [], []
-    common_grid_length = 200  # Choose a consistent number of points for interpolation
 
     for line in lines:
         region_start, region_end = lines_dic[line]['region']
@@ -1083,7 +1123,13 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # ------------------------
     rng_key = random.PRNGKey(0)
     kernel = NUTS(sb1_model)
-    mcmc = MCMC(kernel, num_warmup=1000, num_chains=4, num_samples=2000)
+    mcmc = MCMC(
+        kernel,
+        num_warmup=num_warmup,
+        num_chains=num_chains,
+        num_samples=num_samples,
+        chain_method=chain_method,
+    )
     mcmc.run(rng_key, extra_fields=("potential_energy",),
              λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, is_hline=is_hline)
 
@@ -1096,7 +1142,7 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # If specific epochs have bene provided to discard from the fitting procedure
     if rm_epochs is not None:
         n_epochs = n_epochs - len(rm_epochs)
-    plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path)
+    plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, n_sol=150)
 
     # Output cornerplot of recovered RV posteriors
     if cornerplot:
@@ -1178,7 +1224,7 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
 
             fλ_pred_samples = f_pred[-n_sol:, idx, epoch_idx, :]
             continuum_pred_samples = trace['ε'][-n_sol:, None]
-            ax.plot(x_waves[idx][epoch_idx], fλ_pred_samples.T, color='orangered', alpha=0.1, rasterized=True)
+            ax.plot(x_waves[idx][epoch_idx], fλ_pred_samples.T, color='orangered', alpha=0.1, rasterized=True, zorder=-1)
             # Plot the observed data
             ax.plot(x_waves[idx][epoch_idx], y_fluxes[idx][epoch_idx], color='k', lw=1, alpha=0.8)
             # Plot vertical lines for the rest wavelength and component shifts
@@ -1262,7 +1308,8 @@ def mcmc_results_to_file_sb1(trace, names, jds, writer, csvfile, rm_epochs=None)
     return writer
 
 def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, sigma_prior, K=2, shift_kms=0,
-                    wavelength_type='air', rm_epochs=None, profile='Voigt', chi2_plots=False):
+                    wavelength_type='air', rm_epochs=None, profile='Voigt', chi2_plots=False,
+                    num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel'):
     """
     Fit SB2 (double-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
@@ -1324,11 +1371,27 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # Boolean mask for Hydrogen lines (will use Lorentzian instead of Gaussian)
     is_hline = jnp.array([line in Hlines for line in lines])
 
+    # Determine a common grid length that matches the native sampling as closely as possible.
+    # For each line, count the native points inside the masked region across epochs, take
+    # the median per line, then use the maximum of those medians as the shared length.
+    common_lengths = []
+    for line in lines:
+        region_start, region_end = lines_dic[line]['region']
+        region_start = rv_shift_wavelength(region_start, shift_kms)
+        region_end = rv_shift_wavelength(region_end, shift_kms)
+        masked_lengths = []
+        for wave_set in wavelengths:
+            mask = (wave_set > region_start) & (wave_set < region_end)
+            masked_lengths.append(int(mask.sum()))
+        if masked_lengths:
+            common_lengths.append(int(np.median(masked_lengths)))
+    common_grid_length = max(common_lengths) if common_lengths else 200
+    common_grid_length = max(common_grid_length, 2)  # at least two points
+
     # Interpolate fluxes and errors to a common grid
     x_waves_interp = []
     y_fluxes_interp = []
     y_errors_interp = []
-    common_grid_length = 200  # Choose a consistent number of points for interpolation
 
     for line in lines:
         region_start, region_end = lines_dic[line]['region']
@@ -1504,7 +1567,13 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # ------------------------
     rng_key = random.PRNGKey(0)
     kernel = NUTS(sb2_model)
-    mcmc = MCMC(kernel, num_warmup=1000, num_chains=4, num_samples=2000)
+    mcmc = MCMC(
+        kernel,
+        num_warmup=num_warmup,
+        num_chains=num_chains,
+        num_samples=num_samples,
+        chain_method=chain_method,
+    )
     mcmc.run(rng_key, extra_fields=("potential_energy",), 
              λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means)
 
@@ -1895,7 +1964,8 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile, rm_epochs):
 
 def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', instrument='FLAMES',
           plots=True, balmer=True, neblines=[], doubem=[], SB2=False, init_guess_shift=0, sigma_prior=20,
-          shift_kms=0, use_init_pars=False, rm_epochs=None, cornerplots=True, chi2_plots=False, profile='Voigt'):
+          shift_kms=0, use_init_pars=False, rm_epochs=None, cornerplots=True, chi2_plots=False, profile='Voigt',
+          num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel'):
     """
     Perform spectral line fitting on a list of spectra. This function reads the spectral data, sets up
     the output directory, initializes line dictionaries and fit variables, and then fits each spectral
@@ -1968,8 +2038,10 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
         if SB2:
             # SB2 fitting: fit all lines using the probabilistic SB2 model and write results to CSV
             result, x_wave, y_flux = fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic,
-                                                      Hlines, neblines, out_path, K=K, shift_kms=shift_kms, 
-                                                      rm_epochs=rm_epochs, chi2_plots=chi2_plots, profile=profile, sigma_prior=sigma_prior)
+                                                      Hlines, neblines, out_path, K=K, shift_kms=shift_kms,
+                                                      rm_epochs=rm_epochs, chi2_plots=chi2_plots, profile=profile, sigma_prior=sigma_prior,
+                                                      num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains,
+                                                      chain_method=chain_method)
             writer = mcmc_results_to_file(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
 
             if cornerplots == True:
@@ -1981,7 +2053,9 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
             # SB1 fitting: using probabilistic method
             result, x_waves, y_fluxes = fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic,
                                                         Hlines, neblines, out_path, shift_kms=shift_kms,
-                                                        rm_epochs=rm_epochs, profile=profile)
+                                                        rm_epochs=rm_epochs, profile=profile,
+                                                        num_warmup=num_warmup, num_samples=num_samples,
+                                                        num_chains=num_chains, chain_method=chain_method)
             writer = mcmc_results_to_file_sb1(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
 
         plt.close('all')
