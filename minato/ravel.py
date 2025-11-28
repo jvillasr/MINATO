@@ -941,7 +941,8 @@ def rv_shift_wavelength(lambda_emitted, v):
 
 def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path,
                     shift_kms=0, wavelength_type='air', rm_epochs=None, profile='Voigt', cornerplot=True,
-                    num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel'):
+                    num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel',
+                    max_interp_points=None):
     """
     Fit SB1 (single-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
@@ -1018,6 +1019,8 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         if masked_lengths:
             common_lengths.append(int(np.median(masked_lengths)))
     common_grid_length = max(common_lengths) if common_lengths else 200
+    if max_interp_points is not None:
+        common_grid_length = min(common_grid_length, int(max_interp_points))
     common_grid_length = max(common_grid_length, 2)  # at least two points
 
     # Interpolate fluxes and errors to a common grid
@@ -1147,7 +1150,7 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # If specific epochs have bene provided to discard from the fitting procedure
     if rm_epochs is not None:
         n_epochs = n_epochs - len(rm_epochs)
-    plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, n_sol=150)
+    plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, n_sol=200)
 
     # Output cornerplot of recovered RV posteriors
     if cornerplot:
@@ -1314,7 +1317,8 @@ def mcmc_results_to_file_sb1(trace, names, jds, writer, csvfile, rm_epochs=None)
 
 def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, sigma_prior, K=2, shift_kms=0,
                     wavelength_type='air', rm_epochs=None, profile='Voigt', chi2_plots=False,
-                    num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel'):
+                    num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel',
+                    max_interp_points=None):
     """
     Fit SB2 (double-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
@@ -1391,6 +1395,8 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         if masked_lengths:
             common_lengths.append(int(np.median(masked_lengths)))
     common_grid_length = max(common_lengths) if common_lengths else 200
+    if max_interp_points is not None:
+        common_grid_length = min(common_grid_length, int(max_interp_points))
     common_grid_length = max(common_grid_length, 2)  # at least two points
 
     # Interpolate fluxes and errors to a common grid
@@ -1970,7 +1976,7 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile, rm_epochs):
 def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', instrument='FLAMES',
           plots=True, balmer=True, neblines=[], doubem=[], SB2=False, init_guess_shift=0, sigma_prior=20,
           shift_kms=0, use_init_pars=False, rm_epochs=None, cornerplots=True, chi2_plots=False, profile='Voigt',
-          num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel'):
+          num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel', max_interp_points=None):
     """
     Perform spectral line fitting on a list of spectra. This function reads the spectral data, sets up
     the output directory, initializes line dictionaries and fit variables, and then fits each spectral
@@ -2046,7 +2052,7 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
                                                       Hlines, neblines, out_path, K=K, shift_kms=shift_kms,
                                                       rm_epochs=rm_epochs, chi2_plots=chi2_plots, profile=profile, sigma_prior=sigma_prior,
                                                       num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains,
-                                                      chain_method=chain_method)
+                                                      chain_method=chain_method, max_interp_points=max_interp_points)
             writer = mcmc_results_to_file(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
 
             if cornerplots == True:
@@ -2060,7 +2066,8 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
                                                         Hlines, neblines, out_path, shift_kms=shift_kms,
                                                         rm_epochs=rm_epochs, profile=profile,
                                                         num_warmup=num_warmup, num_samples=num_samples,
-                                                        num_chains=num_chains, chain_method=chain_method)
+                                                        num_chains=num_chains, chain_method=chain_method,
+                                                        max_interp_points=max_interp_points)
             writer = mcmc_results_to_file_sb1(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
 
         plt.close('all')
