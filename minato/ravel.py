@@ -1150,7 +1150,7 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # If specific epochs have bene provided to discard from the fitting procedure
     if rm_epochs is not None:
         n_epochs = n_epochs - len(rm_epochs)
-    plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, n_sol=200)
+    plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, Hlines, profile, n_sol=200)
 
     # Output cornerplot of recovered RV posteriors
     if cornerplot:
@@ -1181,7 +1181,7 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
     return trace, x_waves, y_fluxes
 
-def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, n_sol=100):
+def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, Hlines, profile, n_sol=100):
     """
     Plot the SB1 line-fit results based on the posterior predictions by plotting the best-fitting sample
     across all epochs & lines, as determined by a χ2 test.
@@ -1266,7 +1266,12 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
             handlelength=2.5,
         )
 
-        plt.savefig(os.path.join(path, f'{line}_fits_SB1_.png'), dpi=300, bbox_inches='tight')
+        # Determine profile tag for filename
+        if line in Hlines:
+            prof_tag = "L"
+        else:
+            prof_tag = "V" if profile == "Voigt" else "G"
+        plt.savefig(os.path.join(path, f'{line}_{prof_tag}_fits_SB1_.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
 def mcmc_results_to_file_sb1(trace, names, jds, writer, csvfile, rm_epochs=None):
@@ -1541,11 +1546,11 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         μ = λ0 * (1 + Δv_τk / c_kms)  # Broadcasts: (K, n_lines, nepochs) then add an extra axis
         μ = μ[:, :, :, None]  # Final shape: (K, n_lines, nepochs, 1)
 
-        # Prepare the observed wavelengths for model evaluation
-        λ_expanded = λ[None, :, :, :]  # Shape: (1, n_lines, nepochs, ndata)
-        is_hline_expanded = is_hline[None, :, None, None]  # Shape: (1, n_lines, 1, 1)
+    # Prepare the observed wavelengths for model evaluation
+    λ_expanded = λ[None, :, :, :]  # Shape: (1, n_lines, nepochs, ndata)
+    is_hline_expanded = is_hline[None, :, None, None]  # Shape: (1, n_lines, 1, 1)
 
-        # Compute the model profiles for each component
+    # Compute the model profiles for each component
         gaussian_profile = gaussian(λ_expanded, amp, μ, wid)
         lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
         voigt_profile = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
@@ -1821,16 +1826,16 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         n_epochs = n_epochs - len(rm_epochs)
         
     if chi2_plots:
-        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace1, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='original', show_chi2=True) # MCMC1 result
-        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace2, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='switched', show_chi2=True) # MCMC2 result
-        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final', show_chi2=True) # stitched final result
+        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace1, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='original', Hlines=Hlines, profile=profile, show_chi2=True) # MCMC1 result
+        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace2, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='switched', Hlines=Hlines, profile=profile, show_chi2=True) # MCMC2 result
+        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final', Hlines=Hlines, profile=profile, show_chi2=True) # stitched final result
     else:
-        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final', show_chi2=False)
+        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final', Hlines=Hlines, profile=profile, show_chi2=False)
     return stitched, x_waves, y_fluxes
 
 def plot_lines_fit(
     wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace, lines_dic, shift_kms, comp_sep, path,
-    chi2_1, chi2_2, type_name, show_chi2=True):
+    chi2_1, chi2_2, type_name, Hlines, profile, show_chi2=True):
     """
     Plot SB2 line-fit results using ONE global best posterior sample (s_star),
     chosen by minimizing total χ² across all epochs. For each epoch, we plot
@@ -1920,7 +1925,12 @@ def plot_lines_fit(
         fig.supylabel('Flux', fontsize=24, x=0.01)
         plt.tight_layout()
         fig.subplots_adjust(bottom=0.118, wspace=0, hspace=0)
-        plt.savefig(os.path.join(path, f'{type_name}_{line}_fits_SB2_.png'), dpi=400, bbox_inches='tight')
+        # Determine profile tag for filename (Hydrogen lines always Lorentzian)
+        if line in Hlines:
+            prof_tag = "L"
+        else:
+            prof_tag = "V" if profile == "Voigt" else "G"
+        plt.savefig(os.path.join(path, f'{type_name}_{line}_{prof_tag}_fits_SB2_.png'), dpi=400, bbox_inches='tight')
         plt.close()
 
 def mcmc_results_to_file(trace, names, jds, writer, csvfile, rm_epochs):
