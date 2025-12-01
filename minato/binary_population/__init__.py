@@ -1,0 +1,16 @@
+from .population import BinaryPopulation
+from .survey import BinarySurveySimulator
+from .mcmc import run_mcmc, log_prior, log_likelihood, log_posterior
+
+# Backward-compatibility alias (previous name)
+BinarySimulations = BinaryPopulation
+
+__all__ = [
+    "BinaryPopulation",
+    "BinarySimulations",
+    "BinarySurveySimulator",
+    "run_mcmc",
+    "log_prior",
+    "log_likelihood",
+    "log_posterior",
+]
