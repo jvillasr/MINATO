@@ -258,7 +258,12 @@ class BinaryPopulation:
             "dv_exp2_kms": np.nan,
         })
 
-        intrinsic_df = pd.concat([df_binaries, df_singles], ignore_index=True)
+        # Avoid pandas warning about concatenating empty/all-NA frames: drop empties first.
+        frames = [df for df in (df_binaries, df_singles) if not df.empty]
+        if frames:
+            intrinsic_df = pd.concat(frames, ignore_index=True)
+        else:
+            intrinsic_df = pd.DataFrame(columns=df_binaries.columns.union(df_singles.columns))
 
         if save_sample:
             intrinsic_df.to_pickle(f"mock_sample_N{N}_fbin{int(f_bin*100)}_pi{int(self.pi)}.pkl")
