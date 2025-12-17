@@ -47,6 +47,9 @@ class BinaryPopulation:
         # --- period-safety and smear controls ---
         self.use_roche_guard = True      # enforce Roche-safe minimum period
         self.roche_margin_frac = 0.10    # 10% headroom below RL at periastron
+        # Print a one-line report when the Roche guard clamps drawn periods.
+        # This is useful interactively, but can be noisy in batched simulations (e.g., MCMC).
+        self.roche_guard_report = True
         self.use_smear_flag = True       # compute exposure-smear flag (15 min)
         self.t_exp_sec = 900.0           # BOSS exposure ≈ 15 min
         self.dv_smear_limit = 20.0       # km/s allowed intra-exposure Δv
@@ -193,7 +196,8 @@ class BinaryPopulation:
         if self.use_roche_guard:
             P_array, n_clamped = self._enforce_roche_guard_on_P(M1_array, q_array, e_array, P_array)
             if n_clamped > 0:
-                print(f"[roche] clamped {n_clamped}/{n_bin} periods to avoid RL overflow.")
+                if getattr(self, "roche_guard_report", True):
+                    print(f"[roche] clamped {n_clamped}/{n_bin} periods to avoid RL overflow.")
             logP_array = np.log10(P_array)
         P_clamped_flag = (P_array > P_drawn + 1e-12)
 
@@ -239,31 +243,51 @@ class BinaryPopulation:
             df_binaries["dv_exp1_kms"] = np.nan
             df_binaries["dv_exp2_kms"] = np.nan
 
-        # 4) For single stars:
+        # 4) For single stars: keep only non-empty columns here, then reindex to the full schema.
+        # This avoids pandas FutureWarning about concatenating frames with all-NA columns.
         n_singles = N - n_bin
         df_singles = pd.DataFrame({
             "M1": self.sample_primary_mass(n_singles),
-            "M2": np.nan,
-            "q": np.nan,
-            "i": np.nan,
-            "P": np.nan,
-            "P_drawn": np.nan,
-            "P_clamped": False,
-            "e": np.nan,
             "gamma": np.random.uniform(self.gamma_range[0], self.gamma_range[1], size=n_singles),
             "is_binary": False,
             "synthetic_ID": [f"SYN_{(n_bin + i):04d}" for i in range(n_singles)],
-            "smear_ok": np.nan,
-            "dv_exp1_kms": np.nan,
-            "dv_exp2_kms": np.nan,
         })
 
-        # Avoid pandas warning about concatenating empty/all-NA frames: drop empties first.
+        schema_cols = [
+            "M1",
+            "M2",
+            "q",
+            "i",
+            "P",
+            "P_drawn",
+            "P_clamped",
+            "e",
+            "Tp",
+            "omega_deg",
+            "gamma",
+            "K1",
+            "K2",
+            "is_binary",
+            "synthetic_ID",
+            "smear_ok",
+            "dv_exp1_kms",
+            "dv_exp2_kms",
+        ]
+
         frames = [df for df in (df_binaries, df_singles) if not df.empty]
-        if frames:
-            intrinsic_df = pd.concat(frames, ignore_index=True)
+        if not frames:
+            intrinsic_df = pd.DataFrame(columns=schema_cols)
+        elif len(frames) == 1:
+            intrinsic_df = frames[0].copy()
         else:
-            intrinsic_df = pd.DataFrame(columns=df_binaries.columns.union(df_singles.columns))
+            intrinsic_df = pd.concat(frames, ignore_index=True)
+
+        intrinsic_df = intrinsic_df.reindex(columns=schema_cols)
+        # Ensure boolean columns are proper bool dtype without triggering pandas downcasting warnings.
+        if "P_clamped" in intrinsic_df.columns:
+            intrinsic_df["P_clamped"] = intrinsic_df["P_clamped"].astype("boolean").fillna(False).astype(bool)
+        if "is_binary" in intrinsic_df.columns:
+            intrinsic_df["is_binary"] = intrinsic_df["is_binary"].astype("boolean").fillna(False).astype(bool)
 
         if save_sample:
             intrinsic_df.to_pickle(f"mock_sample_N{N}_fbin{int(f_bin*100)}_pi{int(self.pi)}.pkl")

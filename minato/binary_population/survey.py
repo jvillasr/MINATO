@@ -43,6 +43,7 @@ class BinarySurveySimulator:
         ideal_sampling=False,
         n_epochs=None,
         rv_error_common=None,
+        summary_only=False,
         seed=None,
     ):
         """
@@ -68,6 +69,7 @@ class BinarySurveySimulator:
             ideal_sampling=ideal_sampling,
             n_epochs=n_epochs,
             rv_error_common=rv_error_common,
+            summary_only=summary_only,
         )
         return self.obs_results_df
 
@@ -113,7 +115,7 @@ class BinarySurveySimulator:
         sigma = diff / err
         return np.max(sigma)
 
-    def compute_rvs(self, intrinsic_df, ideal_sampling=False, n_epochs=None, rv_error_common=None):
+    def compute_rvs(self, intrinsic_df, ideal_sampling=False, n_epochs=None, rv_error_common=None, summary_only=False):
         """
         Simulate RV observations for each star in the intrinsic sample based on the specified observing strategy.
         """
@@ -204,6 +206,20 @@ class BinarySurveySimulator:
             dRV = rv_obs1.max() - rv_obs1.min()
             sigma_detect = self._compute_sigmad_vectorized(rv_obs1, rv_errors)
 
+            if summary_only:
+                results_obs.append({
+                    "synthetic_ID": row["synthetic_ID"],
+                    "real_ID_used": chosen_id,
+                    "is_binary": row["is_binary"],
+                    "dRV_max": dRV,
+                    "sigma_d": sigma_detect,
+                    "rv_mean": rv_mean,
+                    "n_eps": n_eps,
+                    "n_epochs": n_eps,
+                    "rng_seed": self._last_seed,
+                })
+                continue
+
             results_obs.append({
                 "synthetic_ID": row["synthetic_ID"],
                 "real_ID_used": chosen_id,
@@ -227,6 +243,8 @@ class BinarySurveySimulator:
                 "sigma_d": sigma_detect,
                 "rv_mean": rv_mean,
                 "n_eps": n_eps,
+                # Alias for clarity in notebooks/docs (keep n_eps for backward compatibility)
+                "n_epochs": n_eps,
                 "rv_true": v1_true,
                 "rv_true2": v2_true,
                 "rv_array": rv_obs1,
@@ -296,4 +314,3 @@ class BinarySurveySimulator:
         plt.savefig("parameter_distribution.png", dpi=300, bbox_inches="tight")
         plt.show()
         plt.close()
-
