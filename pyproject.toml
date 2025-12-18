@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minato"
+version = "0.2.0"
+description = "MINATO: Massive bINaries Analysis TOols"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE.txt" }
+dependencies = [
+  "astropy",
+  "emcee",
+  "jax",
+  "kepler.py",
+  "lmfit",
+  "matplotlib",
+  "multiprocess",
+  "numpy",
+  "numpyro",
+  "pandas",
+  "scipy",
+  "tqdm",
+]
+
+[tool.setuptools.packages.find]
+include = ["minato*"]
+
