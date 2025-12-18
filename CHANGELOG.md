@@ -8,6 +8,7 @@
   * `BinarySurveySimulator` for survey cadence/noise and RV time-series synthesis.
   * `run_mcmc` helper to fit the binary fraction via Poisson likelihood on `dRV_max` (importable as `from minato.binary_population import run_mcmc`).
 * New tutorial notebook for `minato.binary_population`: `minato/tutorials/binary_population_tutorial.ipynb`.
+* Added `pyproject.toml` (initial packaging metadata) to support `uv`/`pip` workflows.
 
 ### Changed
 * SB2 workflow now runs a two-stage sampling procedure (full fit + RV-only refit with frozen nuisance parameters) and records which posterior summary (median / mode / HDI) was used per epoch in `fit_values.csv`.
