@@ -6,6 +6,7 @@ dependencies:
   - python=3.10
   - pip
   - astropy
+  - corner
   - jax
   - lmfit
   - matplotlib
@@ -18,3 +19,4 @@ dependencies:
   - multiprocess
   - pip:
       - kepler.py
+      - exojax
