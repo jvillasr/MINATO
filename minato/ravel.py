@@ -63,6 +63,7 @@ import corner
 from scipy.stats import gaussian_kde
 from astropy.time import Time
 import gc
+# from minato import myRC
 
 pd.set_option('display.max_rows', 1000)
 pd.set_option('display.max_columns', 1000)
@@ -789,13 +790,13 @@ def setup_line_dictionary():
     lines_dic = {
         # --- Balmer centres of gravity (NIST) --------------------------------
         4102: {  # Hδ
-            'region': [4080, 4122], 'centre': [4102.8991, 0.0024], 'air': [4101.7414, 0.0024], 'wid_ini': 6, 'title': 'H$\delta$'},
+            'region': [4077, 4128], 'centre': [4102.8991, 0.0024], 'air': [4101.7414, 0.0024], 'wid_ini': 6, 'title': 'H$\delta$'},
         4340: {  # Hγ
-            'region': [4316, 4366], 'centre': [4341.691, 0.003],   'air': [4340.471, 0.003],   'wid_ini': 7, 'title': 'H$\gamma$'},
+            'region': [4310, 4370], 'centre': [4341.691, 0.003],   'air': [4340.471, 0.003],   'wid_ini': 7, 'title': 'H$\gamma$'},
         4861: {  # Hβ
-            'region': [4836, 4871], 'centre': [4862.691, 0.003],   'air': [4861.333, 0.003],   'wid_ini': 6, 'title': 'H$\beta$'},
+            'region': [4831, 4891], 'centre': [4862.691, 0.003],   'air': [4861.333, 0.003],   'wid_ini': 6, 'title': 'H$\beta$'},
         6562: {  # Hα
-            'region': [6538, 6579], 'centre': [6564.632, 0.007],   'air': [6562.819, 0.007],   'wid_ini': 6, 'title': 'H$\alpha$'
+            'region': [6533, 6593], 'centre': [6564.632, 0.007],   'air': [6562.819, 0.007],   'wid_ini': 6, 'title': 'H$\alpha$'
         },
         # --- He I lines ------------------------------------------------
         4009: { 'region': [4001, 4014], 'centre': [4010.3899037, 0.0000011], 'air': [4009.256516, 0.000020], 'wid_ini': 3, 'title': 'He I $\lambda$4009'},
@@ -999,7 +1000,7 @@ def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):
 def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path,
                     shift_kms=0, wavelength_type='air', rm_epochs=None, profile='Voigt', Hprofile='Lorentzian', cornerplot=True,
                     num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel',
-                    max_interp_points=None):
+                    max_interp_points=None, plots=True):
     """
     Fit SB1 (single-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
@@ -1042,6 +1043,8 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         Enable/disable seperate plotting of first, second, and final (stitched) MCMC results.
     cornerplot : bool
         Enable/disable automatic cornerplot of RV posteriors for each epoch.
+    plots : bool
+        Enable/disable line-fit plots (per-line, per-epoch).
 
     Returns:
     --------
@@ -1152,9 +1155,9 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
 
         with npro.plate('lines', nlines, dim=-3):
             amp   = npro.sample('amp',   dist.TruncatedNormal(loc=0.18, scale=0.06, low=0.02, high=0.80))   # (L,1,1)
-            wid_G = npro.sample('wid_G', dist.Uniform(0.5, 5.0))   # (L,1,1)
-            wid_L = npro.sample('wid_L', dist.Uniform(0.1, 3.0))   # (L,1,1)
-            wid   = npro.sample('wid',   dist.Uniform(0.5, 5.0))   # (L,1,1)
+            wid_G = npro.sample('wid_G', dist.Uniform(0.5, 12.0))   # (L,1,1)
+            wid_L = npro.sample('wid_L', dist.Uniform(0.1, 12.0))   # (L,1,1)
+            # wid   = npro.sample('wid',   dist.Uniform(0.5, 5.0))   # (L,1,1)
 
         # Make λ_rest a deterministic variable and reshape for broadcasting
         λ0 = npro.deterministic("λ0", λ_rest[:, None, None])   # (L,1,1)
@@ -1220,7 +1223,10 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # If specific epochs have bene provided to discard from the fitting procedure
     if rm_epochs is not None:
         n_epochs = n_epochs - len(rm_epochs)
-    plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, Hlines, profile, Hprofile, n_sol=200)
+    if plots:
+        plot_lines_fit_sb1(
+            wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, Hlines, profile, Hprofile, n_sol=200
+        )
 
     # Output cornerplot of recovered RV posteriors
     if cornerplot:
@@ -1393,7 +1399,7 @@ def mcmc_results_to_file_sb1(trace, names, jds, writer, csvfile, rm_epochs=None)
 def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, sigma_prior, K=2, shift_kms=0,
                     wavelength_type='air', rm_epochs=None, profile='Voigt', Hprofile='Lorentzian', chi2_plots=False,
                     num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel',
-                    max_interp_points=None):
+                    max_interp_points=None, plots=True):
     """
     Fit SB2 (double-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
@@ -1436,6 +1442,8 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         Profile type used for Hydrogen lines.
     chi2_plots : bool
         Enable/disable seperate plotting of first, second, and final (stitched) MCMC results.
+    plots : bool
+        Enable/disable line-fit plots (per-line, per-epoch).
 
     Returns:
     --------
@@ -1901,18 +1909,19 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # ------------------------
     # 4) Plot 
     # ------------------------
-    plot_path = path + 'Line_plots'
-    os.makedirs(plot_path, exist_ok=True)
+    if plots:
+        plot_path = path + 'Line_plots'
+        os.makedirs(plot_path, exist_ok=True)
 
-    if rm_epochs is not None:
-        n_epochs = n_epochs - len(rm_epochs)
-        
-    if chi2_plots:
-        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace1, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='original', Hlines=Hlines, profile=profile, show_chi2=True) # MCMC1 result
-        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace2, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='switched', Hlines=Hlines, profile=profile, show_chi2=True) # MCMC2 result
-        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final', Hlines=Hlines, profile=profile, show_chi2=True) # stitched final result
-    else:
-        plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final', Hlines=Hlines, profile=profile, show_chi2=False)
+        if rm_epochs is not None:
+            n_epochs = n_epochs - len(rm_epochs)
+            
+        if chi2_plots:
+            plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace1, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='original', Hlines=Hlines, profile=profile, Hprofile=Hprofile, show_chi2=True) # MCMC1 result
+            plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace2, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='switched', Hlines=Hlines, profile=profile, Hprofile=Hprofile, show_chi2=True) # MCMC2 result
+            plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final', Hlines=Hlines, profile=profile, Hprofile=Hprofile, show_chi2=True) # stitched final result
+        else:
+            plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final', Hlines=Hlines, profile=profile, Hprofile=Hprofile, show_chi2=False)
     return stitched, x_waves, y_fluxes
 
 def plot_lines_fit(
@@ -2110,7 +2119,7 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
         return
 
     # Define default Hydrogen lines for which Lorentzian profiles may be used
-    Hlines = [4102, 4340, 4861, 6562]
+    Hlines = [4102, 4340, 4861, 6562, 8345, 8467, 8598, 8750, 8863, 9015, 9229, 9546, 10049]
     print('*** SB2 set to:', SB2, '***\n')
 
     # Read in spectral data from the provided file list and data path
@@ -2151,7 +2160,7 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
                 rm_epochs=rm_epochs, chi2_plots=chi2_plots, profile=profile, Hprofile=Hprofile,
                 sigma_prior=sigma_prior, num_warmup=num_warmup, num_samples=num_samples,
                 num_chains=num_chains, chain_method=chain_method,
-                max_interp_points=max_interp_points
+                max_interp_points=max_interp_points, plots=plots
             )
             writer = mcmc_results_to_file(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
 
@@ -2169,7 +2178,7 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
                     rm_epochs=rm_epochs, profile=profile, Hprofile=Hprofile,
                     num_warmup=num_warmup, num_samples=num_samples,
                     num_chains=num_chains, chain_method=chain_method,
-                    max_interp_points=max_interp_points
+                    max_interp_points=max_interp_points, plots=plots, cornerplot=cornerplots
                 )
                 writer = mcmc_results_to_file_sb1(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
             elif sb1_method in ['classic', 'lmfit']:
