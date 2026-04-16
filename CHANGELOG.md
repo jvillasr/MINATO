@@ -9,14 +9,17 @@
   * `run_mcmc` helper to fit the binary fraction via Poisson likelihood on `dRV_max` (importable as `from minato.binary_population import run_mcmc`).
 * New tutorial notebook for `minato.binary_population`: `minato/tutorials/binary_population_tutorial.ipynb`.
 * Added `pyproject.toml` (initial packaging metadata) to support `uv`/`pip` workflows.
+* Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
 
 ### Changed
+* `AGENTS.md` and `ROADMAP.md` are now tracked on `develop`, and the repository instructions document the release workflow for keeping development-only project-management files out of `main`.
 * SB2 workflow now runs a two-stage sampling procedure (full fit + RV-only refit with frozen nuisance parameters) and records which posterior summary (median / mode / HDI) was used per epoch in `fit_values.csv`.
 * `SLfit` logic, docstrings, and plotting have been streamlined; both SB1 and SB2 runs now share the same probabilistic infrastructure and optionally create diagnostic corner plots only for the recovered RVs.
 * `plot_lines_fit` / `plot_lines_fit_sb1` visualize both MCMC runs, Chi^2 statistics, and stitched RV solutions. Error reporting in `mcmc_results_to_file*` is more robust to bimodality.
 * Lomb–Scargle utilities read SB1 products directly, handle star names without underscores, and clean up KDE imports / plotting labels.
 * Restored the earlier `setup_star_directory_and_save_jds` behaviour so SB2 output directories are laid out consistently again.
 * `binary_population` inference: `run_mcmc` defaults to summary-only mock simulations (lighter outputs), vectorizes the Poisson log-likelihood, and supports multi-core pooling (`pool_kind="process"` default, configurable `start_method`).
+* The SB1 and SB2 `ravel` tutorials now include an upfront note on setting `XLA_FLAGS` before importing `minato.ravel` on shared CPU servers.
 
 ### Fixed
 * Plotting now respects the exact number of SB1 fits requested.
