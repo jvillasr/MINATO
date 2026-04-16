@@ -2,6 +2,26 @@ import os
 import sys
 import warnings
 import multiprocessing
+import io
+from contextlib import nullcontext, redirect_stdout
+
+# -----------------------------------------------------------------------------
+# Output control
+# -----------------------------------------------------------------------------
+def _env_truthy(name: str) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return False
+    return val.strip().lower() not in {"", "0", "false", "no", "off"}
+
+
+def _resolve_verbose_progress(verbose, progress):
+    quiet = _env_truthy("MINATO_QUIET")
+    if verbose is None:
+        verbose = not quiet
+    if progress is None:
+        progress = not quiet
+    return bool(verbose), bool(progress)
 
 # Encourage multi-device CPU use and 64-bit precision before JAX initializes.
 if "jax" not in sys.modules:
@@ -28,11 +48,12 @@ if _ldc == 1 and multiprocessing.cpu_count() > 1:
         RuntimeWarning,
     )
 npro.set_host_device_count(_ldc)
-print(
-    f"JAX local devices: {_ldc}. "
-    "To change, set XLA_FLAGS=--xla_force_host_platform_device_count=<n_cpus> "
-    "before importing ravel."
-)
+if not _env_truthy("MINATO_QUIET"):
+    print(
+        f"JAX local devices: {_ldc}. "
+        "To change, set XLA_FLAGS=--xla_force_host_platform_device_count=<n_cpus> "
+        "before importing ravel."
+    )
 
 import matplotlib
 import csv
@@ -997,10 +1018,10 @@ def fit_sb1(line, wave, flux, ferr, lines_dic, Hlines, neblines, doubem, shift):
     return result, x_wave, y_flux, wave_region
 
 
-def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path,
-                    shift_kms=0, wavelength_type='air', rm_epochs=None, profile='Voigt', Hprofile='Lorentzian', cornerplot=True,
-                    num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel',
-                    max_interp_points=None, plots=True):
+def _fit_sb1_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path,
+                          shift_kms=0, wavelength_type='air', rm_epochs=None, profile='Voigt', Hprofile='Lorentzian', cornerplot=True,
+                          num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel',
+                          max_interp_points=None, plots=True, progress=True):
     """
     Fit SB1 (single-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
@@ -1204,13 +1225,19 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # ------------------------
     rng_key = random.PRNGKey(0)
     kernel = NUTS(sb1_model)
-    mcmc = MCMC(
-        kernel,
+    mcmc_kwargs = dict(
         num_warmup=num_warmup,
         num_chains=num_chains,
         num_samples=num_samples,
         chain_method=chain_method,
+        progress_bar=bool(progress),
     )
+    try:
+        mcmc = MCMC(kernel, **mcmc_kwargs)
+    except TypeError:
+        # Older NumPyro versions may not support progress_bar.
+        mcmc_kwargs.pop("progress_bar", None)
+        mcmc = MCMC(kernel, **mcmc_kwargs)
     mcmc.run(rng_key, extra_fields=("potential_energy",),
              λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, is_hline=is_hline)
 
@@ -1256,6 +1283,29 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
         plt.close(fig)
 
     return trace, x_waves, y_fluxes
+
+def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path,
+                    shift_kms=0, wavelength_type='air', rm_epochs=None, profile='Voigt', Hprofile='Lorentzian', cornerplot=True,
+                    num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel',
+                    max_interp_points=None, plots=True, verbose=None, progress=None):
+    """
+    Wrapper for SB1 probabilistic fitting with optional output/progress suppression.
+
+    Set `verbose=False` to silence all prints produced during the fit. Set `progress=False` to
+    disable NumPyro progress bars. If `MINATO_QUIET=1` is set in the environment, both default
+    to False unless explicitly provided.
+    """
+    verbose, progress = _resolve_verbose_progress(verbose, progress)
+    stdout_cm = nullcontext() if verbose else redirect_stdout(io.StringIO())
+    with stdout_cm:
+        return _fit_sb1_probmod_impl(
+            lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path,
+            shift_kms=shift_kms, wavelength_type=wavelength_type, rm_epochs=rm_epochs,
+            profile=profile, Hprofile=Hprofile, cornerplot=cornerplot,
+            num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains,
+            chain_method=chain_method, max_interp_points=max_interp_points, plots=plots,
+            progress=progress,
+        )
 
 def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, Hlines, profile, Hprofile, n_sol=100):
     """
@@ -1321,12 +1371,13 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
 
         ax.set_xlim(region_start, region_end)
         fig.supxlabel('Wavelength [Å]', fontsize=24, y=-0.015)
-        fig.supylabel('Flux', fontsize=24, x=-0.01)
+        # Keep the y-label inside the figure; otherwise it can overlap the y-tick labels.
+        fig.supylabel('Flux', fontsize=24, x=-0.1)
         
         custom_lines = [
             Line2D([0], [0], color='orangered', lw=2)
         ]
-        fig.subplots_adjust(bottom=0.1)
+        fig.subplots_adjust(bottom=0.1, left=0.12)
 
         # Legend formatting
         fig.legend(
@@ -1396,10 +1447,10 @@ def mcmc_results_to_file_sb1(trace, names, jds, writer, csvfile, rm_epochs=None)
 
     return writer
 
-def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, sigma_prior, K=2, shift_kms=0,
-                    wavelength_type='air', rm_epochs=None, profile='Voigt', Hprofile='Lorentzian', chi2_plots=False,
-                    num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel',
-                    max_interp_points=None, plots=True):
+def _fit_sb2_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, sigma_prior, K=2, shift_kms=0,
+                          wavelength_type='air', rm_epochs=None, profile='Voigt', Hprofile='Lorentzian', chi2_plots=False,
+                          num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel',
+                          max_interp_points=None, plots=True, progress=True):
     """
     Fit SB2 (double-lined spectroscopic binary) spectral lines using a probabilistic
     model with Numpyro. The function interpolates spectral data onto a common grid,
@@ -1673,13 +1724,18 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
     # ------------------------
     rng_key = random.PRNGKey(0)
     kernel = NUTS(sb2_model)
-    mcmc = MCMC(
-        kernel,
+    mcmc_kwargs = dict(
         num_warmup=num_warmup,
         num_chains=num_chains,
         num_samples=num_samples,
         chain_method=chain_method,
+        progress_bar=bool(progress),
     )
+    try:
+        mcmc = MCMC(kernel, **mcmc_kwargs)
+    except TypeError:
+        mcmc_kwargs.pop("progress_bar", None)
+        mcmc = MCMC(kernel, **mcmc_kwargs)
     mcmc.run(rng_key, extra_fields=("potential_energy",), 
              λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, Δv_means=Δv_means)
 
@@ -1924,6 +1980,29 @@ def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
             plot_lines_fit(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, stitched, lines_dic, shift_kms, comp_sep, plot_path, chi2_1=chi2_orig, chi2_2=chi2_switched, type_name='final', Hlines=Hlines, profile=profile, Hprofile=Hprofile, show_chi2=False)
     return stitched, x_waves, y_fluxes
 
+def fit_sb2_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, sigma_prior, K=2, shift_kms=0,
+                    wavelength_type='air', rm_epochs=None, profile='Voigt', Hprofile='Lorentzian', chi2_plots=False,
+                    num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel',
+                    max_interp_points=None, plots=True, verbose=None, progress=None):
+    """
+    Wrapper for SB2 probabilistic fitting with optional output/progress suppression.
+
+    Set `verbose=False` to silence all prints produced during the fit. Set `progress=False` to
+    disable NumPyro progress bars. If `MINATO_QUIET=1` is set in the environment, both default
+    to False unless explicitly provided.
+    """
+    verbose, progress = _resolve_verbose_progress(verbose, progress)
+    stdout_cm = nullcontext() if verbose else redirect_stdout(io.StringIO())
+    with stdout_cm:
+        return _fit_sb2_probmod_impl(
+            lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neblines, path, sigma_prior,
+            K=K, shift_kms=shift_kms, wavelength_type=wavelength_type, rm_epochs=rm_epochs,
+            profile=profile, Hprofile=Hprofile, chi2_plots=chi2_plots,
+            num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains,
+            chain_method=chain_method, max_interp_points=max_interp_points, plots=plots,
+            progress=progress,
+        )
+
 def plot_lines_fit(
     wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace, lines_dic, shift_kms, comp_sep, path,
     chi2_1, chi2_2, type_name, Hlines, profile, Hprofile, show_chi2=True):
@@ -2074,11 +2153,12 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile, rm_epochs):
 
     return writer
 
-def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', instrument='FLAMES',
-          plots=True, balmer=True, neblines=[], doubem=[], SB2=False, init_guess_shift=0, sigma_prior=20, shift_kms=0, 
-          use_init_pars=False, rm_epochs=None, cornerplots=True, chi2_plots=False, profile='Voigt', Hprofile='Lorentzian',
-          sb1_method='prob', 
-          num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel', max_interp_points=None):
+def _SLfit_impl(spectra_list, data_path, save_path, lines, K=2, file_type='fits', instrument='FLAMES',
+                plots=True, balmer=True, neblines=[], doubem=[], SB2=False, init_guess_shift=0, sigma_prior=20, shift_kms=0, 
+                use_init_pars=False, rm_epochs=None, cornerplots=True, chi2_plots=False, profile='Voigt', Hprofile='Lorentzian',
+                sb1_method='prob', 
+                num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel', max_interp_points=None,
+                progress=True):
     """
     Perform spectral line fitting on a list of spectra. This function reads the spectral data, sets up
     the output directory, initializes line dictionaries and fit variables, and then fits each spectral
@@ -2160,7 +2240,7 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
                 rm_epochs=rm_epochs, chi2_plots=chi2_plots, profile=profile, Hprofile=Hprofile,
                 sigma_prior=sigma_prior, num_warmup=num_warmup, num_samples=num_samples,
                 num_chains=num_chains, chain_method=chain_method,
-                max_interp_points=max_interp_points, plots=plots
+                max_interp_points=max_interp_points, plots=plots, progress=progress
             )
             writer = mcmc_results_to_file(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
 
@@ -2178,7 +2258,7 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
                     rm_epochs=rm_epochs, profile=profile, Hprofile=Hprofile,
                     num_warmup=num_warmup, num_samples=num_samples,
                     num_chains=num_chains, chain_method=chain_method,
-                    max_interp_points=max_interp_points, plots=plots, cornerplot=cornerplots
+                    max_interp_points=max_interp_points, plots=plots, cornerplot=cornerplots, progress=progress
                 )
                 writer = mcmc_results_to_file_sb1(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
             elif sb1_method in ['classic', 'lmfit']:
@@ -2297,6 +2377,32 @@ def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', inst
         plt.close('all')
         
     return out_path
+
+def SLfit(spectra_list, data_path, save_path, lines, K=2, file_type='fits', instrument='FLAMES',
+          plots=True, balmer=True, neblines=[], doubem=[], SB2=False, init_guess_shift=0, sigma_prior=20, shift_kms=0, 
+          use_init_pars=False, rm_epochs=None, cornerplots=True, chi2_plots=False, profile='Voigt', Hprofile='Lorentzian',
+          sb1_method='prob', 
+          num_warmup=1000, num_samples=2000, num_chains=4, chain_method='parallel', max_interp_points=None,
+          verbose=None, progress=None):
+    """
+    High-level spectral-line fitting wrapper with output/progress controls.
+
+    - `verbose=False` silences all prints emitted during the run.
+    - `progress=False` disables NumPyro progress bars for probabilistic fits.
+    - If `MINATO_QUIET=1` is set, both default to False unless explicitly provided.
+    """
+    verbose, progress = _resolve_verbose_progress(verbose, progress)
+    stdout_cm = nullcontext() if verbose else redirect_stdout(io.StringIO())
+    with stdout_cm:
+        return _SLfit_impl(
+            spectra_list, data_path, save_path, lines, K=K, file_type=file_type, instrument=instrument,
+            plots=plots, balmer=balmer, neblines=neblines, doubem=doubem, SB2=SB2,
+            init_guess_shift=init_guess_shift, sigma_prior=sigma_prior, shift_kms=shift_kms,
+            use_init_pars=use_init_pars, rm_epochs=rm_epochs, cornerplots=cornerplots,
+            chi2_plots=chi2_plots, profile=profile, Hprofile=Hprofile, sb1_method=sb1_method,
+            num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains,
+            chain_method=chain_method, max_interp_points=max_interp_points, progress=progress
+        )
 
 class GetRVs:
     """
