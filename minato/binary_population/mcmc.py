@@ -1,7 +1,15 @@
+import os
 import sys
 import numpy as np
 from multiprocessing.pool import ThreadPool
 import multiprocessing as mp
+
+
+def _env_truthy(name: str) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return False
+    return val.strip().lower() not in {"", "0", "false", "no", "off"}
 
 
 class LogProb:
@@ -113,12 +121,16 @@ def run_mcmc(
     sim_kwargs=None,
     pool_kind="process",  # "process" | "thread" | "none"
     start_method=None,    # e.g. "spawn" (macOS) or "fork" (Linux)
+    progress=None,
 ):
     """
     Run an emcee EnsembleSampler over f_bin using the Poisson likelihood on dRV_real.
     """
     if sim_kwargs is None:
         sim_kwargs = {}
+
+    if progress is None:
+        progress = not _env_truthy("MINATO_QUIET")
 
     # Keep survey/population in sync if the caller passed a different instance.
     if getattr(survey, "population", None) is None:
@@ -155,12 +167,18 @@ def run_mcmc(
     try:
         if pool is None:
             sampler = emcee.EnsembleSampler(nwalkers, ndim, log_prob)
-            sampler.run_mcmc(p0, nsteps, progress=True)
+            try:
+                sampler.run_mcmc(p0, nsteps, progress=bool(progress))
+            except TypeError:
+                sampler.run_mcmc(p0, nsteps)
             return sampler
 
         # ThreadPool supports context manager; multiprocessing Pool does not always implement __enter__/__exit__.
         sampler = emcee.EnsembleSampler(nwalkers, ndim, log_prob, pool=pool)
-        sampler.run_mcmc(p0, nsteps, progress=True)
+        try:
+            sampler.run_mcmc(p0, nsteps, progress=bool(progress))
+        except TypeError:
+            sampler.run_mcmc(p0, nsteps)
         return sampler
     finally:
         if pool is not None and hasattr(pool, "close"):
