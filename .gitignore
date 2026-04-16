@@ -14,4 +14,5 @@ minato/create_model.py
 minato/rotin_inp.py
 minato/rvcurve.py
 minato/spdis.py
+minato.egg-info/
 minato/tutorials/ravel_tutorial/**/power_spectrum.txt
