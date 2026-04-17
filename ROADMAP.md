@@ -37,6 +37,8 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 - Update `binary_population` tutorial with HPC caveats and “how to run” guidance (threads vs processes vs MPI; choosing `N_sim`, `batch_size`, `nwalkers`, `nsteps`) [][]
 - Create/expand a tutorial for binary simulations (`minato.binary_population`) covering the main options and common workflows [Done][2025-12-15]
 - Validate and complete the SB1 tutorial: Gaussian vs Voigt (`profile`), impact on results, and a working legacy `lmfit` example [][]
+- Benchmark `ravel` SB1 scaling on astro-nodes using the PoWR multiepoch binary sample (`R=2000`, `SNR=25`) and document the recommended `XLA_FLAGS` / `num_chains` / `chain_method` setup [STARTED][2026-04-16]
+- Benchmark and optimise the P117-style SB1 batch workflow for large campaigns: 4 fit families per star, no plots, tuned warmup/sample depth, epoch-count batching, and validated `n_workers` × `n_cpus_per_worker` packing before multi-node scale-out [STARTED][2026-04-17]
 - Refresh the SB2 tutorial to match current code and include new functionality (two-stage sampling, diagnostics, stitching) [][]
 - Make MINATO installable via `pip` (add packaging config like `pyproject.toml`, declare deps, and document install) [][]
 - Start the MINATO paper draft: choose workflow (gitignored `paper/` folder vs. dedicated `paper` branch) and add minimal repo guidance [STARTED][2025-12-15]

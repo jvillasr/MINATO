@@ -1,6 +1,7 @@
 ## [Unreleased]
 ### Added
 * Probabilistic SB1 fitting workflow (`fit_sb1_probmod`) that mirrors the SB2 logic, including SB1-specific line plotting, corner-plot generation, and CSV writers.
+* Dedicated Na-doublet probabilistic fitter (`sb1_method='na'`) for per-epoch Na I D diagnostic RVs, using one shared local window and tied D1/D2 physics.
 * Tools for diagnosing multimodal SB2 posteriors: HDI / mode summaries, per-component RV corner plots, Chi^2 comparison plots, and the ability to stitch together epoch-wise best fits from sequential MCMC runs.
 * `profile` and `sigma_prior` parameters in `fit_sb2_probmod` / `SLfit` so users can choose Gaussian vs. Voigt profiles and tune the RV priors explicitly.
 * New `binary_population` subpackage:
@@ -10,6 +11,7 @@
 * New tutorial notebook for `minato.binary_population`: `minato/tutorials/binary_population_tutorial.ipynb`.
 * Added `pyproject.toml` (initial packaging metadata) to support `uv`/`pip` workflows.
 * Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
+* Added `Na I 5896 (D1)` and the Paschen series entries used by the P117 workflow to the default `ravel` line dictionary.
 
 ### Changed
 * `AGENTS.md` and `ROADMAP.md` are now tracked on `develop`, and the repository instructions document the release workflow for keeping development-only project-management files out of `main`.
@@ -23,6 +25,7 @@
 
 ### Fixed
 * Plotting now respects the exact number of SB1 fits requested.
+* `SLfit` now allows single-epoch runs and no longer trips over one-panel plotting in the probabilistic SB1/SB2 plotting helpers.
 * `mcmc_results_to_file_sb1` correctly treats `rm_epochs=None`, preventing crashes when no epochs are removed.
 * `binary_population` inference: fixed `run_mcmc` passing internal bookkeeping kwargs into the survey simulator.
 * `binary_population` inference: `LogProb` is now a pickle-friendly callable to support multiprocessing pools reliably.

@@ -834,6 +834,16 @@ def setup_line_dictionary():
         4542: { 'region': [4533, 4551], 'centre': [4542.912549, 0.000132], 'air': [4541.63924, 0.000132],    'wid_ini': 3, 'title': 'He II $\lambda$4542'},
         4686: { 'region': [4672, 4700], 'centre': [4687.015247, 0.000091], 'air': [4685.70384 , 0.000091],   'wid_ini': 4, 'title': 'He II $\lambda$4686'},
         5412: { 'region': [5401, 5415], 'centre': [5413.083151, 0.000262], 'air': [5411.57874 , 0.000262],   'wid_ini': 4, 'title': 'He II $\lambda$5412'},
+        # --- Paschen lines (coarse air-wavelength definitions for low-resolution optical/NIR work) ---
+        8345: { 'region': [8320, 8370], 'centre': [], 'air': [8345.0, 0.1], 'wid_ini': 4, 'title': 'Pa15'},
+        8467: { 'region': [8445, 8490], 'centre': [], 'air': [8467.0, 0.1], 'wid_ini': 5, 'title': 'Pa14'},
+        8598: { 'region': [8575, 8620], 'centre': [], 'air': [8598.0, 0.1], 'wid_ini': 5, 'title': 'Pa13'},
+        8750: { 'region': [8725, 8775], 'centre': [], 'air': [8750.0, 0.1], 'wid_ini': 5, 'title': 'Pa12'},
+        8863: { 'region': [8840, 8890], 'centre': [], 'air': [8863.0, 0.1], 'wid_ini': 5, 'title': 'Pa11'},
+        9015: { 'region': [8990, 9040], 'centre': [], 'air': [9015.0, 0.1], 'wid_ini': 6, 'title': 'Pa10'},
+        9229: { 'region': [9205, 9255], 'centre': [], 'air': [9229.0, 0.1], 'wid_ini': 6, 'title': 'Pa9'},
+        9546: { 'region': [9520, 9575], 'centre': [], 'air': [9546.0, 0.1], 'wid_ini': 6, 'title': 'Pa8'},
+        10049: { 'region': [10020, 10080], 'centre': [], 'air': [10049.0, 0.1], 'wid_ini': 6, 'title': 'Pa7'},
         # --- Other lines ------------------------------------------------
         3995: { 'region': [3986, 4001], 'centre': None,                                 'wid_ini': 2, 'title': 'N II $\lambda$3995'},
         4089: { 'region': [4075, 4095], 'centre': [4090.016, 0.1],   'air':   [4088.862, 0.10], 'wid_ini': 2, 'title': 'Si IV $\lambda$4089'},
@@ -843,7 +853,9 @@ def setup_line_dictionary():
         4267: { 'region': [4259, 4271], 'centre': [], 'air': [4267.258, 0.007],          'wid_ini': 2, 'title': 'C II $\lambda$4267'},
         4481: { 'region': [4474, 4486], 'centre': [4482.4766, 0.0003], 'air': [4481.2192, 0.003],          'wid_ini': 2, 'title': 'Mg II $\lambda$4481'},
         4553: { 'region': [4548, 4558], 'centre': [4553.898, 0.001], 'air': [4552.622, 0.001], 'wid_ini': 3, 'title': 'Si III $\lambda$4553'},
-        5890: { 'region': [5875, 5905], 'centre': [], 'air': [5889.951, 0.00003],        'wid_ini': 3, 'title': 'Na I $\lambda$5890'},
+        # Na I D doublet air wavelengths from the NIST ASD / Handbook strong-line tables.
+        5890: { 'region': [5875, 5905], 'centre': [], 'air': [5889.951, 0.00003],        'wid_ini': 3, 'title': 'Na I $\lambda$5890 (D2)'},
+        5896: { 'region': [5875, 5905], 'centre': [], 'air': [5895.924, 0.00003],        'wid_ini': 3, 'title': 'Na I $\lambda$5896 (D1)'},
         7774: { 'region': [7758, 7782], 'centre': [], 'air': [7774.17, 0.10],            'wid_ini': 3, 'title': 'O I $\lambda$7774'}
     }
     return lines_dic
@@ -879,8 +891,18 @@ def deprecated_setup_line_dictionary():
         4922: { 'region': [4911, 4933], 'centre': [], 'air': [4921.9313, 0.0005], 'wid_ini': 4, 'title': 'He I $\lambda$4922'},
         5412: { 'region': [5401, 5415], 'centre': [], 'air': [5411.52, 0.10],     'wid_ini': 4, 'title': 'He II $\lambda$5412'},
         5876: { 'region': [5863, 5889], 'centre': [], 'air': [5875.621, 0.010],   'wid_ini': 4, 'title': 'He I $\lambda$5876'},
-        5890: { 'region': [5875, 5905], 'centre': [], 'air': [5889.951, 0.00003], 'wid_ini': 3, 'title': 'Na I $\lambda$5890'},
+        5890: { 'region': [5875, 5905], 'centre': [], 'air': [5889.951, 0.00003], 'wid_ini': 3, 'title': 'Na I $\lambda$5890 (D2)'},
+        5896: { 'region': [5875, 5905], 'centre': [], 'air': [5895.924, 0.00003], 'wid_ini': 3, 'title': 'Na I $\lambda$5896 (D1)'},
         6562: { 'region': [6538, 6579], 'centre': [], 'air': [6562.79, 0.030],    'wid_ini': 6, 'title': 'H$\alpha$'},
+        8345: { 'region': [8320, 8370], 'centre': [], 'air': [8345.0, 0.1],       'wid_ini': 4, 'title': 'Pa15'},
+        8467: { 'region': [8445, 8490], 'centre': [], 'air': [8467.0, 0.1],       'wid_ini': 5, 'title': 'Pa14'},
+        8598: { 'region': [8575, 8620], 'centre': [], 'air': [8598.0, 0.1],       'wid_ini': 5, 'title': 'Pa13'},
+        8750: { 'region': [8725, 8775], 'centre': [], 'air': [8750.0, 0.1],       'wid_ini': 5, 'title': 'Pa12'},
+        8863: { 'region': [8840, 8890], 'centre': [], 'air': [8863.0, 0.1],       'wid_ini': 5, 'title': 'Pa11'},
+        9015: { 'region': [8990, 9040], 'centre': [], 'air': [9015.0, 0.1],       'wid_ini': 6, 'title': 'Pa10'},
+        9229: { 'region': [9205, 9255], 'centre': [], 'air': [9229.0, 0.1],       'wid_ini': 6, 'title': 'Pa9'},
+        9546: { 'region': [9520, 9575], 'centre': [], 'air': [9546.0, 0.1],       'wid_ini': 6, 'title': 'Pa8'},
+        10049: { 'region': [10020, 10080], 'centre': [], 'air': [10049.0, 0.1],   'wid_ini': 6, 'title': 'Pa7'},
         6678: { 'region': [6658, 6698], 'centre': [], 'air': [6678.151, 0.010],   'wid_ini': 4, 'title': 'He I $\lambda$6678'},
         7774: { 'region': [7758, 7782], 'centre': [], 'air': [7774.17, 0.10],     'wid_ini': 3, 'title': 'O I $\lambda$7774'}
     }
@@ -1257,30 +1279,7 @@ def _fit_sb1_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hline
 
     # Output cornerplot of recovered RV posteriors
     if cornerplot:
-        dv = np.asarray(trace["Δv"])   # shape (S, E)
-        S, E, _ = dv.shape
-        data = jnp.squeeze(dv)
-        n_samp, E, _ = dv.shape
-        param_names = [f"RV_{e+1}" for e in range(E)]
-        cols = [dv[:, e, 0] for e in range(E)]
-        samples_k = np.vstack(cols).T
-        ndim = samples_k.shape[1]
-
-        # Corner plot
-        fig = corner.corner(
-            samples_k,
-            labels=param_names,
-            show_titles=True,
-            title_kwargs=dict(fontsize=10),
-            label_kwargs=dict(fontsize=16),
-            plot_datapoints=True,
-            smooth=0.0,
-            quiet=True
-        )
-
-        out_png = os.path.join(path, "cornerplot.png")
-        fig.savefig(out_png, dpi=300, bbox_inches="tight")
-        plt.close(fig)
+        save_single_component_rv_corner(trace, path, key='Δv', label_prefix='RV', filename='cornerplot.png')
 
     return trace, x_waves, y_fluxes
 
@@ -1305,6 +1304,185 @@ def fit_sb1_probmod(lines, wavelengths, fluxes, f_errors, lines_dic, Hlines, neb
             num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains,
             chain_method=chain_method, max_interp_points=max_interp_points, plots=plots,
             progress=progress,
+        )
+
+def save_single_component_rv_corner(trace, path, key='Δv', label_prefix='RV', filename='cornerplot.png'):
+    """
+    Save a corner plot for a single-component, per-epoch RV posterior.
+
+    Parameters
+    ----------
+    trace : dict
+        Posterior samples dictionary containing `key`.
+    path : str
+        Output directory.
+    key : str, optional
+        Trace key containing RV samples. Expected shape is `(n_samples, n_epochs)` or
+        `(n_samples, n_epochs, 1)`.
+    label_prefix : str, optional
+        Prefix used to label the RV parameters.
+    filename : str, optional
+        Output filename for the corner plot.
+    """
+    dv = np.asarray(trace[key])
+    if dv.ndim == 3 and dv.shape[-1] == 1:
+        dv = dv[..., 0]
+    elif dv.ndim != 2:
+        raise ValueError(f"Unexpected RV trace shape for {key}: {dv.shape}")
+
+    param_names = [f"{label_prefix}_{e+1}" for e in range(dv.shape[1])]
+
+    fig = corner.corner(
+        dv,
+        labels=param_names,
+        show_titles=True,
+        title_kwargs=dict(fontsize=10),
+        label_kwargs=dict(fontsize=16),
+        plot_datapoints=True,
+        smooth=0.0,
+        quiet=True
+    )
+
+    out_png = os.path.join(path, filename)
+    fig.savefig(out_png, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+def _fit_na_probmod_impl(wavelengths, fluxes, f_errors, path, shift_kms=0, wavelength_type='air',
+                         rm_epochs=None, num_warmup=1000, num_samples=2000, num_chains=4,
+                         chain_method='parallel', window=(5878, 5899), plots=True,
+                         cornerplot=True, progress=True):
+    """
+    Fit the Na I D doublet in one shared local window using a dedicated probabilistic model.
+
+    The first-pass model is designed for low-resolution diagnostics:
+    - one Na RV per epoch
+    - one shared Gaussian width across epochs
+    - one shared D1/D2 depth ratio across epochs
+    - one local linear continuum and one overall Na depth scale per epoch
+    """
+    if wavelength_type != 'air':
+        raise ValueError("fit_na_probmod currently supports air wavelengths only.")
+
+    na_d2 = 5889.951  # Na I D2, air wavelength [Angstrom]
+    na_d1 = 5895.924  # Na I D1, air wavelength [Angstrom]
+    c_kms = c.to('km/s').value
+
+    n_epochs = len(wavelengths)
+    print('Fitting Na doublet in a shared local window')
+    print('Number of epochs:', n_epochs)
+
+    region_start, region_end = window
+    region_start = rv_shift_wavelength(region_start, shift_kms)
+    region_end = rv_shift_wavelength(region_end, shift_kms)
+
+    masked_lengths = []
+    for wave_set in wavelengths:
+        mask = (wave_set > region_start) & (wave_set < region_end)
+        masked_lengths.append(int(mask.sum()))
+    common_grid_length = int(np.median(masked_lengths)) if masked_lengths else 200
+    common_grid_length = max(common_grid_length, 2)
+
+    x_waves_interp, y_fluxes_interp, y_errors_interp = [], [], []
+    for wave_set, flux_set, error_set in zip(wavelengths, fluxes, f_errors):
+        mask = (wave_set > region_start) & (wave_set < region_end)
+        wave_masked = wave_set[mask]
+        flux_masked = flux_set[mask]
+        if error_set is not None:
+            error_masked = error_set[mask]
+        else:
+            f_err = compute_flux_err(wave_set, flux_set, wave_region=[region_start, region_end])
+            error_masked = f_err[mask]
+
+        common_wavelength_grid = np.linspace(wave_masked.min(), wave_masked.max(), common_grid_length)
+        interp_flux = interp1d(wave_masked, flux_masked, bounds_error=False, fill_value="extrapolate")(common_wavelength_grid)
+        interp_error = interp1d(wave_masked, error_masked, bounds_error=False, fill_value="extrapolate")(common_wavelength_grid)
+
+        x_waves_interp.append(common_wavelength_grid)
+        y_fluxes_interp.append(interp_flux)
+        y_errors_interp.append(interp_error)
+
+    x_waves = jnp.array(x_waves_interp)   # (E, N)
+    y_fluxes = jnp.array(y_fluxes_interp) # (E, N)
+    y_errors = jnp.array(y_errors_interp) # (E, N)
+
+    if rm_epochs is not None:
+        x_waves = jnp.delete(x_waves, jnp.array(rm_epochs), axis=0)
+        y_fluxes = jnp.delete(y_fluxes, jnp.array(rm_epochs), axis=0)
+        y_errors = jnp.delete(y_errors, jnp.array(rm_epochs), axis=0)
+        n_epochs = n_epochs - len(rm_epochs)
+
+    def na_model(λ, fλ, σ_fλ):
+        nepochs, _ = λ.shape
+
+        # Shared Na-doublet shape parameters.
+        wid_G = npro.sample('wid_G', dist.TruncatedNormal(loc=3.0, scale=0.5, low=1.5, high=5.0))
+        d1_d2_ratio = npro.sample('d1_d2_ratio', dist.Uniform(0.35, 1.0))
+
+        λ_ref = jnp.mean(λ, axis=-1, keepdims=True)
+
+        with npro.plate('epochs', nepochs, dim=-2):
+            Δv_raw = npro.sample('Δv_raw', dist.Uniform(-500.0, 500.0))
+            cont_intercept = npro.sample('cont_intercept', dist.TruncatedNormal(loc=1.0, scale=0.03, low=0.85, high=1.15))
+            cont_slope = npro.sample('cont_slope', dist.Normal(0.0, 0.01))
+            depth_scale = npro.sample('depth_scale', dist.TruncatedNormal(loc=0.18, scale=0.08, low=0.005, high=0.9))
+
+        Δv = npro.deterministic('Δv', Δv_raw[:, None])
+
+        μ_d2 = na_d2 * (1 + Δv_raw[:, None] / c_kms)
+        μ_d1 = na_d1 * (1 + Δv_raw[:, None] / c_kms)
+
+        continuum = cont_intercept[:, None] + cont_slope[:, None] * (λ - λ_ref)
+        profile_d2 = gaussian(λ, depth_scale[:, None], μ_d2, wid_G)
+        profile_d1 = gaussian(λ, depth_scale[:, None] * d1_d2_ratio, μ_d1, wid_G)
+        fλ_pred = npro.deterministic('fλ_pred', continuum + profile_d2 + profile_d1)
+
+        npro.sample('fλ', dist.StudentT(df=8, loc=fλ_pred, scale=σ_fλ), obs=fλ)
+
+    rng_key = random.PRNGKey(0)
+    kernel = NUTS(na_model)
+    mcmc_kwargs = dict(
+        num_warmup=num_warmup,
+        num_chains=num_chains,
+        num_samples=num_samples,
+        chain_method=chain_method,
+        progress_bar=bool(progress),
+    )
+    try:
+        mcmc = MCMC(kernel, **mcmc_kwargs)
+    except TypeError:
+        mcmc_kwargs.pop("progress_bar", None)
+        mcmc = MCMC(kernel, **mcmc_kwargs)
+    mcmc.run(rng_key, extra_fields=("potential_energy",), λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors)
+
+    trace = mcmc.get_samples(group_by_chain=False)
+
+    if plots:
+        plot_lines_fit_na(wavelengths, x_waves, y_fluxes, n_epochs, trace, path, shift_kms, window=window, n_sol=200)
+
+    if cornerplot:
+        save_single_component_rv_corner(trace, path, key='Δv', label_prefix='RV_Na', filename='cornerplot_na.png')
+
+    return trace, x_waves, y_fluxes
+
+def fit_na_probmod(wavelengths, fluxes, f_errors, path, shift_kms=0, wavelength_type='air',
+                   rm_epochs=None, num_warmup=1000, num_samples=2000, num_chains=4,
+                   chain_method='parallel', window=(5878, 5899), plots=True,
+                   cornerplot=True, verbose=None, progress=None):
+    """
+    Wrapper for the dedicated Na I doublet probabilistic fitter.
+
+    Set `verbose=False` to silence prints. Set `progress=False` to disable NumPyro progress bars.
+    If `MINATO_QUIET=1` is set, both default to False unless explicitly provided.
+    """
+    verbose, progress = _resolve_verbose_progress(verbose, progress)
+    stdout_cm = nullcontext() if verbose else redirect_stdout(io.StringIO())
+    with stdout_cm:
+        return _fit_na_probmod_impl(
+            wavelengths, fluxes, f_errors, path, shift_kms=shift_kms,
+            wavelength_type=wavelength_type, rm_epochs=rm_epochs,
+            num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains,
+            chain_method=chain_method, window=window, plots=plots,
+            cornerplot=cornerplot, progress=progress,
         )
 
 def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, Hlines, profile, Hprofile, n_sol=100):
@@ -1350,7 +1528,7 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
             # fallback ±13 Å if no explicit region stored
             region_start, region_end = centre - 13, centre + 13
 
-        for epoch_idx, ax in enumerate(axes.ravel()[:n_epochs]):
+        for epoch_idx, ax in enumerate(axes[:n_epochs]):
             f_pred = trace['fλ_pred']
             # If it came out (S, epochs, lines, N), swap to (S, lines, epochs, N)
             if f_pred.shape[1] == n_epochs and f_pred.shape[2] == len(lines):
@@ -1400,6 +1578,45 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
             prof_tag = "V" if profile == "Voigt" else "G"
         plt.savefig(os.path.join(path, f'{line}_fits_SB1_{prof_tag}.png'), dpi=300, bbox_inches='tight')
         plt.close()
+
+def plot_lines_fit_na(wavelengths, x_waves, y_fluxes, n_epochs, trace, path, shift_kms, window=(5878, 5899), n_sol=100):
+    """
+    Plot posterior Na-doublet predictions for each epoch in a shared local window.
+    """
+    from matplotlib.lines import Line2D
+
+    na_d2 = 5889.951
+    na_d1 = 5895.924
+
+    fig, axes = setup_fits_plots(wavelengths)
+    f_pred = np.asarray(trace['fλ_pred'])
+
+    for epoch_idx, ax in enumerate(axes[:n_epochs]):
+        fλ_pred_samples = f_pred[-n_sol:, epoch_idx, :]
+        ax.plot(x_waves[epoch_idx], fλ_pred_samples.T, color='orangered', alpha=0.08, rasterized=True, zorder=-1)
+        ax.plot(x_waves[epoch_idx], y_fluxes[epoch_idx], color='k', lw=1, alpha=0.85)
+        ax.axvline(rv_shift_wavelength(na_d2, shift_kms), color='r', linestyle='--', lw=1)
+        ax.axvline(rv_shift_wavelength(na_d1, shift_kms), color='r', linestyle='--', lw=1)
+        ax.text(0.1, 0.1, f'Epoch {epoch_idx+1}', transform=ax.transAxes, fontsize=16)
+
+    ax.set_xlim(rv_shift_wavelength(window[0], shift_kms), rv_shift_wavelength(window[1], shift_kms))
+    fig.supxlabel('Wavelength [Å]', fontsize=24, y=-0.015)
+    fig.supylabel('Flux', fontsize=24, x=-0.1)
+
+    custom_lines = [Line2D([0], [0], color='orangered', lw=2)]
+    fig.subplots_adjust(bottom=0.1, left=0.12)
+    fig.legend(
+        custom_lines,
+        ['Prediction'],
+        loc='lower center',
+        bbox_to_anchor=(0.5, 0.02),
+        ncol=1,
+        frameon=False,
+        fontsize=14,
+        borderaxespad=0.0,
+    )
+    plt.savefig(os.path.join(path, 'Na_doublet_fits.png'), dpi=300, bbox_inches='tight')
+    plt.close()
 
 def mcmc_results_to_file_sb1(trace, names, jds, writer, csvfile, rm_epochs=None):
     """
@@ -2040,7 +2257,7 @@ def plot_lines_fit(
 
         centre = rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms)
 
-        for e, ax in enumerate(axes.ravel()[:n_epochs]):
+        for e, ax in enumerate(axes[:n_epochs]):
             x = x_waves[idx, e, :]
             y = y_fluxes[idx, e, :]
 
@@ -2182,8 +2399,9 @@ def _SLfit_impl(spectra_list, data_path, save_path, lines, K=2, file_type='fits'
         use_init_pars (bool): (Reserved) Whether to use pre-defined initial parameters.
         profile (str): Line profile for non-Hydrogen lines ('Voigt' or 'Gaussian') in probabilistic fits.
         Hprofile (str): Line profile for Hydrogen lines ('Lorentzian', 'Voigt', or 'Gaussian') in probabilistic fits.
-        sb1_method (str): 'prob' (default) for the probabilistic SB1 fitter, or 'classic'/'lmfit' to use the
-                          original per-line lmfit routine.
+        sb1_method (str): `'prob'` (default) for the probabilistic stellar SB1 fitter,
+                          `'na'` for the dedicated Na-doublet diagnostic fitter, or
+                          `'classic'`/`'lmfit'` to use the original per-line lmfit routine.
     
     Returns:
         str: The output directory path where fit results and plots were saved.
@@ -2193,10 +2411,10 @@ def _SLfit_impl(spectra_list, data_path, save_path, lines, K=2, file_type='fits'
     print('******************           Spectral Line fitting           ******************')
     print('*******************************************************************************\n')
     
-    # If there's only one spectrum (epoch), warn and exit because RV computation requires multiple epochs
+    # Single-epoch runs are allowed, but they only constrain one RV and a shared line-profile
+    # solution. They cannot diagnose epoch-to-epoch variability on their own.
     if len(spectra_list) == 1:
-        print("\n   WARNING: There is only 1 epoch to compute RVs.")
-        return
+        print("\n   WARNING: Only 1 epoch was provided. The fit will return a single-epoch RV estimate only.")
 
     # Define default Hydrogen lines for which Lorentzian profiles may be used
     Hlines = [4102, 4340, 4861, 6562, 8345, 8467, 8598, 8750, 8863, 9015, 9229, 9546, 10049]
@@ -2259,6 +2477,21 @@ def _SLfit_impl(spectra_list, data_path, save_path, lines, K=2, file_type='fits'
                     num_warmup=num_warmup, num_samples=num_samples,
                     num_chains=num_chains, chain_method=chain_method,
                     max_interp_points=max_interp_points, plots=plots, cornerplot=cornerplots, progress=progress
+                )
+                writer = mcmc_results_to_file_sb1(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
+            elif sb1_method in ['na', 'na_prob', 'na_probabilistic']:
+                required_na_lines = {5890, 5896}
+                provided_lines = set(lines)
+                if provided_lines != required_na_lines:
+                    raise ValueError(
+                        "The dedicated Na fitter requires lines=[5890, 5896]. "
+                        f"Received: {sorted(provided_lines)}"
+                    )
+                result, x_waves, y_fluxes = fit_na_probmod(
+                    wavelengths, fluxes, f_errors, out_path, shift_kms=shift_kms,
+                    rm_epochs=rm_epochs, num_warmup=num_warmup, num_samples=num_samples,
+                    num_chains=num_chains, chain_method=chain_method, plots=plots,
+                    cornerplot=cornerplots, progress=progress
                 )
                 writer = mcmc_results_to_file_sb1(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
             elif sb1_method in ['classic', 'lmfit']:
@@ -2372,7 +2605,7 @@ def _SLfit_impl(spectra_list, data_path, save_path, lines, K=2, file_type='fits'
                         plt.savefig(filename, bbox_inches='tight', dpi=150)
                         plt.close()
             else:
-                raise ValueError(f"Unknown sb1_method: {sb1_method}. Use 'prob' or 'classic'.")
+                raise ValueError(f"Unknown sb1_method: {sb1_method}. Use 'prob', 'na' or 'classic'.")
 
         plt.close('all')
         
