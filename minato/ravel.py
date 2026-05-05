@@ -3,6 +3,7 @@ import sys
 import warnings
 import multiprocessing
 import io
+import json
 from contextlib import nullcontext, redirect_stdout
 
 # -----------------------------------------------------------------------------
@@ -60,6 +61,7 @@ import csv
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from itertools import product
 from astropy.constants import c
 from astropy.io import fits
 from astropy.timeseries import LombScargle
@@ -69,6 +71,7 @@ from lmfit import Model, Parameters, models
 from datetime import date
 from scipy.signal import find_peaks
 from scipy.interpolate import interp1d
+from scipy.special import gammaln
 from scipy.special import wofz as scipy_wofz
 from numpyro import handlers
 import numpyro.distributions as dist
@@ -141,6 +144,33 @@ def hdi_summary(x, cred=0.68):
     lo, hi = x[j], x[j + k - 1]
     return 0.5 * (lo + hi), 0.5 * (hi - lo) # return center, half-width of interval
 
+
+def hdi_summary_asymmetric(x, cred=0.68):
+    """
+    Determine the HDI and return the adopted centre plus lower/upper errors.
+
+    This preserves the legacy HDI centre definition used by hdi_summary while
+    making the interval bounds explicit for CSV outputs.
+    """
+    x = np.sort(np.asarray(x).ravel())
+    n = x.size
+    if n == 0:
+        raise ValueError('No samples in trace!')
+    k = max(1, int(np.ceil(cred * n)))
+    widths = x[k-1:] - x[:n-k+1]
+    j = int(np.argmin(widths))
+    lo, hi = x[j], x[j + k - 1]
+    center = 0.5 * (lo + hi)
+    return center, center - lo, hi - center, lo, hi
+
+
+def _percentile_errors_around_center(x, center, lower=16, upper=84):
+    """
+    Return percentile-based lower/upper errors around an adopted centre.
+    """
+    lo, hi = np.percentile(np.asarray(x).ravel(), [lower, upper])
+    return max(float(center - lo), 0.0), max(float(hi - center), 0.0)
+
 def summarize_mode_1d(samples, cred=0.68, min_sep_sigma=3, min_frac=0.2, kmeans_iters=20):
     """
     Mode-aware summary with automatic choice:
@@ -168,65 +198,185 @@ def summarize_mode_1d(samples, cred=0.68, min_sep_sigma=3, min_frac=0.2, kmeans_
     posterior_method : str ('HDI' or 'MODE-AWARE')
         Flags which method was used in analyzing posterior to write out to fit_values.csv.
     """
-    x = np.asarray(samples).ravel() # flatten sample
+    split = _split_bimodal_1d(
+        samples, cred=cred, min_sep_sigma=min_sep_sigma, min_frac=min_frac, kmeans_iters=kmeans_iters
+    )
+    if len(split["candidates"]) == 1:
+        cand = split["candidates"][0]
+        return cand["center"], cand["half"], cand["method"]
+
+    hdi_center, hdi_half = split["hdi_center"], split["hdi_half"]
+    best = max(split["candidates"], key=lambda c: c["peak"])
+    if (best["center"] - best["half"]) <= hdi_center <= (best["center"] + best["half"]):
+        return hdi_center, hdi_half, 'HDI'
+    return best["center"], best["half"], 'MODE-AWARE'
+
+
+def summarize_mode_1d_asymmetric(samples, cred=0.68, min_sep_sigma=3, min_frac=0.2, kmeans_iters=20):
+    """
+    Mode-aware RV summary with explicit lower and upper uncertainties.
+
+    The first three return values match summarize_mode_1d. The additional
+    uncertainties preserve asymmetric percentile intervals for selected modes.
+    """
+    split = _split_bimodal_1d(
+        samples, cred=cred, min_sep_sigma=min_sep_sigma, min_frac=min_frac, kmeans_iters=kmeans_iters
+    )
+    if len(split["candidates"]) == 1:
+        cand = split["candidates"][0]
+        return cand["center"], cand["half"], cand["err_minus"], cand["err_plus"], cand["method"]
+
+    hdi_center, hdi_half = split["hdi_center"], split["hdi_half"]
+    best = max(split["candidates"], key=lambda c: c["peak"])
+    if (best["center"] - best["half"]) <= hdi_center <= (best["center"] + best["half"]):
+        return hdi_center, hdi_half, split["hdi_err_minus"], split["hdi_err_plus"], 'HDI'
+    return best["center"], best["half"], best["err_minus"], best["err_plus"], 'MODE-AWARE'
+
+
+def _split_bimodal_1d(samples, cred=0.68, min_sep_sigma=3, min_frac=0.2, kmeans_iters=20):
+    """
+    Build HDI information and, when possible, two explicit mode candidates for a 1-D posterior.
+    """
+    x = np.asarray(samples).ravel()
     x = x[np.isfinite(x)]
     n = x.size
     if n == 0:
         raise ValueError("No samples in trace!")
 
-    # Fetch Highest Density Interval (appropriate when unimodal/ambiguous)
-    hdi_center, hdi_half = hdi_summary(x, cred=cred)
+    hdi_center, hdi_hdi_err_minus, hdi_hdi_err_plus, _, _ = hdi_summary_asymmetric(x, cred=cred)
+    hdi_half = 0.5 * (hdi_hdi_err_minus + hdi_hdi_err_plus)
+    hdi_err_minus, hdi_err_plus = _percentile_errors_around_center(x, hdi_center)
 
-    # Check for bimodality
-    c_low, c_high = np.percentile(x, [33, 67]) # centers at 33rd & 67th percentile
+    c_low, c_high = np.percentile(x, [33, 67])
     labels = None
     for _ in range(kmeans_iters):
-        # assign each sample to nearest centroid
-        labels = (np.abs(x - c_high) < np.abs(x - c_low)).astype(int) #  False (label 0) near low, True (label 1) near high)
-        if labels.sum() == 0 or labels.sum() == n: # All samples assigned to one label
+        labels = (np.abs(x - c_high) < np.abs(x - c_low)).astype(int)
+        if labels.sum() == 0 or labels.sum() == n:
             break
-        new_low  = np.median(x[labels == 0]) # median of all labels nearer 33rd percentile
-        new_high = np.median(x[labels == 1]) # median of all labels nearer 67th percentile
-        if np.allclose([new_low, new_high], [c_low, c_high]): # break if centers = medians after current iteration
+        new_low = np.median(x[labels == 0])
+        new_high = np.median(x[labels == 1])
+        if np.allclose([new_low, new_high], [c_low, c_high]):
             c_low, c_high = new_low, new_high
             break
-        c_low, c_high = new_low, new_high # update centers of bimodal dist.
+        c_low, c_high = new_low, new_high
 
-    # If no usable split, use HDI
     if labels is None or labels.sum() == 0 or labels.sum() == n:
-        return hdi_center, hdi_half, 'HDI'
+        return {
+            "hdi_center": hdi_center,
+            "hdi_half": hdi_half,
+            "hdi_err_minus": hdi_err_minus,
+            "hdi_err_plus": hdi_err_plus,
+            "candidates": [{
+                "center": hdi_center,
+                "half": hdi_half,
+                "err_minus": hdi_err_minus,
+                "err_plus": hdi_err_plus,
+                "peak": 1.0,
+                "method": "HDI",
+            }],
+        }
 
-    # Analyze two separated modes
-    m0, m1 = (labels == 0), (labels == 1)
+    m0, m1 = labels == 0, labels == 1
     x0, x1 = x[m0], x[m1]
-    frac0, frac1 = x0.size/n, x1.size/n
-
-    # Separability test (gap vs pooled blur) + dominant fraction CITE
+    frac0, frac1 = x0.size / n, x1.size / n
     combined_sigmas = np.sqrt(np.var(x0, ddof=1) + np.var(x1, ddof=1) + 1e-12)
-    gap  = abs(c_high - c_low)
-    separated = (gap >= min_sep_sigma*combined_sigmas) and (max(frac0, frac1) >= min_frac)
+    gap = abs(c_high - c_low)
+    separated = (gap >= min_sep_sigma * combined_sigmas) and (max(frac0, frac1) >= min_frac)
     if not separated:
-        return hdi_center, hdi_half, 'HDI'
+        return {
+            "hdi_center": hdi_center,
+            "hdi_half": hdi_half,
+            "hdi_err_minus": hdi_err_minus,
+            "hdi_err_plus": hdi_err_plus,
+            "candidates": [{
+                "center": hdi_center,
+                "half": hdi_half,
+                "err_minus": hdi_err_minus,
+                "err_plus": hdi_err_plus,
+                "peak": 1.0,
+                "method": "HDI",
+            }],
+        }
 
-    # --- Choose the cluster with the higher peak height (via KDE at medians) ---
-    kde = gaussian_kde(x, bw_method='silverman') # or 'scott'?
+    kde = gaussian_kde(x, bw_method='silverman')
     med0, med1 = np.median(x0), np.median(x1)
+    p0, p1 = kde([med0, med1])
+    lo0, hi0 = np.percentile(x0, [16, 84])
+    lo1, hi1 = np.percentile(x1, [16, 84])
+    return {
+        "hdi_center": hdi_center,
+        "hdi_half": hdi_half,
+        "hdi_err_minus": hdi_err_minus,
+        "hdi_err_plus": hdi_err_plus,
+        "candidates": [
+            {
+                "center": med0,
+                "half": 0.5 * (hi0 - lo0),
+                "err_minus": med0 - lo0,
+                "err_plus": hi0 - med0,
+                "peak": float(p0),
+                "method": "MODE-AWARE",
+            },
+            {
+                "center": med1,
+                "half": 0.5 * (hi1 - lo1),
+                "err_minus": med1 - lo1,
+                "err_plus": hi1 - med1,
+                "peak": float(p1),
+                "method": "MODE-AWARE",
+            },
+        ],
+    }
 
-    p0, p1 = kde([med0, med1])  # KDE peak heights at each mode's median
 
-    # Pick mode with the higher peak height
-    if p1 > p0:
-        x_main, center = x1, med1
-    else:
-        x_main, center = x0, med0
+def summarize_stationary_modes(samples_by_epoch, cred=0.68, min_sep_sigma=3, min_frac=0.2, kmeans_iters=20, return_meta=False):
+    """
+    Choose the most stationary combination of per-epoch Na modes across the full time series.
+    """
+    split_results = [
+        _split_bimodal_1d(
+            vals, cred=cred, min_sep_sigma=min_sep_sigma, min_frac=min_frac, kmeans_iters=kmeans_iters
+        )
+        for vals in samples_by_epoch
+    ]
+    candidate_lists = [res["candidates"] for res in split_results]
+    n_combos = int(np.prod([len(cands) for cands in candidate_lists], dtype=int))
 
-    half = 0.5 * (np.percentile(x_main, 84) - np.percentile(x_main, 16))
+    if n_combos > 4096:
+        summaries = []
+        for res in split_results:
+            if len(res["candidates"]) == 1:
+                cand = res["candidates"][0]
+            else:
+                cand = max(res["candidates"], key=lambda c: c["peak"])
+            summaries.append((cand["center"], cand["half"], cand["err_minus"], cand["err_plus"], cand["method"]))
+        if return_meta:
+            centers = np.array([item[0] for item in summaries], dtype=float)
+            return summaries, {"centers": centers, "scatter": float(np.std(centers))}
+        return summaries
 
-    # If HDI center already sits inside this dominant 68% band, prefer HDI
-    if (center - half) <= hdi_center <= (center + half):
-        return hdi_center, hdi_half, 'HDI'
+    max_peaks = [max(c["peak"] for c in cands) for cands in candidate_lists]
+    best_choice = None
+    best_score = np.inf
+    for combo in product(*candidate_lists):
+        centers = np.array([cand["center"] for cand in combo], dtype=float)
+        peak_norm = np.array(
+            [cand["peak"] / max(max_peak, 1e-12) for cand, max_peak in zip(combo, max_peaks)],
+            dtype=float,
+        )
+        score = np.std(centers) + 5.0 * np.sum(1.0 - peak_norm)
+        if score < best_score:
+            best_score = score
+            best_choice = combo
 
-    return center, half, 'MODE-AWARE'
+    summaries = []
+    for cand in best_choice:
+        method = "MODE-STATIONARY" if cand["method"] == "MODE-AWARE" else cand["method"]
+        summaries.append((cand["center"], cand["half"], cand["err_minus"], cand["err_plus"], method))
+    if return_meta:
+        centers = np.array([item[0] for item in summaries], dtype=float)
+        return summaries, {"centers": centers, "scatter": float(np.std(centers))}
+    return summaries
 
 def make_rv_corner_for_component(dv, k, path, diagnostics=True):
     """
@@ -578,6 +728,76 @@ def compute_flux_err(wavelength, flux, wave_region=[4240, 4260]):
     noise_level = np.std(flux_masked)
     flux_err = np.full_like(flux, 2 * noise_level)
     return flux_err
+
+
+def _extract_finite_region_arrays(wave_set, flux_set, error_set, region_start, region_end):
+    """
+    Extract one fitting window and keep only points usable for interpolation.
+
+    Non-finite fluxes/errors and non-positive errors are removed. The returned wavelength
+    sampling is unique and sorted. Raises ``ValueError`` if fewer than two valid points remain.
+    """
+    mask = (wave_set > region_start) & (wave_set < region_end)
+    wave_masked = np.asarray(wave_set[mask], dtype=float)
+    flux_masked = np.asarray(flux_set[mask], dtype=float)
+
+    if error_set is not None:
+        error_masked = np.asarray(error_set[mask], dtype=float)
+    else:
+        error_masked = compute_flux_err(wave_set, flux_set, wave_region=[region_start, region_end])[mask]
+        error_masked = np.asarray(error_masked, dtype=float)
+
+    finite = (
+        np.isfinite(wave_masked)
+        & np.isfinite(flux_masked)
+        & np.isfinite(error_masked)
+        & (error_masked > 0)
+    )
+    wave_masked = wave_masked[finite]
+    flux_masked = flux_masked[finite]
+    error_masked = error_masked[finite]
+
+    if wave_masked.size < 2:
+        raise ValueError(
+            "Not enough finite spectral points remain inside the fitting window "
+            f"{region_start:.1f}-{region_end:.1f} Å."
+        )
+
+    wave_unique, unique_idx = np.unique(wave_masked, return_index=True)
+    flux_masked = flux_masked[unique_idx]
+    error_masked = error_masked[unique_idx]
+
+    if wave_unique.size < 2:
+        raise ValueError(
+            "Interpolation requires at least two unique wavelength points inside the fitting "
+            f"window {region_start:.1f}-{region_end:.1f} Å."
+        )
+
+    return wave_unique, flux_masked, error_masked
+
+
+def _sb1_profile_width_masks(lines, Hlines, profile, Hprofile):
+    """
+    Return masks identifying which SB1 lines use Gaussian and Lorentzian widths.
+    """
+    is_hline = np.array([line in Hlines for line in lines], dtype=bool)
+    valid_profiles = {"Gaussian", "Lorentzian", "Voigt"}
+    if profile not in {"Gaussian", "Voigt"}:
+        raise ValueError('profile argument must be one of Voigt or Gaussian')
+    if Hprofile not in valid_profiles:
+        raise ValueError('Hprofile argument must be one of Lorentzian, Voigt or Gaussian')
+
+    uses_gaussian = np.where(
+        is_hline,
+        Hprofile in {"Gaussian", "Voigt"},
+        profile in {"Gaussian", "Voigt"},
+    )
+    uses_lorentzian = np.where(
+        is_hline,
+        Hprofile in {"Lorentzian", "Voigt"},
+        profile == "Voigt",
+    )
+    return uses_gaussian, uses_lorentzian
 
 def read_fits(fits_file, instrument):
     """
@@ -1140,14 +1360,9 @@ def _fit_sb1_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hline
         x_waves_line, y_fluxes_line, y_errors_line = [], [], []
 
         for wave_set, flux_set, error_set in zip(wavelengths, fluxes, f_errors):
-            mask = (wave_set > region_start) & (wave_set < region_end)
-            wave_masked = wave_set[mask]
-            flux_masked = flux_set[mask]
-            if error_set is not None:
-                error_masked = error_set[mask]
-            else:
-                f_err = compute_flux_err(wave_set, flux_set)
-                error_masked = f_err[mask]
+            wave_masked, flux_masked, error_masked = _extract_finite_region_arrays(
+                wave_set, flux_set, error_set, region_start, region_end
+            )
 
             # Interpolate onto a common wavelength grid for this line and epoch
             common_wavelength_grid = np.linspace(wave_masked.min(), wave_masked.max(), common_grid_length)
@@ -1175,6 +1390,9 @@ def _fit_sb1_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hline
 
     # Initial guess for the rest (central) wavelength from lines_dic
     cen_ini = jnp.array([lines_dic[line][key][0] for line in lines])
+    uses_gaussian_width, uses_lorentzian_width = _sb1_profile_width_masks(lines, Hlines, profile, Hprofile)
+    gaussian_width_indices = jnp.array(np.nonzero(uses_gaussian_width)[0], dtype=int)
+    lorentzian_width_indices = jnp.array(np.nonzero(uses_lorentzian_width)[0], dtype=int)
 
     # Define the probabilistic SB1 model
     def sb1_model(λ, fλ, σ_fλ, is_hline):
@@ -1198,9 +1416,18 @@ def _fit_sb1_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hline
 
         with npro.plate('lines', nlines, dim=-3):
             amp   = npro.sample('amp',   dist.TruncatedNormal(loc=0.18, scale=0.06, low=0.02, high=0.80))   # (L,1,1)
-            wid_G = npro.sample('wid_G', dist.Uniform(0.5, 12.0))   # (L,1,1)
-            wid_L = npro.sample('wid_L', dist.Uniform(0.1, 12.0))   # (L,1,1)
-            # wid   = npro.sample('wid',   dist.Uniform(0.5, 5.0))   # (L,1,1)
+
+        wid_G = jnp.ones((nlines, 1, 1))
+        if gaussian_width_indices.size:
+            with npro.plate('gaussian_width_lines', gaussian_width_indices.size, dim=-3):
+                wid_G_sampled = npro.sample('wid_G', dist.Uniform(0.5, 12.0))
+            wid_G = wid_G.at[gaussian_width_indices, :, :].set(wid_G_sampled)
+
+        wid_L = jnp.ones((nlines, 1, 1))
+        if lorentzian_width_indices.size:
+            with npro.plate('lorentzian_width_lines', lorentzian_width_indices.size, dim=-3):
+                wid_L_sampled = npro.sample('wid_L', dist.Uniform(0.1, 12.0))
+            wid_L = wid_L.at[lorentzian_width_indices, :, :].set(wid_L_sampled)
 
         # Make λ_rest a deterministic variable and reshape for broadcasting
         λ0 = npro.deterministic("λ0", λ_rest[:, None, None])   # (L,1,1)
@@ -1212,29 +1439,22 @@ def _fit_sb1_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hline
         λ_expanded = λ                                         # (L,E,N)
         is_hline_expanded = is_hline[:, None, None]            # (L,1,1)
 
-        # Compute the model profiles
-        G = gaussian(λ_expanded, amp, μ, wid_G)                 # (L,E,N)
-        L = lorentzian(λ_expanded, amp, μ, wid_L)               # (L,E,N)
-        V = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)      # (L,E,N)
-
-        if profile == 'Voigt':
-            non_h_comp = V
-        elif profile == 'Gaussian':
-            non_h_comp = G
-        else:
-            raise ValueError('profile argument must be one of Voigt or Gaussian')
-
-        # Hydrogen profile selection
+        comp = jnp.zeros_like(λ_expanded)
+        if profile == 'Gaussian' or Hprofile == 'Gaussian':
+            G = gaussian(λ_expanded, amp, μ, wid_G)
+            if profile == 'Gaussian':
+                comp = jnp.where(~is_hline_expanded, G, comp)
+            if Hprofile == 'Gaussian':
+                comp = jnp.where(is_hline_expanded, G, comp)
         if Hprofile == 'Lorentzian':
-            h_comp = L
-        elif Hprofile == 'Voigt':
-            h_comp = V
-        elif Hprofile == 'Gaussian':
-            h_comp = G
-        else:
-            raise ValueError('Hprofile argument must be one of Lorentzian, Voigt or Gaussian')
-
-        comp = jnp.where(is_hline_expanded, h_comp, non_h_comp)             # (L,E,N)
+            L = lorentzian(λ_expanded, amp, μ, wid_L)
+            comp = jnp.where(is_hline_expanded, L, comp)
+        if profile == 'Voigt' or Hprofile == 'Voigt':
+            V = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
+            if profile == 'Voigt':
+                comp = jnp.where(~is_hline_expanded, V, comp)
+            if Hprofile == 'Voigt':
+                comp = jnp.where(is_hline_expanded, V, comp)
 
         # Sum component profile and add continuum to yield the predicted flux
         fλ_pred = npro.deterministic("fλ_pred", ε + comp)      # (L,E,N)
@@ -1274,12 +1494,14 @@ def _fit_sb1_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hline
         n_epochs = n_epochs - len(rm_epochs)
     if plots:
         plot_lines_fit_sb1(
-            wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, Hlines, profile, Hprofile, n_sol=200
+            wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace,
+            lines_dic, shift_kms, path, Hlines, profile, Hprofile, n_sol=200
         )
 
     # Output cornerplot of recovered RV posteriors
     if cornerplot:
         save_single_component_rv_corner(trace, path, key='Δv', label_prefix='RV', filename='cornerplot.png')
+        save_sb1_profile_parameter_corners(trace, lines, path, Hlines=Hlines, profile=profile, Hprofile=Hprofile)
 
     return trace, x_waves, y_fluxes
 
@@ -1347,9 +1569,158 @@ def save_single_component_rv_corner(trace, path, key='Δv', label_prefix='RV', f
     fig.savefig(out_png, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
+
+def save_sb1_profile_parameter_corners(trace, lines, path, Hlines=None, profile='Voigt', Hprofile='Lorentzian'):
+    """
+    Save compact SB1 corner plots for line-profile amplitudes and widths.
+
+    The RV corner plot only shows epoch shifts. These plots expose whether a
+    visually poor SB1 solution is tied to a pathological amplitude or width
+    posterior for one of the fitted lines.
+    """
+    line_labels = [str(line) for line in lines]
+    if Hlines is None:
+        gaussian_width_labels = line_labels
+        lorentzian_width_labels = line_labels
+    else:
+        uses_gaussian_width, uses_lorentzian_width = _sb1_profile_width_masks(lines, Hlines, profile, Hprofile)
+        gaussian_width_labels = [str(line) for line, used in zip(lines, uses_gaussian_width) if used]
+        lorentzian_width_labels = [str(line) for line, used in zip(lines, uses_lorentzian_width) if used]
+
+    param_specs = [
+        ("amp", "cornerplot_amp.png", "amp", line_labels),
+        ("wid_G", "cornerplot_wid_G.png", "widG", gaussian_width_labels),
+        ("wid_L", "cornerplot_wid_L.png", "widL", lorentzian_width_labels),
+    ]
+
+    for key, filename, prefix, labels in param_specs:
+        if key not in trace:
+            continue
+
+        values = np.asarray(trace[key], dtype=float)
+        values = np.squeeze(values)
+        if values.ndim == 1:
+            values = values[:, None]
+        if values.ndim != 2:
+            raise ValueError(f"Unexpected SB1 parameter trace shape for {key}: {values.shape}")
+
+        finite_rows = np.all(np.isfinite(values), axis=1)
+        values = values[finite_rows]
+        if values.shape[0] == 0:
+            continue
+
+        if len(labels) != values.shape[1]:
+            labels = line_labels[:values.shape[1]]
+        corner_labels = [f"{prefix}_{label}" for label in labels[:values.shape[1]]]
+        fig = corner.corner(
+            values,
+            labels=corner_labels,
+            show_titles=True,
+            title_kwargs=dict(fontsize=9),
+            label_kwargs=dict(fontsize=11),
+            plot_datapoints=True,
+            smooth=0.0,
+            quiet=True,
+        )
+        fig.savefig(os.path.join(path, filename), dpi=250, bbox_inches="tight")
+        plt.close(fig)
+
+
+def _student_t_logpdf_np(y, loc, scale, df=8.0):
+    """
+    Evaluate the Student-t log density with NumPy arrays.
+    """
+    z = (y - loc) / scale
+    return (
+        gammaln((df + 1.0) / 2.0)
+        - gammaln(df / 2.0)
+        - 0.5 * np.log(df * np.pi)
+        - np.log(scale)
+        - ((df + 1.0) / 2.0) * np.log1p((z * z) / df)
+    )
+
+
+def _score_na_chains(trace_by_chain, y_fluxes, y_errors, loglike_delta_threshold=25.0):
+    """
+    Score Na chains with the same Student-t likelihood used by the sampler.
+
+    Chains whose median total log likelihood is much worse than the best chain are
+    treated as failed chains rather than valid posterior modes.
+    """
+    f_pred = np.asarray(trace_by_chain["fλ_pred"], dtype=float)
+    y = np.asarray(y_fluxes, dtype=float)
+    err = np.asarray(y_errors, dtype=float)
+    valid = np.isfinite(y) & np.isfinite(err) & (err > 0)
+
+    loglike = _student_t_logpdf_np(
+        y[None, None, :, :],
+        f_pred,
+        err[None, None, :, :],
+        df=8.0,
+    )
+    loglike = np.where(valid[None, None, :, :], loglike, 0.0)
+    sample_loglike = np.sum(loglike, axis=(2, 3))
+    chain_loglike = np.median(sample_loglike, axis=1)
+    best_loglike = float(np.max(chain_loglike))
+    delta_from_best = best_loglike - chain_loglike
+    keep_mask = delta_from_best <= float(loglike_delta_threshold)
+
+    if not np.any(keep_mask):
+        keep_mask[int(np.argmax(chain_loglike))] = True
+
+    return {
+        "chain_loglike_median": [float(x) for x in chain_loglike],
+        "delta_loglike_from_best": [float(x) for x in delta_from_best],
+        "keep_mask": [bool(x) for x in keep_mask],
+        "n_chains": int(f_pred.shape[0]),
+        "n_chains_kept": int(np.sum(keep_mask)),
+        "n_chains_rejected": int(np.sum(~keep_mask)),
+        "loglike_delta_threshold": float(loglike_delta_threshold),
+    }
+
+
+def _flatten_chain_samples(trace_by_chain, keep_mask):
+    """
+    Flatten selected chain samples while preserving non-sample metadata separately.
+    """
+    keep_mask = np.asarray(keep_mask, dtype=bool)
+    flattened = {}
+    for key, values in trace_by_chain.items():
+        arr = np.asarray(values)
+        if arr.ndim >= 2 and arr.shape[0] == keep_mask.size:
+            kept = arr[keep_mask]
+            flattened[key] = kept.reshape((-1,) + kept.shape[2:])
+        else:
+            flattened[key] = arr
+    return flattened
+
+
+def _na_posterior_warning_reasons(rv_err_minus, rv_err_plus, stationary_scatter,
+                                  asymmetry_threshold=1.5,
+                                  broad_error_threshold=20.0,
+                                  stationary_scatter_threshold=40.0):
+    """
+    Return compact Na posterior-quality warning labels for one epoch.
+    """
+    reasons = []
+    err_lo = float(rv_err_minus)
+    err_hi = float(rv_err_plus)
+    max_err = max(err_lo, err_hi)
+    min_err = max(min(err_lo, err_hi), 1e-12)
+
+    if max_err / min_err > float(asymmetry_threshold):
+        reasons.append("ASYMMETRIC_ERRORS")
+    if max_err > float(broad_error_threshold):
+        reasons.append("BROAD_POSTERIOR")
+    if float(stationary_scatter) > float(stationary_scatter_threshold):
+        reasons.append("STATIONARY_SCATTER")
+
+    return reasons
+
+
 def _fit_na_probmod_impl(wavelengths, fluxes, f_errors, path, shift_kms=0, wavelength_type='air',
                          rm_epochs=None, num_warmup=1000, num_samples=2000, num_chains=4,
-                         chain_method='parallel', window=(5878, 5899), plots=True,
+                         chain_method='parallel', window=(5882, 5905), plots=True,
                          cornerplot=True, progress=True):
     """
     Fit the Na I D doublet in one shared local window using a dedicated probabilistic model.
@@ -1384,14 +1755,9 @@ def _fit_na_probmod_impl(wavelengths, fluxes, f_errors, path, shift_kms=0, wavel
 
     x_waves_interp, y_fluxes_interp, y_errors_interp = [], [], []
     for wave_set, flux_set, error_set in zip(wavelengths, fluxes, f_errors):
-        mask = (wave_set > region_start) & (wave_set < region_end)
-        wave_masked = wave_set[mask]
-        flux_masked = flux_set[mask]
-        if error_set is not None:
-            error_masked = error_set[mask]
-        else:
-            f_err = compute_flux_err(wave_set, flux_set, wave_region=[region_start, region_end])
-            error_masked = f_err[mask]
+        wave_masked, flux_masked, error_masked = _extract_finite_region_arrays(
+            wave_set, flux_set, error_set, region_start, region_end
+        )
 
         common_wavelength_grid = np.linspace(wave_masked.min(), wave_masked.max(), common_grid_length)
         interp_flux = interp1d(wave_masked, flux_masked, bounds_error=False, fill_value="extrapolate")(common_wavelength_grid)
@@ -1416,7 +1782,7 @@ def _fit_na_probmod_impl(wavelengths, fluxes, f_errors, path, shift_kms=0, wavel
 
         # Shared Na-doublet shape parameters.
         wid_G = npro.sample('wid_G', dist.TruncatedNormal(loc=3.0, scale=0.5, low=1.5, high=5.0))
-        d1_d2_ratio = npro.sample('d1_d2_ratio', dist.Uniform(0.35, 1.0))
+        d1_d2_ratio = npro.sample('d1_d2_ratio', dist.Uniform(0.5, 1.0))
 
         λ_ref = jnp.mean(λ, axis=-1, keepdims=True)
 
@@ -1425,6 +1791,11 @@ def _fit_na_probmod_impl(wavelengths, fluxes, f_errors, path, shift_kms=0, wavel
             cont_intercept = npro.sample('cont_intercept', dist.TruncatedNormal(loc=1.0, scale=0.03, low=0.85, high=1.15))
             cont_slope = npro.sample('cont_slope', dist.Normal(0.0, 0.01))
             depth_scale = npro.sample('depth_scale', dist.TruncatedNormal(loc=0.18, scale=0.08, low=0.005, high=0.9))
+
+        Δv_raw = jnp.squeeze(Δv_raw, axis=-1)
+        cont_intercept = jnp.squeeze(cont_intercept, axis=-1)
+        cont_slope = jnp.squeeze(cont_slope, axis=-1)
+        depth_scale = jnp.squeeze(depth_scale, axis=-1)
 
         Δv = npro.deterministic('Δv', Δv_raw[:, None])
 
@@ -1454,7 +1825,15 @@ def _fit_na_probmod_impl(wavelengths, fluxes, f_errors, path, shift_kms=0, wavel
         mcmc = MCMC(kernel, **mcmc_kwargs)
     mcmc.run(rng_key, extra_fields=("potential_energy",), λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors)
 
-    trace = mcmc.get_samples(group_by_chain=False)
+    trace_by_chain = mcmc.get_samples(group_by_chain=True)
+    chain_diagnostics = _score_na_chains(trace_by_chain, y_fluxes, y_errors)
+    trace = _flatten_chain_samples(trace_by_chain, chain_diagnostics["keep_mask"])
+    trace["na_chain_diagnostics"] = chain_diagnostics
+
+    if path is not None:
+        os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, "na_chain_diagnostics.json"), "w") as handle:
+            json.dump(chain_diagnostics, handle, indent=2)
 
     if plots:
         plot_lines_fit_na(wavelengths, x_waves, y_fluxes, n_epochs, trace, path, shift_kms, window=window, n_sol=200)
@@ -1466,7 +1845,7 @@ def _fit_na_probmod_impl(wavelengths, fluxes, f_errors, path, shift_kms=0, wavel
 
 def fit_na_probmod(wavelengths, fluxes, f_errors, path, shift_kms=0, wavelength_type='air',
                    rm_epochs=None, num_warmup=1000, num_samples=2000, num_chains=4,
-                   chain_method='parallel', window=(5878, 5899), plots=True,
+                   chain_method='parallel', window=(5882, 5905), plots=True,
                    cornerplot=True, verbose=None, progress=None):
     """
     Wrapper for the dedicated Na I doublet probabilistic fitter.
@@ -1485,10 +1864,9 @@ def fit_na_probmod(wavelengths, fluxes, f_errors, path, shift_kms=0, wavelength_
             cornerplot=cornerplot, progress=progress,
         )
 
-def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, lines_dic, shift_kms, path, Hlines, profile, Hprofile, n_sol=100):
+def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, y_errors, n_epochs, trace, lines_dic, shift_kms, path, Hlines, profile, Hprofile, n_sol=100):
     """
-    Plot the SB1 line-fit results based on the posterior predictions by plotting the best-fitting sample
-    across all epochs & lines, as determined by a χ2 test.
+    Plot SB1 line fits using coherent posterior predictive samples.
 
     Parameters:
     -----------
@@ -1500,6 +1878,8 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
         Interpolated wavelength grids (per line and epoch).
     y_fluxes : JAX array
         Interpolated fluxes.
+    y_errors : JAX array
+        Interpolated flux uncertainties.
     n_epochs : int
         Number of epochs.
     trace : dict
@@ -1511,14 +1891,64 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
     path : str
         Directory path to save the plots.
     n_sol : int
-        Number of posterior samples ot plot
+        Maximum number of high-likelihood posterior samples shown for context.
     """
     from matplotlib.lines import Line2D 
+
+    f_pred = np.asarray(trace['fλ_pred'], dtype=float)
+    if f_pred.ndim != 4:
+        raise ValueError(f"Unexpected SB1 prediction trace shape: {f_pred.shape}")
+    expected_line_epoch_shape = (len(lines), n_epochs)
+    legacy_epoch_line_shape = (n_epochs, len(lines))
+    if f_pred.shape[1:3] == expected_line_epoch_shape:
+        pass
+    elif f_pred.shape[1:3] == legacy_epoch_line_shape:
+        f_pred = np.swapaxes(f_pred, 1, 2)
+    else:
+        raise ValueError(
+            "Unexpected SB1 prediction trace shape: "
+            f"{f_pred.shape}; expected sample,line,epoch,data."
+        )
+
+    y_arr = np.asarray(y_fluxes, dtype=float)
+    err_arr = np.asarray(y_errors, dtype=float)
+    if y_arr.shape != f_pred.shape[1:] or err_arr.shape != f_pred.shape[1:]:
+        raise ValueError(
+            "Unexpected SB1 plot array shapes: "
+            f"f_pred={f_pred.shape}, y={y_arr.shape}, err={err_arr.shape}"
+        )
+
+    valid = np.isfinite(y_arr) & np.isfinite(err_arr) & (err_arr > 0)
+    loglike = _student_t_logpdf_np(
+        y_arr[None, :, :, :],
+        f_pred,
+        err_arr[None, :, :, :],
+        df=8.0,
+    )
+    loglike = np.where(valid[None, :, :, :], loglike, 0.0)
+    sample_loglike = np.sum(loglike, axis=(1, 2, 3))
+    finite_score = np.isfinite(sample_loglike)
+    if not np.any(finite_score):
+        raise ValueError("No finite SB1 posterior predictions available for plotting.")
+
+    ranked_samples = np.argsort(np.where(finite_score, -sample_loglike, np.inf))
+    n_plot = min(int(n_sol), f_pred.shape[0])
+    top_samples = ranked_samples[:min(n_plot, 40)]
+    best_sample = int(ranked_samples[0])
+
+    dv = np.asarray(trace['Δv'])
+    if dv.ndim == 3 and dv.shape[-1] == 1:
+        dv = dv[..., 0]
+    if dv.ndim != 2:
+        raise ValueError(f"Unexpected SB1 RV trace shape: {dv.shape}")
+    rv_best = dv[best_sample]
+    rv_lo, rv_hi = np.nanpercentile(dv[finite_score], [16, 84], axis=0)
 
     for idx, line in enumerate(lines):
         print('Plotting fits for line:', line)
         fig, axes = setup_fits_plots(wavelengths)
-        centre = rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms)
+        rest_air = lines_dic[line]['air'][0]
+        rest_centre = rv_shift_wavelength(rest_air, shift_kms)
         region_limits = lines_dic.get(line, {}).get('region')
         if region_limits is not None:
             region_start, region_end = region_limits
@@ -1526,41 +1956,55 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
             region_end = rv_shift_wavelength(region_end, shift_kms)
         else:
             # fallback ±13 Å if no explicit region stored
-            region_start, region_end = centre - 13, centre + 13
+            region_start, region_end = rest_centre - 13, rest_centre + 13
 
         for epoch_idx, ax in enumerate(axes[:n_epochs]):
-            f_pred = trace['fλ_pred']
-            # If it came out (S, epochs, lines, N), swap to (S, lines, epochs, N)
-            if f_pred.shape[1] == n_epochs and f_pred.shape[2] == len(lines):
-                f_pred = np.swapaxes(f_pred, 1, 2)
-
-            fλ_pred_samples = f_pred[-n_sol:, idx, epoch_idx, :]
-            continuum_pred_samples = trace['ε'][-n_sol:, None]
-            ax.plot(x_waves[idx][epoch_idx], fλ_pred_samples.T, color='orangered', alpha=0.1, rasterized=True, zorder=-1)
+            x_epoch = np.asarray(x_waves[idx][epoch_idx])
+            if top_samples.size:
+                ax.plot(
+                    x_epoch,
+                    f_pred[top_samples, idx, epoch_idx, :].T,
+                    color='orangered',
+                    alpha=0.035,
+                    lw=1,
+                    rasterized=True,
+                    zorder=-2,
+                )
+            ax.plot(x_epoch, f_pred[best_sample, idx, epoch_idx], color='orangered', lw=2, zorder=-1)
             # Plot the observed data
             ax.plot(x_waves[idx][epoch_idx], y_fluxes[idx][epoch_idx], color='k', lw=1, alpha=0.8)
-            # Plot vertical lines for the rest wavelength and component shifts
-            centre = rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms)
-            ax.axvline(centre, color='r', linestyle='--', lw=1)
-            ax.axvline(rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms), color='orange', linestyle='--', lw=1)
-            ax.axvline(rv_shift_wavelength(lines_dic[line]['air'][0], shift_kms), color='orange', linestyle='--', lw=1)
+            # Plot rest wavelength and the RV centre from the same posterior sample as the model curve.
+            rv_centre = rv_shift_wavelength(rest_air, shift_kms + rv_best[epoch_idx])
+            rv_centre_lo = rv_shift_wavelength(rest_air, shift_kms + rv_lo[epoch_idx])
+            rv_centre_hi = rv_shift_wavelength(rest_air, shift_kms + rv_hi[epoch_idx])
+            ax.axvline(rest_centre, color='0.45', linestyle=':', lw=1)
+            ax.axvspan(
+                min(rv_centre_lo, rv_centre_hi), max(rv_centre_lo, rv_centre_hi),
+                color='orange', alpha=0.16, linewidth=0, zorder=-3
+            )
+            ax.axvline(rv_centre, color='orange', linestyle='--', lw=1.2)
             # Annotate the epoch number
-            ax.text(0.1, 0.1, f'Epoch {epoch_idx+1}', transform=ax.transAxes, fontsize=16)
+            ax.text(
+                0.06, 0.08,
+                f'Epoch {epoch_idx+1}\nRV {rv_best[epoch_idx]:.0f} km/s',
+                transform=ax.transAxes, fontsize=12
+            )
+            ax.set_xlim(region_start, region_end)
 
-        ax.set_xlim(region_start, region_end)
         fig.supxlabel('Wavelength [Å]', fontsize=24, y=-0.015)
-        # Keep the y-label inside the figure; otherwise it can overlap the y-tick labels.
-        fig.supylabel('Flux', fontsize=24, x=-0.1)
+        fig.supylabel('Flux', fontsize=24, x=0.01)
         
         custom_lines = [
-            Line2D([0], [0], color='orangered', lw=2)
+            Line2D([0], [0], color='orangered', lw=2),
+            Line2D([0], [0], color='orange', linestyle='--', lw=1.2),
+            Line2D([0], [0], color='0.45', linestyle=':', lw=1),
         ]
         fig.subplots_adjust(bottom=0.1, left=0.12)
 
         # Legend formatting
         fig.legend(
             custom_lines,
-            ['Prediction'],
+            ['Best coherent prediction', 'RV centre', 'Rest wavelength'],
             loc='lower center',
             bbox_to_anchor=(0.5, 0.02),  # closer to bottom edge
             ncol=3,
@@ -1579,7 +2023,7 @@ def plot_lines_fit_sb1(wavelengths, lines, x_waves, y_fluxes, n_epochs, trace, l
         plt.savefig(os.path.join(path, f'{line}_fits_SB1_{prof_tag}.png'), dpi=300, bbox_inches='tight')
         plt.close()
 
-def plot_lines_fit_na(wavelengths, x_waves, y_fluxes, n_epochs, trace, path, shift_kms, window=(5878, 5899), n_sol=100):
+def plot_lines_fit_na(wavelengths, x_waves, y_fluxes, n_epochs, trace, path, shift_kms, window=(5882, 5905), n_sol=100):
     """
     Plot posterior Na-doublet predictions for each epoch in a shared local window.
     """
@@ -1622,8 +2066,11 @@ def mcmc_results_to_file_sb1(trace, names, jds, writer, csvfile, rm_epochs=None)
     """
     Write MCMC fit results for an SB1 (single component) to a CSV file.
     
-    The function utilizes either HDI or mode-aware analysis (see  summarize_mode_1d) to define RV results from 
-    the posterior, and writes out to a file called fit_values.csv.
+    The function utilizes either HDI or mode-aware analysis (see summarize_mode_1d)
+    to define RV results from the posterior, and writes out to a file called
+    fit_values.csv. The legacy ``mean_rv_er`` column is retained as a scalar
+    uncertainty; ``rv_err_minus`` and ``rv_err_plus`` preserve asymmetric posterior
+    spread around the adopted RV.
     
     Parameters:
         trace (dict): Dictionary containing MCMC samples (expects key 'Δv_τk').
@@ -1650,12 +2097,77 @@ def mcmc_results_to_file_sb1(trace, names, jds, writer, csvfile, rm_epochs=None)
 
         # Calculate the mean RV and its error at epoch j.
         vals = (np.asarray(trace['Δv'][:, j]))
-        rv_val, rv_err, mode = summarize_mode_1d(vals)
+        rv_val, rv_err, rv_err_minus, rv_err_plus, mode = summarize_mode_1d_asymmetric(vals)
         results_dict['mean_rv'] = rv_val
         results_dict['mean_rv_er'] = rv_err
+        results_dict['rv_err_minus'] = rv_err_minus
+        results_dict['rv_err_plus'] = rv_err_plus
         results_dict['posterior_method'] = mode # method used to fetch results from posterior
 
         # Initialize the writer if not already created
+        if writer is None:
+            fieldnames = results_dict.keys()
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+        writer.writerow(results_dict)
+
+    return writer
+
+
+def mcmc_results_to_file_na(trace, names, jds, writer, csvfile, rm_epochs=None):
+    """
+    Write Na-doublet RV summaries using a stationary-mode choice across epochs.
+
+    The legacy ``mean_rv_er`` column is retained as a scalar uncertainty;
+    ``rv_err_minus`` and ``rv_err_plus`` preserve asymmetric posterior spread
+    around the adopted RV.
+    """
+    if rm_epochs is not None:
+        names = [x for i, x in enumerate(names) if i not in rm_epochs]
+        jds = [x for i, x in enumerate(jds) if i not in rm_epochs]
+
+    dv = np.asarray(trace['Δv'])
+    if dv.ndim == 3 and dv.shape[-1] == 1:
+        dv = dv[..., 0]
+    if dv.ndim != 2:
+        raise ValueError(f"Unexpected Na RV trace shape: {dv.shape}")
+
+    summaries, stationary_meta = summarize_stationary_modes(
+        [dv[:, j] for j in range(dv.shape[1])], return_meta=True
+    )
+    chain_diagnostics = trace.get("na_chain_diagnostics", {})
+    n_chains_rejected = int(chain_diagnostics.get("n_chains_rejected", 0) or 0)
+
+    for j, epoch_name in enumerate(names):
+        results_dict = {'epoch': epoch_name}
+        if jds is not None and j < len(jds):
+            results_dict['MJD'] = jds[j]
+        rv_val, rv_err, rv_err_minus, rv_err_plus, mode = summaries[j]
+        if mode == "MODE-STATIONARY" and stationary_meta["scatter"] > 40:
+            mode = "AMBIGUOUS"
+        if n_chains_rejected:
+            mode = f"CHAIN-FILTERED+{mode}"
+        warning_reasons = _na_posterior_warning_reasons(
+            rv_err_minus,
+            rv_err_plus,
+            stationary_meta["scatter"],
+        )
+        if warning_reasons:
+            quality_flag = "POSTERIOR_WARNING"
+        elif n_chains_rejected:
+            quality_flag = "CHAIN_FILTERED"
+        else:
+            quality_flag = "CLEAN"
+        results_dict['mean_rv'] = rv_val
+        results_dict['mean_rv_er'] = rv_err
+        results_dict['rv_err_minus'] = rv_err_minus
+        results_dict['rv_err_plus'] = rv_err_plus
+        results_dict['posterior_method'] = mode
+        results_dict['na_chains_rejected'] = n_chains_rejected
+        results_dict['na_quality_flag'] = quality_flag
+        results_dict['na_posterior_warning'] = bool(warning_reasons)
+        results_dict['na_warning_reasons'] = ";".join(warning_reasons)
+
         if writer is None:
             fieldnames = results_dict.keys()
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -1768,14 +2280,9 @@ def _fit_sb2_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hline
         y_errors_line = []
 
         for wave_set, flux_set, error_set in zip(wavelengths, fluxes, f_errors):
-            mask = (wave_set > region_start) & (wave_set < region_end)
-            wave_masked = wave_set[mask]
-            flux_masked = flux_set[mask]
-            if error_set is not None:
-                error_masked = error_set[mask]
-            else:
-                f_err = compute_flux_err(wave_set, flux_set)
-                error_masked = f_err[mask]
+            wave_masked, flux_masked, error_masked = _extract_finite_region_arrays(
+                wave_set, flux_set, error_set, region_start, region_end
+            )
 
             # Interpolate onto a common wavelength grid for this line and epoch
             common_wavelength_grid = np.linspace(wave_masked.min(), wave_masked.max(), common_grid_length)
@@ -1844,6 +2351,10 @@ def _fit_sb2_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hline
         with npro.plate(f'epochs', nepochs, dim=-1):       
             Δv_τk = npro.sample("Δv_τk", dist.Normal(loc=Δv_means, scale=σ_Δv))
 
+        # TODO: mirror the SB1 width-parameter cleanup here soon. SB2 still samples
+        # Gaussian/Lorentzian width parameters that may be inactive for the selected
+        # line profile, and its two-stage frozen-parameter flow needs a dedicated
+        # validation pass before removing those dead dimensions.
         with npro.plate(f'lines', nlines, dim=-2):
             # Primary amplitude
             amp0 = npro.sample("amp0", dist.TruncatedNormal(loc=0.18, scale=0.06, low=0.02, high=0.40))
@@ -2327,7 +2838,10 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile, rm_epochs):
     For each component (assumed to be two components) and for each epoch (from the 
     provided 'names' list) the function calculates the mean RV and its uncertainty 
     from the MCMC trace and writes these values alongside the epoch, MJD, and strategy
-    used to extract values from the posterior (HDI or mode-aware, see hdi_summary and summarize_mode_1d).
+    used to extract values from the posterior (HDI or mode-aware, see hdi_summary
+    and summarize_mode_1d). The legacy ``mean_rv_er`` column is retained as a
+    scalar uncertainty; ``rv_err_minus`` and ``rv_err_plus`` preserve asymmetric
+    posterior spread around the adopted RV.
     
     Parameters:
         trace (dict): Dictionary containing MCMC samples (expects key 'Δv_τk').
@@ -2355,10 +2869,12 @@ def mcmc_results_to_file(trace, names, jds, writer, csvfile, rm_epochs):
 
             # Extract 1D samples for component i, epoch j
             vals = np.squeeze(np.asarray(trace['Δv_τk'][:, i, :, j]))
-            rv_val, rv_err, mode = summarize_mode_1d(vals)
+            rv_val, rv_err, rv_err_minus, rv_err_plus, mode = summarize_mode_1d_asymmetric(vals)
 
             results_dict['mean_rv'] = rv_val
             results_dict['mean_rv_er'] = rv_err
+            results_dict['rv_err_minus'] = rv_err_minus
+            results_dict['rv_err_plus'] = rv_err_plus
             results_dict['comp'] = i + 1
             results_dict['posterior_method'] = mode
 
@@ -2493,7 +3009,7 @@ def _SLfit_impl(spectra_list, data_path, save_path, lines, K=2, file_type='fits'
                     num_chains=num_chains, chain_method=chain_method, plots=plots,
                     cornerplot=cornerplots, progress=progress
                 )
-                writer = mcmc_results_to_file_sb1(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
+                writer = mcmc_results_to_file_na(result, names, jds, writer, csvfile, rm_epochs=rm_epochs)
             elif sb1_method in ['classic', 'lmfit']:
                 print('Using classic (lmfit) SB1 routine')
                 for i, line in enumerate(lines):
