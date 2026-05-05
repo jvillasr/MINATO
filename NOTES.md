@@ -1,21 +1,5 @@
 # MINATO Notes
 
-## 2026-05-05 - RAVEL validation artefacts moved to multiplicity paper workspace
-
-Decision:
-- Keep MINATO focused on the RAVEL code changes and project memory.
-- Move the P117 validation runners, manifests, plots, CSVs, JSON summaries, and comparison reports to the multiplicity-paper workspace because the reusable framing is now paper-specific rather than a generic MINATO benchmark suite.
-
-New artefact root:
-- `/nexus/posix0/MIA-astro-env/hxr/jvillasr/SDSS/multiplicity_paper/ravel_validation/benchmarks`
-
-Moved from:
-- `/nexus/posix0/MIA-astro-env/hxr/jvillasr/MINATO/benchmarks`
-
-Notes:
-- Earlier entries in this file that refer to `benchmarks/...` validation paths now correspond to the same relative paths under the new multiplicity-paper artefact root unless explicitly stated otherwise.
-- MINATO should commit the RAVEL source changes plus `NOTES.md` / `CHANGELOG.md`, not the bulky validation products.
-
 ## 2026-05-05 - RAVEL integrated four-fit validation with Gaussian non-H profiles
 
 Output:
