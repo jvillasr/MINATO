@@ -1,5 +1,206 @@
 # MINATO Notes
 
+## 2026-05-05 - RAVEL validation artefacts moved to multiplicity paper workspace
+
+Decision:
+- Keep MINATO focused on the RAVEL code changes and project memory.
+- Move the P117 validation runners, manifests, plots, CSVs, JSON summaries, and comparison reports to the multiplicity-paper workspace because the reusable framing is now paper-specific rather than a generic MINATO benchmark suite.
+
+New artefact root:
+- `/nexus/posix0/MIA-astro-env/hxr/jvillasr/SDSS/multiplicity_paper/ravel_validation/benchmarks`
+
+Moved from:
+- `/nexus/posix0/MIA-astro-env/hxr/jvillasr/MINATO/benchmarks`
+
+Notes:
+- Earlier entries in this file that refer to `benchmarks/...` validation paths now correspond to the same relative paths under the new multiplicity-paper artefact root unless explicitly stated otherwise.
+- MINATO should commit the RAVEL source changes plus `NOTES.md` / `CHANGELOG.md`, not the bulky validation products.
+
+## 2026-05-05 - RAVEL integrated four-fit validation with Gaussian non-H profiles
+
+Output:
+- `benchmarks/results/p117_validation_subset_fourfit_gaussian_nonh_20260505`
+- report: `benchmarks/results/p117_validation_subset_fourfit_gaussian_nonh_20260505/REPORT.md`
+
+Command:
+- `env MINATO_QUIET=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 JAX_ENABLE_X64=True XLA_FLAGS=--xla_force_host_platform_device_count=2 MPLCONFIGDIR=benchmarks/results/.mplconfig ./.venv/bin/python benchmarks/run_p117_fourfit_validation.py --output-dir benchmarks/results/p117_validation_subset_fourfit_gaussian_nonh_20260505 --families blue,red,full,na --num-warmup 100 --num-samples 300 --num-chains 2 --chain-method parallel --max-interp-points 400`
+
+Scope:
+- Ran the fixed 10-star validation subset with all four planned families: `blue`, `red`, `full`, and `na`.
+- Stellar families used non-H `profile="Gaussian"` and `Hprofile="Lorentzian"`.
+- Na used the dedicated Na-doublet diagnostic model with the narrowed default window `5882-5905 Å`.
+- Plots were enabled; corner plots were off for this integrated pass.
+- Low-cost smoke sampler settings were `num_warmup=100`, `num_samples=300`, `num_chains=2`.
+
+Results:
+- `40/40` fits completed.
+- Median runtimes were `7.36 s` for blue, `5.89 s` for red, `17.53 s` for full, and `3.38 s` for Na.
+- Total wall time was `376.47 s`.
+- Mode A red/full collapse did not reappear; the old repeated zero-error RV template was absent.
+- Mode B Na behaviour is still the limiting case: `82244026` is mostly clean, while `73957460` remains explicitly flagged with stationary-scatter warnings and a high-RV epoch 4 (`349.73 km/s`) at this low-cost sampler depth.
+- Mode C `82903408` blue plots now look coherent with the full blue line list; the earlier apparent amplitude inconsistency is resolved.
+
+Decision:
+- Use Gaussian profiles for non-H stellar lines in the P117 four-fit validation workflow.
+- Keep H/Paschen lines Lorentzian.
+- Keep Na separate on the dedicated Na-doublet diagnostic path with the narrowed `5882-5905 Å` window.
+- This is still a functional validation at smoke-test MCMC depth, not the final production-depth or throughput benchmark.
+- The previous Na-only deep run with the same narrowed window (`num_warmup=500`, `num_samples=1000`, `num_chains=4`) recovered `73957460` epoch 4 near the stationary solution, so the remaining `73957460` issue is sampler-depth sensitive rather than fixed by window narrowing alone.
+
+Targeted follow-up for `73957460` Na:
+- Reran only `73957460` / `na` in the same output tree with `num_warmup=200`, `num_samples=500`, `num_chains=4`.
+- Runtime was `3.91 s`.
+- Two low-likelihood chains were rejected and two chains retained.
+- The current `73957460/na` products in `benchmarks/results/p117_validation_subset_fourfit_gaussian_nonh_20260505` come from this targeted run.
+- Epoch 4 recovered the stationary solution: `45.51 km/s` with `-6.97/+5.14 km/s` asymmetric errors.
+- Targeted summary copy: `benchmarks/results/p117_validation_subset_fourfit_gaussian_nonh_20260505/summary_73957460_na_200_500_4.json`.
+
+## 2026-05-05 - RAVEL 10-star 200/500/4 comparison
+
+Output:
+- `benchmarks/results/p117_validation_subset_fourfit_gaussian_nonh_200_500_4_20260505`
+- comparison report: `benchmarks/results/p117_validation_subset_fourfit_gaussian_nonh_200_500_4_20260505/COMPARISON_TO_LOW_COST.md`
+- comparison table: `benchmarks/results/p117_validation_subset_fourfit_gaussian_nonh_200_500_4_20260505/rv_comparison_to_low_cost.csv`
+
+Command:
+- `env MINATO_QUIET=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 JAX_ENABLE_X64=True XLA_FLAGS=--xla_force_host_platform_device_count=4 MPLCONFIGDIR=benchmarks/results/.mplconfig ./.venv/bin/python benchmarks/run_p117_fourfit_validation.py --output-dir benchmarks/results/p117_validation_subset_fourfit_gaussian_nonh_200_500_4_20260505 --families blue,red,full,na --num-warmup 200 --num-samples 500 --num-chains 4 --chain-method parallel --max-interp-points 400`
+
+Scope:
+- Reran all four families for all 10 validation stars with `num_warmup=200`, `num_samples=500`, `num_chains=4`.
+- Stellar profile settings stayed at non-H `Gaussian`, H/Paschen `Lorentzian`.
+- Na used the narrowed default window `5882-5905 Å`.
+- Plots were enabled; corner plots were off.
+
+Results:
+- `40/40` fits completed.
+- Total wall time was `320.03 s` in this run, compared with `376.47 s` for the previous low-cost smoke run. This should not be over-interpreted as a guaranteed speed-up because the deeper run used `XLA_FLAGS=--xla_force_host_platform_device_count=4` while the earlier integrated smoke run used `2`; it does show that `200/500/4` is not obviously too expensive at this 10-star scale.
+- Median runtimes were `7.25 s` for blue, `5.80 s` for red, `12.90 s` for full, and `3.58 s` for Na.
+- Stellar RV differences relative to the current low-cost output tree were small:
+  - blue: max absolute shift `3.10 km/s`, median `0.75 km/s`
+  - red: max absolute shift `2.81 km/s`, median `0.89 km/s`
+  - full: max absolute shift `3.10 km/s`, median `0.46 km/s`
+- Na gained substantially in robustness:
+  - `73957460` epoch 4 stayed on the stationary solution (`45.51 km/s`) with two low-likelihood chains rejected.
+  - `82244026` epochs that were pathological in the low-cost tree recovered near the stationary Na solution (`-3.00` and `-13.72 km/s` for the last two epochs).
+
+Interpretation:
+- The stellar fits do not materially change at `200/500/4` on this subset.
+- Na is the main beneficiary of the deeper sampler and four chains.
+- Candidate default for functional validation is now `200/500/4` for all families unless throughput tests show this is too expensive at scale. If production throughput becomes limiting, use family-specific settings with Na at `200/500/4` and stellar families at the cheaper setting.
+
+## 2026-05-05 - RAVEL 10-star stellar profile comparison
+
+Comparison outputs:
+- `benchmarks/results/p117_blue_profile_compare_20260505/blue_voigt`
+- `benchmarks/results/p117_blue_profile_compare_20260505/blue_gaussian_nonh`
+- `benchmarks/results/p117_stellar_profile_compare_20260505/redfull_voigt`
+- `benchmarks/results/p117_stellar_profile_compare_20260505/redfull_gaussian_nonh`
+- summary report: `benchmarks/results/p117_stellar_profile_compare_20260505/REPORT.md`
+
+Scope:
+- Fixed 10-star validation subset.
+- Compared non-H `profile="Voigt"` against non-H `profile="Gaussian"`.
+- Kept `Hprofile="Lorentzian"` in both runs.
+- Ran `blue`, `red`, and `full`; Na was not part of this stellar-profile comparison.
+
+Results:
+- `60/60` stellar fits completed across the two profile settings.
+- Gaussian-minus-Voigt RV shifts were small:
+  - blue: maximum absolute shift `5.49 km/s`, median absolute shift `1.52 km/s`, max shift `0.53` combined sigma
+  - red: maximum absolute shift `5.39 km/s`, median absolute shift `1.88 km/s`, max shift `0.50` combined sigma
+  - full: maximum absolute shift `3.15 km/s`, median absolute shift `1.01 km/s`, max shift `0.50` combined sigma
+- Gaussian non-H fits were modestly faster in these smoke runs.
+
+Interpretation:
+- At this smoke-test depth, Gaussian non-H profiles do not show an RV-level regression relative to Voigt non-H profiles.
+- Gaussian non-H is a credible candidate for the production stellar profile default, but final promotion should wait for qualitative plot review and the chosen production MCMC depth.
+- Minor cosmetic follow-up: some three-epoch blue plots place the y-axis label too close to tick labels.
+
+## 2026-05-05 - RAVEL SB1 width-parameter cleanup
+
+Targeted diagnostic output:
+- `benchmarks/results/mode_c_sb1_width_sampling_20260505`
+
+Code change:
+- SB1 probabilistic fitting now samples only line-width parameters that enter the selected profile likelihood.
+- With `profile="Voigt"` and `Hprofile="Lorentzian"`, Balmer lines no longer sample unused Gaussian widths.
+- With `profile="Gaussian"` and `Hprofile="Lorentzian"`, non-H lines sample only Gaussian widths and Balmer lines sample only Lorentzian widths.
+- SB1 profile corner plots now use the same masks, so `cornerplot_wid_G.png` and `cornerplot_wid_L.png` only show active parameters.
+
+Targeted validation:
+- Reran `82903408` blue with the full blue line list for:
+  - non-H `Voigt`, H `Lorentzian`
+  - non-H `Gaussian`, H `Lorentzian`
+- Both runs completed and produced coherent `4471` panels.
+- The Gaussian-vs-Voigt RV differences were small at smoke-test depth, with epoch differences from `-2.84` to `+2.18 km/s`.
+- Do not promote Gaussian non-H profiles to the default yet; run the full 10-star validation subset with both settings first.
+
+SB2 note:
+- The equivalent unused-width cleanup has not yet been applied to SB2 because the two-stage frozen-parameter model needs a separate, validated edit.
+
+## 2026-05-05 - RAVEL mode C blue plot-axis fix
+
+Targeted diagnostic output:
+- `benchmarks/results/mode_c_sb1_axis_fix_20260505/82903408/blue`
+- `benchmarks/results/mode_c_sb1_axis_fix_20260505/82244026/red_axis_check`
+
+Diagnosis:
+- The blue mode C failure for `82903408` was a plotting-axis bug, not evidence that the production blue line list had to be tailored per star.
+- `82903408` has 7 epochs and the blue family has 7 lines. The SB1 plotter had a legacy shape-detection branch that swapped the line and epoch axes whenever `fλ_pred.shape[1] == n_epochs` and `fλ_pred.shape[2] == len(lines)`.
+- In the ambiguous `7 x 7` case this swapped a correct current trace shaped `(sample, line, epoch, pixel)` into the wrong order, producing apparent per-epoch depth changes for a single line. That visual behaviour looked like a violation of the shared-amplitude requirement, but the model parameters were already shared per line across epochs.
+
+Code changes:
+- SB1 plotting now treats current traces as `(sample, line, epoch, pixel)` first and only swaps legacy traces when the shape is unambiguously `(sample, epoch, line, pixel)`.
+- SB1 plots now draw a coherent high-likelihood posterior sample rather than a pointwise posterior median.
+- When `cornerplots=True`, SB1 now writes additional profile-parameter diagnostics:
+  - `cornerplot_amp.png`
+  - `cornerplot_wid_G.png`
+  - `cornerplot_wid_L.png`
+
+Validation:
+- Reran `82903408` blue with the full production blue list `[4026, 4102, 4144, 4340, 4388, 4471, 4713]`.
+- The `4471`, `4102`, and `4340` fit panels now look coherent, with shared-depth profiles across epochs.
+- Also reran `82244026` red because it has the same axis ambiguity (`5` red lines and `5` epochs); the red panels look coherent after the fix.
+- The RV table is unchanged relative to the previous all-blue run, as expected for a plotting-axis fix.
+- The earlier no-Hδ run is retained only as a diagnostic control; it is not the production solution.
+
+## 2026-05-04 - RAVEL mode A/C targeted validation
+
+Targeted validation outputs are in `benchmarks/results/mode_ac_validation_20260504`.
+
+Scope:
+- Mode A: red/full collapse recovery for `73590837`, `76657579`, `105622073`
+- Mode C: blue posterior/plot diagnosis for `82903408`
+
+Run settings:
+- `MINATO_QUIET=1`, BLAS/OpenMP thread counts set to `1`
+- `JAX_ENABLE_X64=True`
+- `XLA_FLAGS=--xla_force_host_platform_device_count=4`
+- `chain_method="parallel"`
+- `max_interp_points=400`
+- plots and corner plots enabled
+
+Validation summary:
+- `8/8` targeted fits completed in `89.5 s`
+- Mode A did not reproduce the old repeated pathological red/full RV template (`50.0176, -376.8281, 108.6114`) and did not produce zero uncertainties
+- Mode C smoke and deep blue runs for `82903408` agreed to within `1.3 km/s` per epoch, so increasing chains/samples did not change the RV solution
+- The `82903408` blue corner plot is unimodal; remaining visual concerns appear to be line-profile/depth mismatch rather than sampler failure
+
+Code behaviour under validation:
+- Finite-window sanitisation is now shared by SB1, Na, and SB2 probabilistic interpolation paths
+- Probabilistic Na, SB1, and SB2 result writers now preserve asymmetric posterior errors via `rv_err_minus` and `rv_err_plus`
+- Na outputs additionally record `na_quality_flag`, `na_posterior_warning`, and `na_warning_reasons`
+- Generic chain rejection was not added to SB1/SB2; Na chain filtering remains diagnostic-specific
+
+Detailed morning-review report:
+- `benchmarks/results/mode_ac_validation_20260504/REPORT.md`
+
+Follow-up mode C diagnosis:
+- The original blue family `[4026, 4102, 4144, 4340, 4388, 4471, 4713]` produced visibly poor `82903408` blue plots, even though the posterior was unimodal
+- Comparing line-list variants showed that dropping Hδ (`4102`) made the visual issue disappear, but this was a diagnostic clue rather than a valid production solution
+- The actual cause was later identified as an SB1 plotting-axis ambiguity when `n_lines == n_epochs == 7`; see the `2026-05-05` entry
+- The validation runner keeps the full blue family; do not tailor the line list per star for this failure mode
+
 ## 2026-04-17 - Na diagnostic and single-epoch support
 
 Follow-up decisions for the planned four-fit SB1 production workflow:
@@ -16,6 +217,7 @@ Provisional line-family definitions agreed on `2026-04-17`:
 - `blue`
   - `4026, 4102, 4144, 4340, 4388, 4471, 4713`
   - dropped `4861` and `4922` relative to the historical P117 stellar set
+  - keep `4102`; the apparent mode C failure was a plotting-axis bug, not a line-list failure
 - `red`
   - `5876, 6678`, plus a curated subset of Paschen lines
   - drop `6562` (`Hα`) because of emission contamination concerns
@@ -242,6 +444,25 @@ Current recommended starting point, pending the next benchmark:
 - `cornerplots=False`
 - try `n_cpus_per_worker=2`, `num_chains=2`, `chain_method='parallel'`
 - validate warmup/sample depth before locking that in for production
+
+Validation subset fixed on `2026-04-17` before scaling tests:
+- File: `benchmarks/p117_validation_subset_20260417.csv`
+- Purpose: larger functional check of the four-fit workflow before any throughput benchmark
+- Selection design: 10 stars stratified by epoch count and MINATO RV amplitude, with one explicitly suspicious XCSAO-versus-MINATO case
+- Selected stars:
+  - `74826456`: 2-epoch moderate case
+  - `105622073`: 2-epoch high-amplitude case
+  - `76657579`: 3-epoch near-threshold case
+  - `74829598`: 3-epoch moderate compact-baseline case
+  - `74914335`: 3-epoch strong-variability case
+  - `73590837`: 3-epoch smoke-test anchor
+  - `73957460`: 4-epoch lower-amplitude multi-epoch stability case
+  - `82334978`: 4-epoch suspicious control with extreme XCSAO `dRV` but low MINATO `dRV`
+  - `82244026`: 5-epoch moderate longer-baseline case
+  - `82903408`: 7-epoch high-amplitude higher-cadence stress case
+- Working rule for the next iteration:
+  - run the full `blue` / `red` / `full` / `na` workflow on this 10-star subset first
+  - only after the qualitative behaviour looks stable across this set should the worker-packing benchmark begin
 
 ## 2026-04-16 - Launched SB1 astro-node smoke scaling matrix
 

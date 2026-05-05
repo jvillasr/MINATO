@@ -58,6 +58,7 @@ Future: tutorials may move to a ReadTheDocs-style site; write notebooks so they 
 - Maintain an `Unreleased` section and past versions.
 - When a change is completed and approved, add an entry under `Unreleased`:
   - Added / Changed / Fixed (use the appropriate subsection)
+- Add new entries at the top of the appropriate subsection so each list is reverse chronological.
 - Keep entries short, user-facing, and specific (what changed and why it matters).
 - Do NOT bump version numbers unless I explicitly instruct.
 
