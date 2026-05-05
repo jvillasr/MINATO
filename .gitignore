@@ -3,7 +3,11 @@
 # Exclude .DS_Store and other files
 .DS_Store*
 .vscode/
+.codex
 __pycache*
+*.egg-info/
+build/
+dist/
 **/data
 # Exclude files in minato
 index.html

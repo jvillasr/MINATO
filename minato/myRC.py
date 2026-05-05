@@ -36,7 +36,7 @@ plt.rcParams['legend.frameon']       = True
 plt.rcParams['legend.framealpha']    = 0.4
 plt.rcParams['legend.handlelength'] = 1.125
 plt.rcParams['legend.handleheight'] = 0.8
-plt.rcParams['text.latex.preamble'] = r'\usepackage{newtxmath}'
+# plt.rcParams['text.latex.preamble'] = r'\usepackage{newtxmath}'
 # plt.rcParams['font.family'] = 'serif'
 # plt.rcParams['font.serif']  = 'Times'
 

@@ -28,3 +28,6 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 include = ["minato*"]
+
+[project.optional-dependencies]
+dev = ["ipykernel>=7.1.0"]
