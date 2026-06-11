@@ -1,5 +1,26 @@
 # MINATO Notes
 
+## 2026-06-11 - Four-parameter binary-population MCMC support
+
+Scope:
+- Extended `minato.binary_population.run_mcmc` from the historical
+  one-parameter `f_bin` default to an opt-in parameter list supporting
+  simultaneous sampling of `f_bin`, `pi`, `kappa`, and `eta`.
+- Added `BinaryPopulation.logP_powerlaw_mode = "direct"` for literature-style
+  `p(log10 P) proportional to (log10 P)^pi` sampling over positive log-period
+  intervals. The old shifted-logP sampler remains the default.
+
+Validation:
+- AST syntax check passed for `mcmc.py` and `population.py`.
+- A tiny four-parameter synthetic-cadence smoke run returned finite
+  prior/likelihood values and chain shape `(2, 16, 4)`.
+- A tiny legacy one-parameter smoke run returned chain shape `(2, 8, 1)`.
+
+Paper context:
+- Added for the SDSS-V multiplicity paper clean-epoch analysis, where the
+  first broad-domain inference uses `log10(P/d)=0.15-3.5`, `q=0.1-1`, and
+  fits `f_bin`, `pi`, `kappa`, and `eta`.
+
 ## 2026-05-05 - RAVEL integrated four-fit validation with Gaussian non-H profiles
 
 Output:

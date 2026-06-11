@@ -22,6 +22,10 @@ class BinaryPopulation:
         self.logP_min = -0.15
         self.logP_max = 3.5
         self.pi = 0.0
+        # "shifted" preserves the legacy sampler:
+        # p(x) ∝ (x - logP_min)^pi, where x = log10(P/day).
+        # "direct" is the literature-style p(x) ∝ x^pi, valid for x > 0.
+        self.logP_powerlaw_mode = "shifted"
         # Systemic velocity
         self.gamma_range = (-1, 1)
         # Eccentricity
@@ -85,6 +89,7 @@ class BinaryPopulation:
             "fixed_e_enforcement": getattr(self, "fixed_e_enforcement", "clip"),
             "e_max": getattr(self, "e_max", None),
             "use_period_ecc_cap": getattr(self, "use_period_ecc_cap", True),
+            "logP_powerlaw_mode": getattr(self, "logP_powerlaw_mode", "shifted"),
         }
 
     # -------------------- Radius support --------------------
@@ -345,30 +350,52 @@ class BinaryPopulation:
 
     def sample_logP(self, N):
         """
-        Sample x = log10(P) from a PDF f(y) ~ y^pi, y=x-logP_min in [0, y_max].
+        Sample x = log10(P/day) from the configured period power law.
+
+        The legacy/default mode uses f(y) ∝ y^pi for
+        y = x - logP_min in [0, logP_max - logP_min]. Set
+        logP_powerlaw_mode = "direct" to use the literature-style
+        f(x) ∝ x^pi on [logP_min, logP_max], which requires logP_min > 0.
         """
         pi = self.pi
         logP_min = self.logP_min
         logP_max = self.logP_max
+        mode = getattr(self, "logP_powerlaw_mode", "shifted")
 
-        if pi <= -1.0:
-            raise ValueError(
-                f"pi={pi} <= -1 is not integrable with logP_min={logP_min} at y=0. "
-                "Use pi>-1 or shift logP_min > 0 (excluding sub-day orbits)."
-            )
         if logP_min >= logP_max:
             raise ValueError("logP_min must be < logP_max.")
 
-        y_max = logP_max - logP_min
         u = np.random.rand(N)
 
-        if abs(pi) < 1e-9:
-            y_samples = np.random.uniform(0.0, y_max, N)
-        else:
-            y_samples = y_max * (u ** (1.0 / (pi + 1)))
+        if mode == "shifted":
+            if pi <= -1.0:
+                raise ValueError(
+                    f"pi={pi} <= -1 is not integrable with logP_min={logP_min} at y=0. "
+                    "Use pi>-1 or set logP_powerlaw_mode='direct' with logP_min > 0."
+                )
+            y_max = logP_max - logP_min
+            if abs(pi) < 1e-9:
+                y_samples = np.random.uniform(0.0, y_max, N)
+            else:
+                y_samples = y_max * (u ** (1.0 / (pi + 1)))
+            return y_samples + logP_min
 
-        x_samples = y_samples + logP_min
-        return x_samples
+        if mode == "direct":
+            if logP_min <= 0.0:
+                raise ValueError(
+                    "logP_powerlaw_mode='direct' requires logP_min > 0 so "
+                    "p(logP) ∝ logP^pi is well defined for non-integer pi."
+                )
+            if abs(pi + 1.0) < 1e-9:
+                return logP_min * np.power(logP_max / logP_min, u)
+            alpha = pi + 1.0
+            return (
+                u * (logP_max**alpha - logP_min**alpha) + logP_min**alpha
+            ) ** (1.0 / alpha)
+
+        raise ValueError(
+            f"Unknown logP_powerlaw_mode={mode!r}; use 'shifted' or 'direct'."
+        )
 
     def sample_eccentricity(self, N, e_max=None):
         """
@@ -436,6 +463,8 @@ class BinaryPopulation:
 
         if abs(kappa) < 1e-3:
             return np.random.uniform(q_min, q_max, N)
+        if abs(kappa + 1.0) < 1e-9:
+            return q_min * np.power(q_max / q_min, np.random.rand(N))
         alpha = kappa + 1
         Qmin_alpha = q_min**alpha
         Qmax_alpha = q_max**alpha

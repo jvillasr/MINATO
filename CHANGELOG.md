@@ -1,5 +1,7 @@
 ## [Unreleased]
 ### Added
+* [2026-06-11] `binary_population.run_mcmc` can now fit `f_bin`, `pi`, `kappa`, and `eta` together via the opt-in `parameter_names` interface, while retaining the previous one-parameter `f_bin` default.
+* [2026-06-11] `BinaryPopulation` now supports `logP_powerlaw_mode="direct"` for literature-style `p(log10 P) ∝ (log10 P)^pi` sampling over positive log-period intervals.
 * [2026-05-05] Dedicated Na-doublet probabilistic fitter (`sb1_method='na'`) for per-epoch Na I D diagnostic RVs, using one shared local window and tied D1/D2 physics.
 * [2026-05-05] Added `Na I 5896 (D1)` and the Paschen series entries used by the P117 workflow to the default `ravel` line dictionary.
 * Probabilistic SB1 fitting workflow (`fit_sb1_probmod`) that mirrors the SB2 logic, including SB1-specific line plotting, corner-plot generation, and CSV writers.
