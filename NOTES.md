@@ -1,5 +1,26 @@
 # MINATO Notes
 
+## 2026-06-14 - Replace synthetic-spectrum creation tutorial
+
+Scope:
+- Replaced `minato/tutorials/create_synth_spectra.ipynb` with a clean
+  `minato.synthetic` tutorial.
+- Removed notebook-local renderer code and hard-coded local PoWR paths from the
+  tutorial.
+- The new notebook demonstrates an analytic runnable backend, optional
+  user-supplied `TextAtmosphereGrid`/`FallbackAtmosphereGrid` usage, single-star
+  rendering, SB1/SB2 multi-epoch rendering, `write_ravel_txt`, `JDs.txt`, and
+  truth-manifest writing.
+- Outputs are directed to `tutorial_outputs/create_synth_spectra/` instead of
+  overwriting committed RAVEL tutorial spectra.
+
+Validation:
+- `jq empty minato/tutorials/create_synth_spectra.ipynb`.
+- Confirmed the notebook has 24 cells, no outputs, and no execution counts.
+- Confirmed old local-path markers are absent from the notebook source.
+- `PYTHONDONTWRITEBYTECODE=1 ./.venv/bin/python -m unittest discover -s tests`
+  passed 13 tests.
+
 ## 2026-06-14 - Fallback atmosphere-grid routing
 
 Scope:

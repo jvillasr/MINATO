@@ -19,6 +19,7 @@
 * Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
 
 ### Changed
+* [2026-06-14] Replaced the legacy `create_synth_spectra.ipynb` notebook-local renderer with a runnable `minato.synthetic` workflow that writes isolated tutorial outputs.
 * [2026-05-05] P117 four-fit validation now uses Gaussian profiles for non-H stellar lines, Lorentzian profiles for H/Paschen lines, and the dedicated Na-doublet model for Na diagnostics.
 * [2026-05-05] The dedicated Na-doublet diagnostic now defaults to the narrowed `5882-5905 Å` fitting window used in validation.
 * [2026-05-05] Probabilistic SB1 outputs now preserve asymmetric posterior RV errors as `rv_err_minus` and `rv_err_plus` while retaining the legacy collapsed `mean_rv_er` column.

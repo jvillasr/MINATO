@@ -11,4 +11,5 @@
 3. ravel_tutorial/ravel_large_scale_batches
 
 ### Synthetic spectra
-1. synthetic_spectra_ravel_bridge
+1. create_synth_spectra
+2. synthetic_spectra_ravel_bridge
