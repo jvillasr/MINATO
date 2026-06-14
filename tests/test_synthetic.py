@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 import numpy as np
 
@@ -7,6 +9,7 @@ from minato.synthetic import (
     ObservationModel,
     Spectrum,
     Star,
+    TextAtmosphereGrid,
     doppler_shift,
     render_binary,
     render_single_star,
@@ -87,6 +90,107 @@ class SyntheticRenderingTests(unittest.TestCase):
         np.testing.assert_allclose(first.flux, second.flux)
         np.testing.assert_allclose(first.error, second.error)
         self.assertFalse(np.allclose(first.flux, different_seed.flux))
+
+
+class TextAtmosphereGridTests(unittest.TestCase):
+    def _write_model(self, directory, name, offset=0.0):
+        path = Path(directory) / name
+        wavelength = np.array([4999.0, 5000.0, 5001.0])
+        flux = np.array([1.0, 0.8 + offset, 1.0])
+        np.savetxt(path, np.column_stack([wavelength, flux]))
+        return path
+
+    def _write_flux(self, directory, name, flux):
+        path = Path(directory) / name
+        wavelength = np.array([4999.0, 5000.0, 5001.0])
+        np.savetxt(path, np.column_stack([wavelength, np.asarray(flux, dtype=float)]))
+        return path
+
+    def test_from_directory_recognises_minato_names(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            self._write_model(directory, "teff25000_logg4.00.txt")
+            self._write_model(directory, "teff30000_logg4.25.txt", offset=0.1)
+
+            grid = TextAtmosphereGrid.from_directory(directory)
+            spectrum = grid.get_spectrum(Star(teff=24_900, logg=4.02))
+
+            self.assertEqual(len(grid.nodes), 2)
+            self.assertAlmostEqual(spectrum.metadata["atmosphere_node"]["teff"], 25_000.0)
+            self.assertAlmostEqual(spectrum.metadata["atmosphere_node"]["logg"], 4.0)
+            np.testing.assert_allclose(spectrum.flux, [1.0, 0.8, 1.0])
+
+    def test_known_format_recognisers_parse_common_names(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            self._write_model(directory, "gal-ob-vd3_25-40_line.txt")
+            self._write_model(directory, "BG30000g425v2.flux")
+            self._write_model(directory, "T35000_g4.50.dat")
+
+            powr = TextAtmosphereGrid.from_directory(directory, format="powr")
+            tlusty = TextAtmosphereGrid.from_directory(directory, format="tlusty")
+            fastwind = TextAtmosphereGrid.from_directory(directory, format="fastwind")
+
+            self.assertAlmostEqual(powr.nodes[0].teff, 25_000.0)
+            self.assertAlmostEqual(powr.nodes[0].logg, 4.0)
+            self.assertAlmostEqual(tlusty.nodes[0].teff, 30_000.0)
+            self.assertAlmostEqual(tlusty.nodes[0].logg, 4.25)
+            self.assertAlmostEqual(fastwind.nodes[0].teff, 35_000.0)
+            self.assertAlmostEqual(fastwind.nodes[0].logg, 4.5)
+
+    def test_auto_powr_directory_uses_log_flux_auto_conversion(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            self._write_flux(directory, "gal-ob-vd3_25-40_line.txt", [-1.0, -0.2, -1.0])
+
+            grid = TextAtmosphereGrid.from_directory(directory)
+            spectrum = grid.get_spectrum(Star(teff=25_000, logg=4.0))
+
+            np.testing.assert_allclose(spectrum.flux, 10.0 ** np.array([-1.0, -0.2, -1.0]))
+            self.assertEqual(spectrum.metadata["flux_transform"], "10**flux")
+
+    def test_filename_pattern_handles_unconventional_names(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            self._write_model(directory, "model_T22k_grav375.txt")
+
+            grid = TextAtmosphereGrid.from_directory(
+                directory,
+                filename_pattern=r"T(?P<teff_kk>\d+)k_grav(?P<logg100>\d+)",
+            )
+            spectrum = grid.get_spectrum(Star(teff=22_000, logg=3.75))
+
+            self.assertAlmostEqual(spectrum.metadata["atmosphere_node"]["teff"], 22_000.0)
+            self.assertAlmostEqual(spectrum.metadata["atmosphere_node"]["logg"], 3.75)
+
+    def test_custom_parser_handles_unconventional_names(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            self._write_model(directory, "odd_model_A.txt")
+
+            def parser(path):
+                if path.name == "odd_model_A.txt":
+                    return {"teff": 22_000, "logg": 3.75, "label": "manual"}
+                return None
+
+            grid = TextAtmosphereGrid.from_directory(directory, parser=parser)
+            spectrum = grid.get_spectrum(Star(teff=22_100, logg=3.8))
+
+            node = spectrum.metadata["atmosphere_node"]
+            self.assertEqual(node["label"], "manual")
+            self.assertAlmostEqual(node["teff"], 22_000.0)
+            self.assertAlmostEqual(node["logg"], 3.75)
+
+    def test_index_template_and_from_index_round_trip(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            self._write_model(directory, "unparsed_name.txt")
+            index_path = Path(directory) / "model_index.csv"
+
+            TextAtmosphereGrid.write_index_template(directory, index_path)
+            text = index_path.read_text()
+            text = text.replace("unparsed_name.txt,,", "unparsed_name.txt,28000,4.1")
+            index_path.write_text(text)
+
+            grid = TextAtmosphereGrid.from_index(index_path, root=directory)
+            spectrum = grid.get_spectrum(Star(teff=28_100, logg=4.1))
+
+            self.assertAlmostEqual(spectrum.metadata["atmosphere_node"]["teff"], 28_000.0)
+            self.assertAlmostEqual(spectrum.metadata["atmosphere_node"]["logg"], 4.1)
 
 
 if __name__ == "__main__":

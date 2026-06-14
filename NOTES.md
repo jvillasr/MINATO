@@ -1,5 +1,24 @@
 # MINATO Notes
 
+## 2026-06-14 - Text atmosphere-grid adapter
+
+Scope:
+- Added `TextAtmosphereGrid` and `AtmosphereGridNode` as generic atmosphere
+  backends for folders of text model spectra.
+- Directory scanning recognises the MINATO filename convention
+  `teff25000_logg4.00.txt` plus common PoWR, TLUSTY, and FASTWIND-style names.
+- Added fallback paths for unconventional model names: custom regex patterns,
+  parser functions, editable index templates, and explicit CSV indexes.
+- The adapter performs nearest-neighbour selection inside the supplied grid; it
+  does not encode a scientific policy for choosing between PoWR, TLUSTY,
+  FASTWIND, AP18, or other model families.
+
+Validation:
+- `PYTHONDONTWRITEBYTECODE=1 ./.venv/bin/python -m unittest discover -s tests`
+  passed (`10` tests).
+- `jq empty minato/tutorials/synthetic_spectra_ravel_bridge.ipynb` passed.
+- Import smoke check for `TextAtmosphereGrid.recognised_formats()` passed.
+
 ## 2026-06-14 - Generic synthetic-spectrum rendering API
 
 Scope:

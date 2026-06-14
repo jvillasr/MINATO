@@ -1,9 +1,9 @@
 # Synthetic Spectra Design Note
 
 `minato.synthetic` provides generic, in-memory primitives for constructing
-synthetic spectra before passing them to tools such as RAVEL. The core package
-does not know about AP18, PoWR, MIST, SDSS, BOSS filenames, or paper-specific
-catalogue layouts.
+synthetic spectra before passing them to tools such as RAVEL. The core renderer
+does not encode AP18/PoWR routing, MIST age priors, SDSS paths, BOSS noise
+models, or paper-specific catalogue layouts.
 
 ## Generic Core
 
@@ -20,6 +20,36 @@ catalogue layouts.
   shifting, component weighting, binary summation, and seeded noise injection.
 - Outputs are `Spectrum` objects first. File writers such as
   `write_ravel_txt` are bridges, not the primary API.
+- `TextAtmosphereGrid` is a small convenience adapter for users with folders of
+  text atmosphere models. It can scan directories using the MINATO convention
+  (`teff25000_logg4.00.txt`) or common PoWR, TLUSTY, and FASTWIND-style
+  filename patterns, and it supports regex/parser/index fallbacks for local
+  naming schemes.
+
+## Text Atmosphere Grids
+
+The simplest path is:
+
+```python
+from minato.synthetic import TextAtmosphereGrid
+
+grid = TextAtmosphereGrid.from_directory("models/", format="auto")
+```
+
+If auto-detection fails, users can:
+
+- pass `format="powr"`, `format="tlusty"`, or `format="fastwind"`;
+- pass `filename_pattern=...` with named groups such as `teff`, `teff_kk`,
+  `logg`, `logg10`, or `logg100`;
+- pass a parser function that returns `{"teff": ..., "logg": ...}`;
+- run `TextAtmosphereGrid.write_index_template(...)`, fill in the CSV, and
+  load it with `TextAtmosphereGrid.from_index(...)`;
+- symlink or rename files to the MINATO convention, for example
+  `teff25000_logg4.00.txt`.
+
+This adapter recognises model-grid files and loads wavelength/flux columns. It
+does not decide whether PoWR, TLUSTY, FASTWIND, or any other grid is physically
+appropriate for a given star.
 
 ## Left Outside The Core
 
