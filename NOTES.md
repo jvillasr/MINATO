@@ -1,5 +1,25 @@
 # MINATO Notes
 
+## 2026-06-14 - Fallback atmosphere-grid routing
+
+Scope:
+- Added `FallbackAtmosphereGrid` for composing multiple user-supplied
+  atmosphere backends in priority order.
+- A backend can decline a star by raising `LookupError`, for example when its
+  nearest `(teff, logg)` node exceeds user-set tolerances; MINATO then tries the
+  next backend.
+- Returned spectra record `selected_grid` metadata so downstream renders know
+  which grid family was actually used.
+- This remains explicit user policy: MINATO does not choose PoWR, TLUSTY,
+  FASTWIND, or any other model family by default.
+
+Validation:
+- `PYTHONDONTWRITEBYTECODE=1 ./.venv/bin/python -m unittest discover -s tests`
+  passed (`13` tests).
+- `jq empty minato/tutorials/synthetic_spectra_ravel_bridge.ipynb` passed.
+- Import smoke check for `FallbackAtmosphereGrid` and `TextAtmosphereGrid`
+  passed.
+
 ## 2026-06-14 - Text atmosphere-grid adapter
 
 Scope:

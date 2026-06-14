@@ -1,6 +1,6 @@
 """Generic synthetic-spectrum rendering tools for MINATO."""
 
-from .grids import AtmosphereGridNode, TextAtmosphereGrid
+from .grids import AtmosphereGridNode, FallbackAtmosphereGrid, TextAtmosphereGrid
 from .isochrones import IsochroneBank
 from .models import (
     AtmosphereGrid,
@@ -27,6 +27,7 @@ __all__ = [
     "AtmosphereGrid",
     "AtmosphereGridNode",
     "BinarySystem",
+    "FallbackAtmosphereGrid",
     "IsochroneBank",
     "IsochronePoint",
     "IsochroneProvider",

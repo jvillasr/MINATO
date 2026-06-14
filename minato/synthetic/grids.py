@@ -324,6 +324,54 @@ class TextAtmosphereGrid:
         )
 
 
+class FallbackAtmosphereGrid:
+    """
+    Try multiple atmosphere-grid backends in user-defined priority order.
+
+    Each backend must implement ``get_spectrum(star)``. A backend may decline a
+    star by raising ``LookupError``; the next backend is then tried. Other
+    exceptions propagate because they usually indicate a malformed grid or file.
+    """
+
+    def __init__(self, grids: Iterable[tuple[str, Any]]):
+        self.grids = tuple(grids)
+        if not self.grids:
+            raise ValueError("FallbackAtmosphereGrid needs at least one named backend")
+        for name, grid in self.grids:
+            if not name:
+                raise ValueError("fallback grid names must be non-empty")
+            if not hasattr(grid, "get_spectrum"):
+                raise TypeError(f"fallback grid {name!r} must define get_spectrum(star)")
+
+    def get_spectrum(self, star: Star) -> Spectrum:
+        """Return the first spectrum whose backend accepts ``star``."""
+
+        failures = []
+        for index, (name, grid) in enumerate(self.grids):
+            try:
+                spectrum = grid.get_spectrum(star)
+            except LookupError as exc:
+                failures.append(f"{name}: {exc}")
+                continue
+            metadata = dict(spectrum.metadata)
+            metadata["selected_grid"] = {
+                "name": name,
+                "priority_index": index,
+                "backend": type(grid).__name__,
+            }
+            return Spectrum(
+                spectrum.wavelength.copy(),
+                spectrum.flux.copy(),
+                error=None if spectrum.error is None else spectrum.error.copy(),
+                metadata=metadata,
+            )
+
+        detail = " | ".join(failures) if failures else "no grid attempted"
+        raise LookupError(
+            f"No atmosphere grid matched Teff={star.teff}, logg={star.logg}. {detail}"
+        )
+
+
 def _find_model_files(
     root: Path,
     *,

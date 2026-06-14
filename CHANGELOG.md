@@ -1,5 +1,6 @@
 ## [Unreleased]
 ### Added
+* [2026-06-14] `FallbackAtmosphereGrid` for user-defined priority routing across overlapping or partially covered atmosphere grids.
 * [2026-06-14] `TextAtmosphereGrid` for loading text-file atmosphere grids from directories, explicit indexes, custom parsers, or recognised MINATO/PoWR/TLUSTY/FASTWIND-style filenames.
 * [2026-06-14] Generic `minato.synthetic` API for in-memory single-star and binary synthetic-spectrum rendering, optional isochrone-derived stellar parameters, seeded noise, and RAVEL-compatible text output.
 * [2026-06-11] `binary_population.run_mcmc` can now fit `f_bin`, `pi`, `kappa`, and `eta` together via the opt-in `parameter_names` interface, while retaining the previous one-parameter `f_bin` default.

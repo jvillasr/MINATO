@@ -51,6 +51,32 @@ This adapter recognises model-grid files and loads wavelength/flux columns. It
 does not decide whether PoWR, TLUSTY, FASTWIND, or any other grid is physically
 appropriate for a given star.
 
+For overlapping or partial grid coverage, compose several user-supplied grids
+with explicit priority:
+
+```python
+from minato.synthetic import FallbackAtmosphereGrid, TextAtmosphereGrid
+
+powr = TextAtmosphereGrid.from_directory(
+    "powr_models/",
+    format="powr",
+    max_teff_delta=800,
+    max_logg_delta=0.25,
+)
+tlusty = TextAtmosphereGrid.from_directory(
+    "tlusty_models/",
+    format="tlusty",
+    max_teff_delta=1000,
+    max_logg_delta=0.25,
+)
+grid = FallbackAtmosphereGrid([("powr", powr), ("tlusty", tlusty)])
+```
+
+MINATO tries each backend in order and falls through only when a backend raises
+`LookupError`, for example because no node is close enough in `(teff, logg)`.
+The user sets the order and tolerance values, and the returned spectrum records
+the selected grid in metadata.
+
 ## Left Outside The Core
 
 - AP18/PoWR selection rules and fallback thresholds.

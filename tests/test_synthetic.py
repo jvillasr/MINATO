@@ -6,6 +6,7 @@ import numpy as np
 
 from minato.synthetic import (
     BinarySystem,
+    FallbackAtmosphereGrid,
     ObservationModel,
     Spectrum,
     Star,
@@ -191,6 +192,66 @@ class TextAtmosphereGridTests(unittest.TestCase):
 
             self.assertAlmostEqual(spectrum.metadata["atmosphere_node"]["teff"], 28_000.0)
             self.assertAlmostEqual(spectrum.metadata["atmosphere_node"]["logg"], 4.1)
+
+
+class FallbackAtmosphereGridTests(unittest.TestCase):
+    def _write_model(self, directory, name, depth):
+        path = Path(directory) / name
+        wavelength = np.array([4999.0, 5000.0, 5001.0])
+        flux = np.array([1.0, 1.0 - depth, 1.0])
+        np.savetxt(path, np.column_stack([wavelength, flux]))
+        return path
+
+    def test_fallback_uses_first_grid_when_node_is_acceptable(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            first_dir = Path(directory) / "first"
+            second_dir = Path(directory) / "second"
+            first_dir.mkdir()
+            second_dir.mkdir()
+            self._write_model(first_dir, "teff17000_logg4.00.txt", depth=0.1)
+            self._write_model(second_dir, "teff17000_logg4.00.txt", depth=0.2)
+
+            first = TextAtmosphereGrid.from_directory(first_dir, max_logg_delta=0.2)
+            second = TextAtmosphereGrid.from_directory(second_dir, max_logg_delta=0.2)
+            grid = FallbackAtmosphereGrid([("first", first), ("second", second)])
+            spectrum = grid.get_spectrum(Star(teff=17_000, logg=4.05))
+
+            self.assertEqual(spectrum.metadata["selected_grid"]["name"], "first")
+            np.testing.assert_allclose(spectrum.flux, [1.0, 0.9, 1.0])
+
+    def test_fallback_uses_later_grid_when_first_grid_misses_logg(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            powr_dir = Path(directory) / "powr"
+            tlusty_dir = Path(directory) / "tlusty"
+            powr_dir.mkdir()
+            tlusty_dir.mkdir()
+            self._write_model(powr_dir, "teff17000_logg3.20.txt", depth=0.1)
+            self._write_model(tlusty_dir, "teff17000_logg4.20.txt", depth=0.2)
+
+            powr = TextAtmosphereGrid.from_directory(powr_dir, max_logg_delta=0.25)
+            tlusty = TextAtmosphereGrid.from_directory(tlusty_dir, max_logg_delta=0.25)
+            grid = FallbackAtmosphereGrid([("powr", powr), ("tlusty", tlusty)])
+            spectrum = grid.get_spectrum(Star(teff=17_000, logg=4.2))
+
+            self.assertEqual(spectrum.metadata["selected_grid"]["name"], "tlusty")
+            self.assertAlmostEqual(spectrum.metadata["atmosphere_node"]["logg"], 4.2)
+            np.testing.assert_allclose(spectrum.flux, [1.0, 0.8, 1.0])
+
+    def test_fallback_reports_all_lookup_failures(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            first_dir = Path(directory) / "first"
+            second_dir = Path(directory) / "second"
+            first_dir.mkdir()
+            second_dir.mkdir()
+            self._write_model(first_dir, "teff15000_logg3.00.txt", depth=0.1)
+            self._write_model(second_dir, "teff25000_logg5.00.txt", depth=0.2)
+
+            first = TextAtmosphereGrid.from_directory(first_dir, max_teff_delta=500)
+            second = TextAtmosphereGrid.from_directory(second_dir, max_teff_delta=500)
+            grid = FallbackAtmosphereGrid([("first", first), ("second", second)])
+
+            with self.assertRaisesRegex(LookupError, "first: .*second:"):
+                grid.get_spectrum(Star(teff=20_000, logg=4.0))
 
 
 if __name__ == "__main__":
