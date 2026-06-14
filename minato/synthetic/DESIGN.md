@@ -15,6 +15,10 @@ models, or paper-specific catalogue layouts.
   `mass_init`, `teff`, `logg`, and `radius`, while `Star.from_mass` and
   `BinarySystem.from_masses` accept any object implementing the same
   interpolation interface.
+- `IsochroneAgeSampler` is an explicit population-to-spectrum helper for
+  selecting a coeval age before calling `Star.from_mass` or
+  `BinarySystem.from_masses`. It can validate fixed ages, sample uniformly from
+  valid isochrone slices, or sample with user-provided weights.
 - Rendering is deliberately composed from small steps: resampling to a
   log-wavelength grid, rotational broadening, instrumental broadening, RV
   shifting, component weighting, binary summation, and seeded noise injection.
@@ -77,10 +81,57 @@ MINATO tries each backend in order and falls through only when a backend raises
 The user sets the order and tolerance values, and the returned spectrum records
 the selected grid in metadata.
 
+## Isochrone Age Sampling
+
+Age selection is a separate step from binary-orbit drawing and spectrum
+rendering. By default, MINATO does not impose a temperature, gravity, radius, or
+evolutionary-state prior:
+
+```python
+from minato.synthetic import IsochroneAgeSampler
+
+sampler = IsochroneAgeSampler()
+log_age, age_meta = sampler.sample(isochrone_bank=iso, m1=8.0, m2=5.6, rng=rng)
+```
+
+Users can define generic main-sequence cuts with `StellarConstraints`:
+
+```python
+from minato.synthetic import IsochroneAgeSampler, StellarConstraints
+
+main_sequence = IsochroneAgeSampler(
+    primary=StellarConstraints(logg_min=3.5),
+    secondary=StellarConstraints(logg_min=3.5),
+)
+log_age, age_meta = main_sequence.sample(iso, m1=8.0, m2=5.6, rng=rng)
+```
+
+Hot-star or OB-specific policies should be passed explicitly by the project
+that needs them:
+
+```python
+from minato.synthetic import BinarySystem
+from minato.synthetic import IsochroneAgeSampler, LoggSkewWeight, StellarConstraints
+
+hot_star = IsochroneAgeSampler(
+    primary=StellarConstraints(teff_min=10_000.0, logg_min=3.0),
+    secondary=StellarConstraints(logg_min=3.0, logg_max=5.5),
+    secondary_low_mass_teff_max={"mass_max": 8.0, "teff_max": 20_000.0},
+    require_primary_logg_lte_secondary=True,
+    weight=LoggSkewWeight(mu=4.0, sigma_lo=0.25, sigma_hi=0.12),
+)
+log_age, age_meta = hot_star.sample(iso, m1=19.28, m2=19.05, rng=rng)
+system = BinarySystem.from_masses(19.28, 19.05 / 19.28, log_age, iso)
+```
+
+The returned metadata records the selected age, the number of valid ages, the
+constraints used, and the selected primary/secondary `teff`, `logg`, and
+`radius`.
+
 ## Left Outside The Core
 
 - AP18/PoWR selection rules and fallback thresholds.
-- MIST-specific coeval-age priors and logg/temperature guards.
+- MIST-specific coeval-age priors and paper-specific logg/temperature guards.
 - BOSS or SDSS S/N distributions, apparent-magnitude scaling, filenames, and
   FITS header policy.
 - Batch HDF5/FITS production for a specific survey or paper.

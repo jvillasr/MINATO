@@ -7,9 +7,14 @@ import numpy as np
 from minato.synthetic import (
     BinarySystem,
     FallbackAtmosphereGrid,
+    IsochroneAgeSampler,
+    IsochroneAgeSamplingError,
+    IsochroneBank,
+    LoggSkewWeight,
     ObservationModel,
     Spectrum,
     Star,
+    StellarConstraints,
     TextAtmosphereGrid,
     doppler_shift,
     render_binary,
@@ -29,6 +34,203 @@ class ToyAtmosphereGrid:
 
 def gaussian_absorption(wavelength, centre, depth=0.4, width=0.25):
     return 1.0 - depth * np.exp(-0.5 * ((wavelength - centre) / width) ** 2)
+
+
+def write_isochrone(directory, log_age, masses, teff, logg, radius):
+    path = Path(directory) / f"toy_logage{log_age:.2f}.csv"
+    table = np.column_stack([masses, teff, logg, radius])
+    np.savetxt(
+        path,
+        table,
+        delimiter=",",
+        header="mass_init,teff,logg,radius",
+        comments="",
+    )
+    return path
+
+
+def make_age_sampling_bank(directory):
+    write_isochrone(
+        directory,
+        6.80,
+        [5.0, 10.0, 20.0, 25.0],
+        [18_000.0, 24_000.0, 34_000.0, 36_000.0],
+        [4.35, 4.25, 4.10, 3.95],
+        [3.0, 4.0, 7.0, 8.0],
+    )
+    write_isochrone(
+        directory,
+        6.90,
+        [15.0, 20.0, 25.0],
+        [28_000.0, 32_000.0, 34_000.0],
+        [4.15, 3.95, 3.70],
+        [5.0, 8.0, 10.0],
+    )
+    write_isochrone(
+        directory,
+        7.00,
+        [5.0, 10.0, 20.0, 25.0],
+        [7_000.0, 8_000.0, 9_000.0, 9_500.0],
+        [2.80, 2.70, 2.50, 2.30],
+        [20.0, 25.0, 35.0, 40.0],
+    )
+    write_isochrone(
+        directory,
+        7.10,
+        [5.0, 10.0, 20.0, 25.0],
+        [16_000.0, 18_000.0, 22_000.0, 24_000.0],
+        [4.20, 4.05, 3.85, 3.60],
+        [4.0, 5.0, 9.0, 11.0],
+    )
+    return IsochroneBank(directory)
+
+
+class IsochroneAgeSamplerTests(unittest.TestCase):
+    def test_fixed_age_reproduces_star_from_mass_behaviour(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            bank = make_age_sampling_bank(directory)
+            sampler = IsochroneAgeSampler.fixed(6.80)
+
+            log_age, metadata = sampler.sample(bank, m1=10.0)
+            star = Star.from_mass(10.0, 6.80, bank)
+
+            self.assertAlmostEqual(log_age, 6.80)
+            self.assertEqual(metadata["selection_mode"], "fixed")
+            self.assertEqual(metadata["valid_age_count"], 1)
+            self.assertAlmostEqual(metadata["selected_primary"]["teff"], star.teff)
+            self.assertAlmostEqual(metadata["selected_primary"]["logg"], star.logg)
+            self.assertAlmostEqual(metadata["selected_primary"]["radius"], star.radius)
+
+    def test_constrained_sampler_rejects_invalid_age_slices(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            bank = make_age_sampling_bank(directory)
+            sampler = IsochroneAgeSampler(
+                primary=StellarConstraints(teff_min=20_000.0, logg_min=3.0)
+            )
+
+            log_age, metadata = sampler.sample(
+                bank,
+                m1=10.0,
+                rng=np.random.default_rng(123),
+            )
+
+            self.assertAlmostEqual(log_age, 6.80)
+            self.assertEqual(metadata["valid_age_count"], 1)
+            self.assertEqual(metadata["valid_log_ages"], [6.80])
+            self.assertEqual(metadata["rejection_counts"]["primary interpolation failed"], 1)
+            self.assertGreaterEqual(metadata["rejection_counts"]["primary constraints failed"], 2)
+
+    def test_hot_star_config_keeps_high_mass_binary_hot(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            bank = make_age_sampling_bank(directory)
+            sampler = IsochroneAgeSampler(
+                primary=StellarConstraints(teff_min=10_000.0, logg_min=3.0),
+                secondary=StellarConstraints(logg_min=3.0, logg_max=5.5),
+                secondary_low_mass_teff_max={"mass_max": 8.0, "teff_max": 20_000.0},
+                require_primary_logg_lte_secondary=True,
+                weight=LoggSkewWeight(mu=4.0, sigma_lo=0.25, sigma_hi=0.12),
+            )
+
+            log_age, metadata = sampler.sample(
+                bank,
+                m1=19.28,
+                m2=19.05,
+                rng=np.random.default_rng(123),
+            )
+
+            self.assertNotEqual(log_age, 7.00)
+            self.assertGreater(metadata["selected_primary"]["teff"], 10_000.0)
+            self.assertGreater(metadata["selected_secondary"]["teff"], 10_000.0)
+            self.assertGreaterEqual(metadata["selected_primary"]["logg"], 3.0)
+            self.assertGreaterEqual(metadata["selected_secondary"]["logg"], 3.0)
+            self.assertLessEqual(
+                metadata["selected_primary"]["logg"],
+                metadata["selected_secondary"]["logg"],
+            )
+
+    def test_failure_mode_raises_when_no_age_is_valid(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            bank = make_age_sampling_bank(directory)
+            sampler = IsochroneAgeSampler(
+                primary=StellarConstraints(teff_min=50_000.0),
+                on_failure="raise",
+            )
+
+            with self.assertRaisesRegex(
+                IsochroneAgeSamplingError,
+                "No valid isochrone age found",
+            ):
+                sampler.sample(bank, m1=10.0, rng=np.random.default_rng(123))
+
+    def test_sampling_is_deterministic_with_fixed_rng_seed(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            bank = make_age_sampling_bank(directory)
+            sampler = IsochroneAgeSampler(
+                primary=StellarConstraints(logg_min=3.0),
+                weight=LoggSkewWeight(mu=4.0, sigma_lo=0.5, sigma_hi=0.5),
+            )
+
+            first_age, first_metadata = sampler.sample(
+                bank,
+                m1=20.0,
+                rng=np.random.default_rng(7),
+            )
+            second_age, second_metadata = sampler.sample(
+                bank,
+                m1=20.0,
+                rng=np.random.default_rng(7),
+            )
+
+            self.assertAlmostEqual(first_age, second_age)
+            self.assertEqual(first_metadata["valid_log_ages"], second_metadata["valid_log_ages"])
+
+    def test_callable_weight_can_select_from_valid_ages(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            bank = make_age_sampling_bank(directory)
+
+            def prefer_oldest(candidate):
+                return 1.0 if np.isclose(candidate.log_age, 7.10) else 0.0
+
+            sampler = IsochroneAgeSampler(
+                primary=StellarConstraints(logg_min=3.0),
+                weight=prefer_oldest,
+            )
+
+            log_age, metadata = sampler.sample(
+                bank,
+                m1=20.0,
+                rng=np.random.default_rng(123),
+            )
+
+            self.assertAlmostEqual(log_age, 7.10)
+            self.assertEqual(metadata["selection_mode"], "weighted")
+
+    def test_binary_convenience_method_uses_shared_sampled_age(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            bank = make_age_sampling_bank(directory)
+            sampler = IsochroneAgeSampler(
+                primary=StellarConstraints(teff_min=10_000.0, logg_min=3.0),
+                secondary=StellarConstraints(logg_min=3.0),
+            )
+
+            system = BinarySystem.from_masses_with_age_sampler(
+                19.28,
+                19.05 / 19.28,
+                bank,
+                sampler,
+                rng=np.random.default_rng(123),
+            )
+
+            self.assertAlmostEqual(
+                system.primary.metadata["log_age"],
+                system.secondary.metadata["log_age"],
+            )
+            self.assertAlmostEqual(
+                system.metadata["log_age"],
+                system.metadata["age_sampling"]["selected_age"],
+            )
+            self.assertEqual(system.primary.label, "primary")
+            self.assertEqual(system.secondary.label, "secondary")
 
 
 class SyntheticRenderingTests(unittest.TestCase):

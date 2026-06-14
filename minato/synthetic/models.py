@@ -165,6 +165,51 @@ class BinarySystem:
             next_metadata.update(metadata)
         return cls(primary=primary, secondary=secondary, metadata=next_metadata)
 
+    @classmethod
+    def from_masses_with_age_sampler(
+        cls,
+        m1: float,
+        q: float,
+        isochrone_bank: "IsochroneProvider",
+        age_sampler: Any,
+        *,
+        rng: np.random.Generator | None = None,
+        rv1: float = 0.0,
+        rv2: float = 0.0,
+        vsini1: float = 0.0,
+        vsini2: float = 0.0,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> "BinarySystem":
+        """Create a binary after explicitly sampling one shared isochrone age."""
+
+        if m1 <= 0:
+            raise ValueError("m1 must be positive")
+        if q <= 0:
+            raise ValueError("q must be positive")
+        m2 = float(m1) * float(q)
+        log_age, age_metadata = age_sampler.sample(
+            isochrone_bank=isochrone_bank,
+            m1=m1,
+            m2=m2,
+            rng=rng,
+        )
+        if log_age is None:
+            raise ValueError("age_sampler did not return a log_age")
+        next_metadata = {"age_sampling": age_metadata}
+        if metadata:
+            next_metadata.update(metadata)
+        return cls.from_masses(
+            m1,
+            q,
+            float(log_age),
+            isochrone_bank,
+            rv1=rv1,
+            rv2=rv2,
+            vsini1=vsini1,
+            vsini2=vsini2,
+            metadata=next_metadata,
+        )
+
 
 @dataclass
 class ObservationModel:

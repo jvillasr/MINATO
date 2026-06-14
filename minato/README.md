@@ -13,3 +13,4 @@
 ### Synthetic spectra
 1. create_synth_spectra
 2. synthetic_spectra_ravel_bridge
+3. isochrone_age_sampling

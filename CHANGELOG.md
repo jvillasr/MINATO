@@ -1,5 +1,6 @@
 ## [Unreleased]
 ### Added
+* [2026-06-14] `IsochroneAgeSampler`, `StellarConstraints`, and `LoggSkewWeight` for explicit coeval isochrone-age selection before synthetic-spectrum rendering.
 * [2026-06-14] `FallbackAtmosphereGrid` for user-defined priority routing across overlapping or partially covered atmosphere grids.
 * [2026-06-14] `TextAtmosphereGrid` for loading text-file atmosphere grids from directories, explicit indexes, custom parsers, or recognised MINATO/PoWR/TLUSTY/FASTWIND-style filenames.
 * [2026-06-14] Generic `minato.synthetic` API for in-memory single-star and binary synthetic-spectrum rendering, optional isochrone-derived stellar parameters, seeded noise, and RAVEL-compatible text output.
