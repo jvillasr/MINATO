@@ -1,5 +1,23 @@
 # MINATO Notes
 
+## 2026-06-14 - Generic synthetic-spectrum rendering API
+
+Scope:
+- Added `minato.synthetic` with in-memory `Spectrum`, `Star`,
+  `BinarySystem`, and `ObservationModel` containers.
+- Atmosphere grids are backend interfaces via `get_spectrum(star)`; AP18,
+  PoWR, MIST, SDSS filenames, and BOSS noise policies remain outside the core.
+- Added optional CSV-bank isochrone interpolation plus `Star.from_mass` and
+  `BinarySystem.from_masses` conveniences.
+- Added Doppler shifting, log-grid resampling, rotational/instrumental
+  broadening, flux-weighted binary combination, seeded noise injection, and
+  `write_ravel_txt` for RAVEL-compatible text output.
+- Added `minato/tutorials/synthetic_spectra_ravel_bridge.ipynb` and
+  `minato/synthetic/DESIGN.md`.
+
+Validation:
+- `./.venv/bin/python -m unittest discover -s tests` passed (`4` tests).
+
 ## 2026-06-11 - Four-parameter binary-population MCMC support
 
 Scope:

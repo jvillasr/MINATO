@@ -9,3 +9,6 @@
 1. ravel_tutorial/ravel_SB1_rvs
 2. ravel_tutorial/ravel_SB2_rvs
 3. ravel_tutorial/ravel_large_scale_batches
+
+### Synthetic spectra
+1. synthetic_spectra_ravel_bridge
