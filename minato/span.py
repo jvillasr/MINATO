@@ -138,8 +138,13 @@ class AtmFit:
             pass   
         
         else:
-            # Rescale flux of the disentangled specrta to new light ratio 
-            fluA, fluB = self.rescale_flux(self.lr)
+            # Keep observations in their original disentangling scale for
+            # likelihood ranking.  Rescaling observations also rescales their
+            # noise, so model spectra are instead diluted to the same scale.
+            fluA, fluB = self.get_flux()
+            lrat = getattr(self, 'lr', None)
+            if lrat is not None:
+                self.lrat = lrat
 
             # slice data to regions for chi^2 computation
             dst_A_w_slc, dst_A_f_slc = self.slicedata(self.wavA, fluA, self.user_dicA)
@@ -150,6 +155,11 @@ class AtmFit:
             # apply He/H ratio to the sliced model of star A
             if self.He2H:
                 mod_A_f_slc = self.He2H_ratio(mod_A_w_slc, mod_A_f_slc, self.He_ini, self.He, self.user_dicA, join=True, plot=False, model=modelA.replace(self.modelsA_path, ''))
+
+            if lrat is not None:
+                mod_A_f_slc = self.model_flux_to_initial_light_ratio(mod_A_f_slc, 'A', lrat)
+                if self.binary:
+                    mod_B_f_slc = self.model_flux_to_initial_light_ratio(mod_B_f_slc, 'B', lrat)
 
             # crop nebular emission from disentangled spectrum and model of star B
             if self.crop_nebular:
@@ -265,7 +275,7 @@ class AtmFit:
         light ratio while considering an initial light ratio. The new flux values are
         calculated using the given light ratio and initial light ratio.
 
-        :param lrat:  Desired light ratio for rescaling.
+        :param lrat:  Desired secondary light fraction for rescaling.
                       Type: float
         :param lrat0: Initial light ratio with which the input spectra have been scaled.
                       Default: 0.3
@@ -289,6 +299,42 @@ class AtmFit:
         flux_new_A = (fluxA -1)*((1-ratio0)/(1-ratio1)) + 1
         flux_new_B = (fluxB -1)*(ratio0/ratio1) + 1
         return flux_new_A, flux_new_B
+
+    def model_flux_to_initial_light_ratio(self, model_flux, component, lrat, lrat0=None):
+        """
+        Dilute an intrinsic model spectrum to the original disentangling light ratio.
+
+        ``lrat`` is the secondary light fraction used by ``rescale_flux`` and by the
+        fitted grid.  When fitting across ``lrat`` values, the likelihood must compare
+        all candidates in a common flux/noise scale: the observed disentangled spectra
+        stay at their initial light ratio, and the intrinsic model fluxes are scaled
+        into that same reference frame.
+
+        :param model_flux: Intrinsic normalised model flux.
+                           Type: numpy array or list of floats
+        :param component: Binary component identifier, either ``'A'`` or ``'B'``.
+                          Type: str
+        :param lrat: Secondary light fraction of the model candidate.
+                     Type: float
+        :param lrat0: Initial secondary light fraction of the disentangled spectra.
+                      Defaults to ``self.lrat0`` when available, otherwise 0.3.
+                      Type: float, optional
+
+        :return: Model flux diluted to the initial light-ratio scale.
+                 Type: numpy array of floats
+        """
+        if lrat0 is None:
+            ratio0 = self.lrat0 if self.lrat0 is not None else 0.3
+        else:
+            ratio0 = lrat0
+
+        component = component.upper()
+        model_flux = np.asarray(model_flux)
+        if component == 'A':
+            return 1 + (model_flux - 1)*((1-lrat)/(1-ratio0))
+        if component == 'B':
+            return 1 + (model_flux - 1)*(lrat/ratio0)
+        raise ValueError("component must be 'A' or 'B'")
 
     def slicedata(self, x_data, y_data, dictionary):
         """
@@ -646,4 +692,3 @@ class AtmFit:
         fluxA = specA[1]
         fluxB = specB[1]
         return fluxA, fluxB
-
