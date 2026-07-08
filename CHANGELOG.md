@@ -34,6 +34,7 @@
 * The SB1 and SB2 `ravel` tutorials now include an upfront note on setting `XLA_FLAGS` before importing `minato.ravel` on shared CPU servers.
 
 ### Fixed
+* [2026-07-08] `AtmFit` light-ratio grid scoring now keeps observations in the original disentangling scale and dilutes models instead, avoiding biased cross-`lr` likelihood rankings.
 * [2026-05-05] SB1 fit plots no longer swap epoch and line axes when `n_epochs == n_lines`; plots now draw a coherent high-likelihood posterior sample.
 * [2026-05-05] Probabilistic SB1/Na/SB2 interpolation windows now drop non-finite or non-positive-error points before interpolation, avoiding red/NIR collapse from bad pixels.
 * [2026-05-05] SB1 probabilistic fitting now samples and plots only the width parameters used by the selected profile family, avoiding unused Gaussian/Lorentzian width dimensions in corner plots.
