@@ -348,6 +348,28 @@ class BinaryPopulation:
         masses = ((u * A) + Mmin**alpha) ** (1.0 / alpha)
         return masses
 
+    @staticmethod
+    def _inverse_powerlaw_unit(u, lower, upper, power):
+        """
+        Transform unit-uniform ranks into samples from p(x) proportional to x**power.
+        """
+        u = np.asarray(u, dtype=float)
+        lower = float(lower)
+        upper = float(upper)
+        power = float(power)
+        if not (0.0 < lower < upper):
+            raise ValueError(f"Expected 0 < lower < upper, got {(lower, upper)}")
+        if abs(power + 1.0) < 1e-10:
+            return lower * np.power(upper / lower, u)
+        alpha = power + 1.0
+        return (u * (upper**alpha - lower**alpha) + lower**alpha) ** (1.0 / alpha)
+
+    def draw_M1_from_unit(self, u):
+        """
+        Deterministically transform unit-uniform ranks into primary masses.
+        """
+        return self._inverse_powerlaw_unit(u, self.M1_min, self.M1_max, self.gamma)
+
     def sample_logP(self, N):
         """
         Sample x = log10(P/day) from the configured period power law.
@@ -392,6 +414,48 @@ class BinaryPopulation:
             return (
                 u * (logP_max**alpha - logP_min**alpha) + logP_min**alpha
             ) ** (1.0 / alpha)
+
+        raise ValueError(
+            f"Unknown logP_powerlaw_mode={mode!r}; use 'shifted' or 'direct'."
+        )
+
+    def draw_logP_from_unit(self, u, pi=None):
+        """
+        Deterministically transform unit-uniform ranks into log10(P/day).
+
+        This uses the same distribution family as ``sample_logP`` but reuses
+        caller-provided ranks, which is useful for common-random-number
+        likelihood evaluations.
+        """
+        if pi is None:
+            pi = self.pi
+        pi = float(pi)
+        logP_min = float(self.logP_min)
+        logP_max = float(self.logP_max)
+        mode = getattr(self, "logP_powerlaw_mode", "shifted")
+        u = np.asarray(u, dtype=float)
+
+        if logP_min >= logP_max:
+            raise ValueError("logP_min must be < logP_max.")
+
+        if mode == "shifted":
+            if pi <= -1.0:
+                raise ValueError(
+                    f"pi={pi} <= -1 is not integrable with logP_min={logP_min} at y=0. "
+                    "Use pi>-1 or set logP_powerlaw_mode='direct' with logP_min > 0."
+                )
+            y_max = logP_max - logP_min
+            if abs(pi) < 1e-9:
+                return logP_min + y_max * u
+            return logP_min + y_max * np.power(u, 1.0 / (pi + 1.0))
+
+        if mode == "direct":
+            if logP_min <= 0.0:
+                raise ValueError(
+                    "logP_powerlaw_mode='direct' requires logP_min > 0 so "
+                    "p(logP) proportional to logP^pi is well defined."
+                )
+            return self._inverse_powerlaw_unit(u, logP_min, logP_max, pi)
 
         raise ValueError(
             f"Unknown logP_powerlaw_mode={mode!r}; use 'shifted' or 'direct'."
@@ -453,6 +517,34 @@ class BinaryPopulation:
             e[np.abs(e) < tol] = 0.0
         return e
 
+    def draw_e_from_unit(self, u, P_array, eta=None, tol=1e-5):
+        """
+        Deterministically transform unit-uniform ranks into eccentricities.
+
+        The period-dependent eccentricity cap and P < 2 day circularisation are
+        the same as in ``sample_ecc_vectorized``.
+        """
+        if eta is None:
+            eta = self.eta
+        eta = float(eta)
+        if eta <= -1.0:
+            raise ValueError("eta <= -1 is not supported by this sampler.")
+
+        P = np.asarray(P_array, dtype=float)
+        u = np.asarray(u, dtype=float)
+        if u.shape != P.shape:
+            raise ValueError("u and P_array must have the same shape.")
+
+        e_cap = np.full(P.shape, float(self.e_max), dtype=float)
+        if getattr(self, "use_period_ecc_cap", True):
+            e_cap = np.minimum(e_cap, self.period_ecc_cap(P))
+        e_cap = np.clip(e_cap, 0.0, 0.999999)
+        e = e_cap * np.power(u, 1.0 / (eta + 1.0))
+        e[P < 2.0] = 0.0
+        if tol is not None:
+            e[np.abs(e) < tol] = 0.0
+        return e
+
     def sample_q(self, N):
         """
         Sample mass ratio q in [q_min, q_max], possibly with a mild power law q^kappa.
@@ -472,6 +564,20 @@ class BinaryPopulation:
         u = np.random.rand(N)
         qvals = ((u * A) + Qmin_alpha) ** (1.0 / alpha)
         return qvals
+
+    def draw_q_from_unit(self, u, kappa=None):
+        """
+        Deterministically transform unit-uniform ranks into mass ratios.
+        """
+        if kappa is None:
+            kappa = self.kappa
+        kappa = float(kappa)
+        q_min = float(self.q_min)
+        q_max = float(self.q_max)
+        u = np.asarray(u, dtype=float)
+        if abs(kappa) < 1e-3:
+            return q_min + u * (q_max - q_min)
+        return self._inverse_powerlaw_unit(u, q_min, q_max, kappa)
 
     def sample_orbital_extras_vectorized(self, M1_array, logP_array, q_array, e_array,
                                          gamma_range=None, inc_mode="random"):

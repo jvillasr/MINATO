@@ -1,5 +1,11 @@
 ## [Unreleased]
 ### Added
+* [2026-06-21] Experimental `binary_population` mixture/common-random-number
+  likelihood for high-`N_obs` `dRV_max` inference. The new
+  `MixtureCRNLikelihood` and `run_mixture_crn_mcmc` APIs model
+  `p_model = (1 - f_bin) p_single + f_bin p_binary(pi, kappa, eta)` using
+  fixed random banks, making repeated likelihood calls deterministic and
+  treating `f_bin` as a continuous mixture weight.
 * [2026-06-14] `IsochroneAgeSampler`, `StellarConstraints`, and `LoggSkewWeight` for explicit coeval isochrone-age selection before synthetic-spectrum rendering.
 * [2026-06-14] `FallbackAtmosphereGrid` for user-defined priority routing across overlapping or partially covered atmosphere grids.
 * [2026-06-14] `TextAtmosphereGrid` for loading text-file atmosphere grids from directories, explicit indexes, custom parsers, or recognised MINATO/PoWR/TLUSTY/FASTWIND-style filenames.
@@ -20,6 +26,15 @@
 * Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
 
 ### Changed
+* [2026-06-16] `binary_population` likelihood evaluation now has an internal
+  fast path for real-cadence `summary_only=True` calls that need only primary
+  `dRV_max`. The path pre-packs cadence/error templates, skips DataFrame
+  construction, avoids unused secondary-RV and `sigma_d` summaries, and caches
+  fixed likelihood state (`dRV_max` histogram bins/counts and normalization)
+  inside the MCMC log-probability callable. `run_mcmc` also accepts an optional
+  `moves` passthrough for sampler-tuning checks. Set
+  `MINATO_BINARY_POPULATION_DISABLE_FAST_SUMMARY=1` to force the legacy path
+  for benchmark comparisons.
 * [2026-06-14] Replaced the legacy `create_synth_spectra.ipynb` notebook-local renderer with a runnable `minato.synthetic` workflow that writes isolated tutorial outputs.
 * [2026-05-05] P117 four-fit validation now uses Gaussian profiles for non-H stellar lines, Lorentzian profiles for H/Paschen lines, and the dedicated Na-doublet model for Na diagnostics.
 * [2026-05-05] The dedicated Na-doublet diagnostic now defaults to the narrowed `5882-5905 Å` fitting window used in validation.

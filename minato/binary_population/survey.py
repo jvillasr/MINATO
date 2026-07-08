@@ -13,6 +13,8 @@ class BinarySurveySimulator:
     def __init__(self, population: BinaryPopulation):
         self.population = population
         self.coverage_dict = None
+        self._coverage_mjds = None
+        self._coverage_rv_errors = None
         self.obs_results_df = None
         self._last_seed = None
 
@@ -32,7 +34,24 @@ class BinarySurveySimulator:
             rv_errs = group_sorted["mean_rv_er"].values
             coverage[star_id] = (mjds, rv_errs)
         self.coverage_dict = coverage
+        self._coverage_mjds = [value[0] for value in coverage.values()]
+        self._coverage_rv_errors = [value[1] for value in coverage.values()]
         return self.coverage_dict
+
+    def cadence_templates(self):
+        """
+        Return packed real-cadence template IDs, MJDs, and RV-error arrays.
+
+        The arrays are cached by ``load_data`` and are intended for lightweight
+        summary likelihoods that need repeated access to the survey cadence.
+        """
+        if self.coverage_dict is None:
+            raise ValueError("No coverage data loaded. Please call load_data first.")
+        if self._coverage_mjds is None or self._coverage_rv_errors is None:
+            self._coverage_mjds = [value[0] for value in self.coverage_dict.values()]
+            self._coverage_rv_errors = [value[1] for value in self.coverage_dict.values()]
+        template_ids = tuple(self.coverage_dict.keys())
+        return template_ids, tuple(self._coverage_mjds), tuple(self._coverage_rv_errors)
 
     def simulate_mock_observations(
         self,
@@ -72,6 +91,87 @@ class BinarySurveySimulator:
             summary_only=summary_only,
         )
         return self.obs_results_df
+
+    def simulate_mock_drv_max(
+        self,
+        N=100,
+        f_bin=0.5,
+        intrinsic_sample=None,
+        seed=None,
+    ):
+        """
+        Fast real-cadence summary path returning only primary ``dRV_max``.
+
+        This is intended for likelihood evaluations that only need the
+        ``dRV_max`` distribution. It preserves the same stochastic model as
+        ``simulate_mock_observations(..., summary_only=True)`` for real-cadence
+        surveys, but avoids constructing per-star dictionaries/DataFrames and
+        avoids computing secondary-star RVs and detection-significance summaries.
+        """
+        if seed is not None:
+            np.random.seed(int(seed))
+        self._last_seed = int(seed) if seed is not None else None
+
+        if self.coverage_dict is None:
+            raise ValueError("No coverage data loaded. Please load observational data using load_data before simulating observations.")
+
+        pop = self.population
+        if intrinsic_sample is None:
+            intrinsic_sample = pop.generate_intrinsic_sample_vectorized(
+                N=N,
+                f_bin=f_bin,
+                save_sample=False,
+            )
+
+        n_stars = len(intrinsic_sample)
+        if n_stars == 0:
+            return np.array([], dtype=float)
+
+        mjd_templates = self._coverage_mjds
+        err_templates = self._coverage_rv_errors
+        if mjd_templates is None or err_templates is None:
+            mjd_templates = [value[0] for value in self.coverage_dict.values()]
+            err_templates = [value[1] for value in self.coverage_dict.values()]
+            self._coverage_mjds = mjd_templates
+            self._coverage_rv_errors = err_templates
+        n_templates = len(mjd_templates)
+        if n_templates == 0:
+            raise ValueError("No cadence templates are available in coverage data.")
+
+        is_binary = intrinsic_sample["is_binary"].to_numpy(dtype=bool)
+        gamma = intrinsic_sample["gamma"].to_numpy(dtype=float)
+        d_rv = np.empty(n_stars, dtype=float)
+        template_indices = np.random.randint(0, n_templates, size=n_stars)
+
+        if np.any(is_binary):
+            period = intrinsic_sample["P"].to_numpy(dtype=float)
+            tp = intrinsic_sample["Tp"].to_numpy(dtype=float)
+            eccentricity = intrinsic_sample["e"].to_numpy(dtype=float)
+            omega_deg = intrinsic_sample["omega_deg"].to_numpy(dtype=float)
+            k1 = intrinsic_sample["K1"].to_numpy(dtype=float)
+
+        for idx in range(n_stars):
+            t_array = mjd_templates[template_indices[idx]]
+            rv_errors = err_templates[template_indices[idx]]
+            if is_binary[idx]:
+                v1_true = pop.rvcurve(
+                    t_array,
+                    period[idx],
+                    tp[idx],
+                    eccentricity[idx],
+                    omega_deg[idx],
+                    gamma[idx],
+                    k1[idx],
+                    0.0,
+                    SB2=False,
+                )
+            else:
+                v1_true = np.full(t_array.shape, gamma[idx], dtype=float)
+
+            rv_obs = v1_true + np.random.normal(0, rv_errors, size=len(t_array))
+            d_rv[idx] = rv_obs.max() - rv_obs.min()
+
+        return d_rv
 
     def two_quadratures(self, P, Tp, e, omega_deg, n_fallback=8000):
         """

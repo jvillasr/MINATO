@@ -192,6 +192,15 @@ class LogProb:
             self.parameter_names,
             parameter_bounds=parameter_bounds,
         )
+        self.bins = np.logspace(0.4, 3, 30)
+        self.n_real, _ = np.histogram(self.dRV_real, bins=self.bins)
+        self.fixed_sim_kwargs = {
+            **self.sim_kwargs,
+            "N_sim_total": self.N_sim,
+            "n_real": self.n_real,
+            "N_obs": len(self.dRV_real),
+            "bins": self.bins,
+        }
 
     def __call__(self, theta):
         return log_posterior(
@@ -200,7 +209,7 @@ class LogProb:
             self.N_sim,
             self.dRV_real,
             batch_size=self.batch_size,
-            sim_kwargs=self.sim_kwargs,
+            sim_kwargs=self.fixed_sim_kwargs,
             parameter_names=self.parameter_names,
             parameter_bounds=self.parameter_bounds,
         )
@@ -247,14 +256,26 @@ def compute_log_likelihood_batch(theta_params, survey, dRV_real, current_batch, 
     N_obs = int(sim_kwargs.pop("N_obs", len(dRV_real)))
     bins = np.asarray(sim_kwargs.pop("bins", np.logspace(0.4, 3, 30)), dtype=float)
 
-    mock_res_df = survey_for_batch.simulate_mock_observations(
-        N=current_batch,
-        f_bin=f_bin,
-        save_sample=False,
-        intrinsic_sample=None,
-        **sim_kwargs,
+    use_fast_summary = (
+        bool(sim_kwargs.get("summary_only", False))
+        and not _env_truthy("MINATO_BINARY_POPULATION_DISABLE_FAST_SUMMARY")
+        and hasattr(survey_for_batch, "simulate_mock_drv_max")
+        and set(sim_kwargs).issubset({"summary_only"})
     )
-    dRV_mock = mock_res_df["dRV_max"].values
+    if use_fast_summary:
+        dRV_mock = survey_for_batch.simulate_mock_drv_max(
+            N=current_batch,
+            f_bin=f_bin,
+        )
+    else:
+        mock_res_df = survey_for_batch.simulate_mock_observations(
+            N=current_batch,
+            f_bin=f_bin,
+            save_sample=False,
+            intrinsic_sample=None,
+            **sim_kwargs,
+        )
+        dRV_mock = mock_res_df["dRV_max"].values
 
     n_mock, _ = np.histogram(dRV_mock, bins=bins)
     n_mock = n_mock.astype(float)
@@ -288,13 +309,22 @@ def log_likelihood(
     n_batches = int(np.ceil(N_sim / batch_size))
     logL_total = 0.0
 
-    bins = np.logspace(0.4, 3, 30)
-    n_real, _ = np.histogram(dRV_real, bins=bins)
-
     # Default to summary-only simulation during inference (faster, lower memory).
     sim_kwargs = {**sim_kwargs}
     sim_kwargs.setdefault("summary_only", True)
-    sim_kwargs = {**sim_kwargs, "N_sim_total": N_sim, "n_real": n_real, "N_obs": len(dRV_real), "bins": bins}
+    if "n_real" not in sim_kwargs or "bins" not in sim_kwargs:
+        bins = np.logspace(0.4, 3, 30)
+        n_real, _ = np.histogram(dRV_real, bins=bins)
+        sim_kwargs = {
+            **sim_kwargs,
+            "N_sim_total": N_sim,
+            "n_real": n_real,
+            "N_obs": len(dRV_real),
+            "bins": bins,
+        }
+    else:
+        sim_kwargs.setdefault("N_sim_total", N_sim)
+        sim_kwargs.setdefault("N_obs", len(dRV_real))
     for i in range(n_batches):
         current_batch = batch_size if i < n_batches - 1 else (N_sim - batch_size * (n_batches - 1))
         logL_total += compute_log_likelihood_batch(
@@ -349,6 +379,7 @@ def run_mcmc(
     initial_scatter=None,
     pool_kind="process",  # "process" | "thread" | "none"
     start_method=None,    # e.g. "spawn" (macOS) or "fork" (Linux)
+    moves=None,
     progress=None,
 ):
     """
@@ -420,7 +451,7 @@ def run_mcmc(
             raise ValueError(f"Unsupported pool_kind={pool_kind!r}; use 'process', 'thread', or 'none'.")
     try:
         if pool is None:
-            sampler = emcee.EnsembleSampler(nwalkers, ndim, log_prob)
+            sampler = emcee.EnsembleSampler(nwalkers, ndim, log_prob, moves=moves)
             try:
                 sampler.run_mcmc(p0, nsteps, progress=bool(progress))
             except TypeError:
@@ -428,7 +459,7 @@ def run_mcmc(
             return sampler
 
         # ThreadPool supports context manager; multiprocessing Pool does not always implement __enter__/__exit__.
-        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_prob, pool=pool)
+        sampler = emcee.EnsembleSampler(nwalkers, ndim, log_prob, pool=pool, moves=moves)
         try:
             sampler.run_mcmc(p0, nsteps, progress=bool(progress))
         except TypeError:
