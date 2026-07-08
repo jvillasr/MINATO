@@ -35,6 +35,7 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 - Verify `binary_population` MCMC batching behaves as expected (correct normalization) and improves wall-time performance [][]
 - PRIORITY: Make `binary_population` inference scalable on large CPUs (process/MPI pool, summary-only simulation, reproducible seeding) and test on laptop + MPIA astro-nodes (small/large scale; 1-parameter `f_bin` and multi-parameter runs) in a dedicated branch [STARTED][2026-06-16]
 - Add and validate an experimental mixture/common-random-number likelihood for high-`N_obs` binary-population inference [STARTED][2026-06-21]
+- Follow the larger binary-population inference branch plan in `BINARY_POPULATION_INFERENCE_PLAN.md`, including multi-bank averaging and time/cadence-conditioned likelihoods [STARTED][2026-07-08]
 - Update `binary_population` tutorial with HPC caveats and “how to run” guidance (threads vs processes vs MPI; choosing `N_sim`, `batch_size`, `nwalkers`, `nsteps`) [][]
 - Create/expand a tutorial for binary simulations (`minato.binary_population`) covering the main options and common workflows [Done][2025-12-15]
 - Validate and complete the SB1 tutorial: Gaussian vs Voigt (`profile`), impact on results, and a working legacy `lmfit` example [][]
