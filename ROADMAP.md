@@ -51,5 +51,6 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 - Add CI (format/lint + tests) [][]
 - Add a packaging config (`pyproject.toml`) for `pip install -e .` workflows [][]
 - Add SB2 support for component-specific RV uncertainties in `binary_population` (e.g., `rv_errors1`/`rv_errors2`, separate cadence/error columns, optional error ratios) [][]
+- Add a `binary_population` survey-coverage generator that can create simulated `ID`/`MJD`/`mean_rv_er` cadence tables from a high-level survey design, so users do not need to hand-build coverage inputs before calling `BinarySurveySimulator.load_data(...)` [][]
 - SED fitting module (from README planned features) [][]
 - Automated spectral classification tooling (from README planned features) [][]
