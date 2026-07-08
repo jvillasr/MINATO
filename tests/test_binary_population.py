@@ -4,7 +4,12 @@ import numpy as np
 import pandas as pd
 
 from minato.binary_population import BinaryPopulation, BinarySurveySimulator, run_mcmc
-from minato.binary_population import MixtureCRNLikelihood, run_mixture_crn_mcmc
+from minato.binary_population import (
+    AveragedMixtureCRNLikelihood,
+    MixtureCRNLikelihood,
+    run_averaged_mixture_crn_mcmc,
+    run_mixture_crn_mcmc,
+)
 
 
 def make_toy_survey():
@@ -147,6 +152,133 @@ class BinaryPopulationInferenceTests(unittest.TestCase):
             parameter_names=("f_bin", "pi"),
             initial_position={"f_bin": 0.6, "pi": 0.0},
             initial_scatter={"f_bin": 0.03, "pi": 0.05},
+        )
+
+        self.assertEqual(sampler.get_chain().shape, (2, 8, 2))
+        self.assertTrue(np.all(np.isfinite(sampler.get_log_prob())))
+
+    def test_one_bank_averaged_mixture_matches_single_bank(self):
+        _, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        single = MixtureCRNLikelihood(
+            survey,
+            observed,
+            n_single_bank=64,
+            n_binary_bank=64,
+            bank_seed=321,
+            parameter_names=("f_bin", "pi"),
+        )
+        averaged = AveragedMixtureCRNLikelihood(
+            survey,
+            observed,
+            n_single_bank=64,
+            n_binary_bank=64,
+            bank_seeds=(321,),
+            parameter_names=("f_bin", "pi"),
+        )
+
+        theta = np.array([0.55, 0.1])
+        self.assertEqual(averaged(theta), single(theta))
+
+    def test_baseline_conditioned_likelihood_is_deterministic(self):
+        _, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        observed_baselines = np.array([30.0, 100.0, 120.0, 30.0])
+        like = AveragedMixtureCRNLikelihood(
+            survey,
+            observed,
+            n_single_bank=128,
+            n_binary_bank=128,
+            bank_seeds=(11, 12),
+            parameter_names=("f_bin", "pi"),
+            bins=np.array([0.0, 1.0e6]),
+            condition_by="baseline_days",
+            baseline_bins=np.array([0.0, 50.0, 150.0, np.inf]),
+            observed_baseline_days=observed_baselines,
+        )
+
+        theta = np.array([0.6, 0.1])
+        self.assertEqual(like(theta), like(theta))
+
+    def test_baseline_condition_counts_and_normalisation(self):
+        _, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        observed_baselines = np.array([30.0, 100.0, 120.0, 30.0])
+        like = AveragedMixtureCRNLikelihood(
+            survey,
+            observed,
+            n_single_bank=256,
+            n_binary_bank=256,
+            bank_seeds=(21, 22),
+            parameter_names=("f_bin", "pi"),
+            bins=np.array([0.0, 1.0e6]),
+            condition_by="baseline_days",
+            baseline_bins=np.array([0.0, 50.0, 150.0, np.inf]),
+            observed_baseline_days=observed_baselines,
+        )
+
+        np.testing.assert_array_equal(like.observed_counts, np.array([2.0, 2.0, 0.0]))
+        np.testing.assert_allclose(like.observed_hist.sum(axis=1), like.observed_counts)
+        needed = like.observed_counts > 0
+        np.testing.assert_allclose(like.single_probability[needed].sum(axis=1), 1.0)
+
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.0, "eta": -0.5}
+        _, binary_probability = like.component_probabilities(params)
+        np.testing.assert_allclose(binary_probability[needed].sum(axis=1), 1.0)
+
+        summary = like.condition_summary()
+        self.assertEqual(summary[0]["observed_count"], 2)
+        self.assertEqual(summary[1]["observed_count"], 2)
+        self.assertEqual(summary[2]["observed_count"], 0)
+
+    def test_four_bank_baseline_conditioned_likelihood_is_finite(self):
+        _, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        observed_baselines = np.array([30.0, 100.0, 120.0, 30.0])
+        like = AveragedMixtureCRNLikelihood(
+            survey,
+            observed,
+            n_single_bank=128,
+            n_binary_bank=128,
+            bank_seeds=(20260621, 20260622, 20260623, 20260624),
+            parameter_names=("f_bin", "pi"),
+            bins=np.array([0.0, 1.0e6]),
+            condition_by="baseline_days",
+            baseline_bins=np.array([0.0, 50.0, 150.0, np.inf]),
+            observed_baseline_days=observed_baselines,
+        )
+
+        grid_values = [
+            like(np.array([f_bin, pi_value]))
+            for f_bin in (0.5, 0.6)
+            for pi_value in (-0.1, 0.1)
+        ]
+        self.assertTrue(np.all(np.isfinite(grid_values)))
+
+    def test_run_averaged_mixture_crn_mcmc_smoke_shape(self):
+        pop, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        observed_baselines = np.array([30.0, 100.0, 120.0, 30.0])
+        np.random.seed(654)
+        sampler = run_averaged_mixture_crn_mcmc(
+            pop,
+            survey,
+            observed,
+            n_single_bank=64,
+            n_binary_bank=64,
+            bank_seeds=(31,),
+            nwalkers=8,
+            nsteps=2,
+            nthreads=1,
+            pool_kind="none",
+            progress=False,
+            parameter_names=("f_bin", "pi"),
+            initial_position={"f_bin": 0.6, "pi": 0.0},
+            initial_scatter={"f_bin": 0.03, "pi": 0.05},
+            bins=np.array([0.0, 1.0e6]),
+            condition_by="baseline_days",
+            baseline_bins=np.array([0.0, 50.0, 150.0, np.inf]),
+            observed_baseline_days=observed_baselines,
         )
 
         self.assertEqual(sampler.get_chain().shape, (2, 8, 2))
