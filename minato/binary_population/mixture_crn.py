@@ -29,6 +29,7 @@ from .mcmc import (
 
 DEFAULT_BASELINE_BINS = np.array([0.0, 7.0, 30.0, 100.0, 365.0, np.inf])
 _STATIC_LOG_PROB = None
+_STATIC_AVERAGED_BANK_LOG_PROB = None
 
 
 def _static_log_prob_initializer(log_prob):
@@ -40,6 +41,25 @@ def _static_log_prob_call(theta):
     if _STATIC_LOG_PROB is None:
         raise RuntimeError("Static CRN log-probability worker was not initialised.")
     return _STATIC_LOG_PROB(theta)
+
+
+def _static_averaged_bank_initializer(log_prob):
+    global _STATIC_AVERAGED_BANK_LOG_PROB
+    _STATIC_AVERAGED_BANK_LOG_PROB = log_prob
+
+
+def _static_averaged_bank_probability_call(task):
+    if _STATIC_AVERAGED_BANK_LOG_PROB is None:
+        raise RuntimeError("Static averaged-bank CRN worker was not initialised.")
+    theta_index, bank_index, params = task
+    try:
+        probability = _STATIC_AVERAGED_BANK_LOG_PROB.bank_binary_probability(
+            bank_index,
+            params,
+        )
+    except (FloatingPointError, OverflowError, ValueError):
+        probability = None
+    return theta_index, bank_index, probability
 
 
 class StaticLogProbPool:
@@ -75,6 +95,92 @@ class StaticLogProbPool:
         self._pool.terminate()
 
 
+class BankParallelAveragedLogProbPool:
+    """
+    Emcee-compatible process pool that parallelises averaged CRN banks.
+
+    For an averaged likelihood with ``n_banks`` fixed random banks, a normal
+    pool evaluates one walker at a time and each worker loops over all banks
+    serially. This pool instead expands every emcee ``map`` call into
+    ``walker x bank`` tasks, then averages the returned bank probabilities in
+    the parent process before applying the same Poisson likelihood as
+    :class:`AveragedMixtureCRNLikelihood`.
+    """
+
+    def __init__(self, log_prob, processes, start_method=None):
+        if not hasattr(log_prob, "bank_binary_probability"):
+            raise TypeError(
+                "BankParallelAveragedLogProbPool requires an averaged CRN "
+                "likelihood with a bank_binary_probability method."
+            )
+        if start_method is None:
+            start_method = "spawn" if sys.platform in {"darwin", "win32"} else "fork"
+        self._log_prob = log_prob
+        self._n_banks = int(log_prob.n_banks)
+        ctx = mp.get_context(str(start_method))
+        self._pool = ctx.Pool(
+            processes=int(processes),
+            initializer=_static_averaged_bank_initializer,
+            initargs=(log_prob,),
+        )
+
+    def map(self, func, iterable):
+        del func
+        theta_values = [np.asarray(theta, dtype=float) for theta in iterable]
+        log_probabilities = [-np.inf] * len(theta_values)
+        params_by_theta = {}
+        tasks = []
+        for theta_index, theta in enumerate(theta_values):
+            params = self._log_prob._theta_to_params(theta)
+            if params is None:
+                continue
+            params_by_theta[theta_index] = params
+            for bank_index in range(self._n_banks):
+                tasks.append((theta_index, bank_index, params))
+
+        if not tasks:
+            return log_probabilities
+
+        bank_outputs = self._pool.map(_static_averaged_bank_probability_call, tasks)
+        probabilities_by_theta = {
+            theta_index: [None] * self._n_banks
+            for theta_index in params_by_theta
+        }
+        failed_theta_indices = set()
+        for theta_index, bank_index, probability in bank_outputs:
+            if probability is None:
+                failed_theta_indices.add(theta_index)
+                continue
+            probabilities_by_theta[theta_index][bank_index] = probability
+
+        for theta_index, params in params_by_theta.items():
+            probabilities = probabilities_by_theta[theta_index]
+            if theta_index in failed_theta_indices or any(
+                probability is None for probability in probabilities
+            ):
+                continue
+            try:
+                binary_probability = np.mean(probabilities, axis=0)
+                log_probabilities[theta_index] = (
+                    self._log_prob.log_likelihood_from_binary_probability(
+                        params,
+                        binary_probability,
+                    )
+                )
+            except (FloatingPointError, OverflowError, ValueError):
+                log_probabilities[theta_index] = -np.inf
+        return log_probabilities
+
+    def close(self):
+        self._pool.close()
+
+    def join(self):
+        self._pool.join()
+
+    def terminate(self):
+        self._pool.terminate()
+
+
 def _make_emcee_pool(pool_kind, nthreads, log_prob, start_method=None):
     if not nthreads or int(nthreads) <= 1 or pool_kind == "none":
         return None
@@ -87,9 +193,15 @@ def _make_emcee_pool(pool_kind, nthreads, log_prob, start_method=None):
         return ctx.Pool(processes=int(nthreads))
     if pool_kind == "static_process":
         return StaticLogProbPool(log_prob, processes=int(nthreads), start_method=start_method)
+    if pool_kind == "bank_static_process":
+        return BankParallelAveragedLogProbPool(
+            log_prob,
+            processes=int(nthreads),
+            start_method=start_method,
+        )
     raise ValueError(
         f"Unsupported pool_kind={pool_kind!r}; use 'process', 'static_process', "
-        "'thread', or 'none'."
+        "'bank_static_process', 'thread', or 'none'."
     )
 
 
@@ -635,27 +747,43 @@ class AveragedMixtureCRNLikelihood:
     def _theta_to_params(self, theta):
         return self.reference._theta_to_params(theta)
 
+    def bank_binary_probability(self, bank_index, params):
+        """
+        Return one bank's binary-component probability for ``params``.
+
+        The returned array has the same shape as ``single_probability``:
+        either a one-dimensional ``dRV_max`` histogram, or a
+        ``condition x dRV_max`` matrix for baseline-conditioned likelihoods.
+        """
+        bank_index = int(bank_index)
+        if bank_index < 0 or bank_index >= self.n_banks:
+            raise ValueError(f"bank_index={bank_index} is outside 0..{self.n_banks - 1}.")
+        if self.condition_by is None:
+            return self.likelihoods[bank_index].component_probabilities(params)[1]
+
+        state = self.conditioned_bank_states[bank_index]
+        binary_drv = state.likelihood.simulate_binary_drv(params)
+        binary_hist = _histogram_by_condition(
+            binary_drv,
+            state.binary_condition_indices,
+            self.n_conditions,
+            self.bins,
+        )
+        return _normalise_condition_histograms(binary_hist, state.binary_counts)
+
     def _binary_conditioned_probability(self, params):
-        probabilities = []
-        for state in self.conditioned_bank_states:
-            binary_drv = state.likelihood.simulate_binary_drv(params)
-            binary_hist = _histogram_by_condition(
-                binary_drv,
-                state.binary_condition_indices,
-                self.n_conditions,
-                self.bins,
-            )
-            probabilities.append(
-                _normalise_condition_histograms(binary_hist, state.binary_counts)
-            )
+        probabilities = [
+            self.bank_binary_probability(bank_index, params)
+            for bank_index in range(self.n_banks)
+        ]
         return np.mean(probabilities, axis=0)
 
     def component_probabilities(self, params):
         if self.condition_by is None:
             binary_probability = np.mean(
                 [
-                    likelihood.component_probabilities(params)[1]
-                    for likelihood in self.likelihoods
+                    self.bank_binary_probability(bank_index, params)
+                    for bank_index in range(self.n_banks)
                 ],
                 axis=0,
             )
@@ -663,21 +791,31 @@ class AveragedMixtureCRNLikelihood:
             binary_probability = self._binary_conditioned_probability(params)
         return self.single_probability, binary_probability
 
-    def expected_counts(self, params):
+    def expected_counts_from_binary_probability(self, params, binary_probability):
         f_bin = float(params["f_bin"])
-        single_probability, binary_probability = self.component_probabilities(params)
-        probability = (1.0 - f_bin) * single_probability + f_bin * binary_probability
+        probability = (1.0 - f_bin) * self.single_probability + f_bin * binary_probability
         if self.condition_by is None:
             return float(self.N_obs) * probability
         return self.observed_counts[:, None] * probability
 
-    def log_likelihood(self, params):
-        expected = self.expected_counts(params) + 1e-8
+    def expected_counts(self, params):
+        _, binary_probability = self.component_probabilities(params)
+        return self.expected_counts_from_binary_probability(params, binary_probability)
+
+    def log_likelihood_from_binary_probability(self, params, binary_probability):
+        expected = self.expected_counts_from_binary_probability(
+            params,
+            binary_probability,
+        ) + 1e-8
         if self.condition_by is None:
             observed = self.n_real
         else:
             observed = self.observed_hist
         return float(np.sum(observed * np.log(expected) - expected))
+
+    def log_likelihood(self, params):
+        _, binary_probability = self.component_probabilities(params)
+        return self.log_likelihood_from_binary_probability(params, binary_probability)
 
     def condition_summary(self) -> list[dict[str, int | str]]:
         if self.condition_by is None:

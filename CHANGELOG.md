@@ -1,5 +1,20 @@
 ## [Unreleased]
 ### Added
+* [2026-07-09] `binary_population` averaged mixture-CRN MCMC now supports
+  `pool_kind="bank_static_process"`, an emcee-compatible process pool that
+  parallelises likelihood work across `walker x bank` tasks before averaging
+  the fixed-bank binary probabilities in the parent process. This keeps the
+  baseline-conditioned `dRV_max` likelihood mathematically equivalent to the
+  serial averaged likelihood while providing the parallelism needed for
+  multi-parameter runs over `f_bin`, `pi`, `kappa`, and `eta`.
+* [2026-07-09] Experimental `binary_population` pairwise mixture-CRN
+  likelihoods for star-balanced, time-binned RV summaries. The new
+  `PairwiseSummaryConfig`, `PairwiseMixtureCRNLikelihood`,
+  `AveragedMixtureCRNPairwiseLikelihood`, `compute_pairwise_summary`, and
+  `run_averaged_mixture_crn_pairwise_mcmc` APIs support pairwise
+  `max |Delta RV|` and RV-error-normalised `max_pair_significance` summaries.
+  A regression test verifies that a single all-time `max |Delta RV|` bin
+  collapses to the existing `dRV_max` mixture-CRN likelihood.
 * [2026-07-08] `binary_population` CRN MCMC runners now accept
   `pool_kind="static_process"`, an emcee-compatible process pool that
   initialises large fixed-bank likelihood objects once per worker instead of

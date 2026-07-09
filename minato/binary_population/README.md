@@ -121,6 +121,46 @@ preserves older behaviour and samples
 mode to use when comparing `pi` to literature-style period distributions over a
 positive log-period interval.
 
+## Experimental pairwise mixture-CRN likelihood
+
+The pairwise CRN likelihood scores a star-balanced summary vector instead of
+raw all-pair histograms. For each star and each `Delta t` bin it computes one
+response, either `max_pair_significance = max(|Delta RV| / hypot(err_i, err_j))`
+or `max_abs_delta_rv`. Missing `Delta t` bins are treated as unsupported cells,
+not as zero-valued non-detections.
+
+```python
+import numpy as np
+from minato.binary_population import (
+    PairwiseSummaryConfig,
+    run_averaged_mixture_crn_pairwise_mcmc,
+)
+
+config = PairwiseSummaryConfig(
+    delta_time_bins=(0, 1, 7, 30, 100, 365, 1000, 3000, np.inf),
+    response="max_pair_significance",
+    response_bins=tuple(np.linspace(0, 20, 41)) + (np.inf,),
+)
+
+# Shape: (n_stars, n_delta_time_bins). Unsupported cells should be NaN.
+observed_pairwise_summary = np.load("path/to/observed_pairwise_summary.npy")
+
+sampler = run_averaged_mixture_crn_pairwise_mcmc(
+    pop,
+    survey,
+    observed_pairwise_summary,
+    n_single_bank=100_000,
+    n_binary_bank=100_000,
+    bank_seeds=(20260621, 20260622, 20260623, 20260624),
+    parameter_names=("f_bin", "pi"),
+    pool_kind="static_process",
+)
+```
+
+This API is experimental. Validate it against the baseline-binned `dRV_max`
+likelihood, bank-seed stability, and wall time before using it for paper
+claims.
+
 ## Key options (selected)
 
 - Fixed draws: set `M1_values`, `logP_values`, `q_values`, `e_values`, with `fixed_values_mode` = `"random"` or `"cycle"`.
@@ -128,6 +168,10 @@ positive log-period interval.
 - Eccentricity caps: `e_max`, `use_period_ecc_cap`; enforce with `fixed_e_enforcement` = `"clip"` or `"error"`.
 - Safety: `use_roche_guard`, `roche_margin_frac`; smearing check via `use_smear_flag`, `t_exp_sec`, `dv_smear_limit`.
 - Cadence modes: `ideal_sampling=False` (real cadence), `True` (two quadratures), or `"phase_uniform"` (uniform phases, needs `n_epochs` and `rv_error_common`).
+- Large averaged CRN MCMC: use `pool_kind="static_process"` to parallelise
+  walkers, or `pool_kind="bank_static_process"` to parallelise the
+  `walker x bank` likelihood tasks when fitting several population parameters
+  with multiple fixed CRN banks.
 
 ## Notes
 

@@ -7,10 +7,16 @@ import pandas as pd
 from minato.binary_population import BinaryPopulation, BinarySurveySimulator, run_mcmc
 from minato.binary_population import (
     AveragedMixtureCRNLikelihood,
+    AveragedMixtureCRNPairwiseLikelihood,
     MixtureCRNLikelihood,
+    PairwiseMixtureCRNLikelihood,
+    PairwiseSummaryConfig,
+    compute_pairwise_summary,
     run_averaged_mixture_crn_mcmc,
+    run_averaged_mixture_crn_pairwise_mcmc,
     run_mixture_crn_mcmc,
 )
+from minato.binary_population.mixture_crn import BankParallelAveragedLogProbPool
 
 
 def make_toy_survey():
@@ -256,6 +262,164 @@ class BinaryPopulationInferenceTests(unittest.TestCase):
         ]
         self.assertTrue(np.all(np.isfinite(grid_values)))
 
+    def test_averaged_binary_probability_matches_bank_mean_for_four_parameters(self):
+        _, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.2, "eta": -0.4}
+        for condition_by, observed_baselines in (
+            (None, None),
+            ("baseline_days", np.array([30.0, 100.0, 120.0, 30.0])),
+        ):
+            with self.subTest(condition_by=condition_by):
+                like = AveragedMixtureCRNLikelihood(
+                    survey,
+                    observed,
+                    n_single_bank=128,
+                    n_binary_bank=128,
+                    bank_seeds=(41, 42, 43),
+                    parameter_names=("f_bin", "pi", "kappa", "eta"),
+                    bins=np.array([0.0, 1.0e6]),
+                    condition_by=condition_by,
+                    baseline_bins=np.array([0.0, 50.0, 150.0, np.inf]),
+                    observed_baseline_days=observed_baselines,
+                )
+
+                _, binary_probability = like.component_probabilities(params)
+                bank_mean = np.mean(
+                    [
+                        like.bank_binary_probability(bank_index, params)
+                        for bank_index in range(like.n_banks)
+                    ],
+                    axis=0,
+                )
+                np.testing.assert_allclose(binary_probability, bank_mean)
+
+                expected = like.expected_counts(params)
+                from_binary = like.expected_counts_from_binary_probability(
+                    params,
+                    binary_probability,
+                )
+                np.testing.assert_allclose(expected, from_binary)
+
+    @unittest.skipUnless("fork" in mp.get_all_start_methods(), "bank_static_process smoke uses fork")
+    def test_bank_static_process_pool_matches_serial_for_four_parameter_baseline(self):
+        _, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        observed_baselines = np.array([30.0, 100.0, 120.0, 30.0])
+        like = AveragedMixtureCRNLikelihood(
+            survey,
+            observed,
+            n_single_bank=128,
+            n_binary_bank=128,
+            bank_seeds=(51, 52, 53),
+            parameter_names=("f_bin", "pi", "kappa", "eta"),
+            bins=np.array([0.0, 1.0e6]),
+            condition_by="baseline_days",
+            baseline_bins=np.array([0.0, 50.0, 150.0, np.inf]),
+            observed_baseline_days=observed_baselines,
+        )
+        theta_values = [
+            np.array([0.55, 0.1, 0.2, -0.4]),
+            np.array([0.65, -0.2, -0.3, 0.1]),
+            np.array([-0.1, 0.1, 0.0, -0.4]),
+        ]
+
+        pool = BankParallelAveragedLogProbPool(like, processes=2, start_method="fork")
+        try:
+            parallel = pool.map(like, theta_values)
+        finally:
+            pool.close()
+            pool.join()
+
+        serial = [like(theta) for theta in theta_values]
+        np.testing.assert_allclose(parallel, serial, rtol=0.0, atol=1.0e-12)
+
+    def test_pairwise_summary_invariants(self):
+        config = PairwiseSummaryConfig()
+        summary = compute_pairwise_summary(
+            mjd=np.array([0.0, 10.0]),
+            rv=np.array([10.0, 40.0]),
+            rv_error=np.array([3.0, 4.0]),
+            config=config,
+        )
+        labels = ["0-1", "1-7", "7-30", "30-100", "100-365", "365-1000", "1000-3000", ">=3000"]
+        idx = labels.index("7-30")
+
+        self.assertEqual(int(summary["n_pairs"][idx]), 1)
+        self.assertEqual(float(summary["max_abs_delta_rv"][idx]), 30.0)
+        self.assertEqual(float(summary["max_pair_significance"][idx]), 6.0)
+        self.assertFalse(bool(summary["has_pair"][labels.index("1-7")]))
+        self.assertTrue(np.isnan(summary["max_abs_delta_rv"][labels.index("1-7")]))
+
+    def test_pairwise_all_time_absdrv_matches_drvmax_likelihood(self):
+        _, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        bins = np.array([0.0, 10.0, 20.0, 50.0, 1.0e6])
+        config = PairwiseSummaryConfig(
+            delta_time_bins=(0.0, np.inf),
+            response="max_abs_delta_rv",
+            response_bins=tuple(bins),
+        )
+        drv_like = MixtureCRNLikelihood(
+            survey,
+            observed,
+            n_single_bank=96,
+            n_binary_bank=96,
+            bank_seed=20260709,
+            parameter_names=("f_bin", "pi"),
+            bins=bins,
+        )
+        pairwise_like = PairwiseMixtureCRNLikelihood(
+            survey,
+            observed[:, None],
+            n_single_bank=96,
+            n_binary_bank=96,
+            bank_seed=20260709,
+            parameter_names=("f_bin", "pi"),
+            config=config,
+        )
+
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.0, "eta": -0.4}
+        np.testing.assert_allclose(
+            pairwise_like.expected_counts(params)[0],
+            drv_like.expected_counts(params),
+        )
+        self.assertAlmostEqual(
+            pairwise_like(np.array([0.6, 0.1])),
+            drv_like(np.array([0.6, 0.1])),
+            places=10,
+        )
+
+    def test_one_bank_averaged_pairwise_matches_single_bank(self):
+        _, survey = make_toy_survey()
+        observed = np.array([[5.0], [12.0], [25.0], [40.0]])
+        config = PairwiseSummaryConfig(
+            delta_time_bins=(0.0, np.inf),
+            response="max_abs_delta_rv",
+            response_bins=(0.0, 10.0, 20.0, 50.0, 1.0e6),
+        )
+        single = PairwiseMixtureCRNLikelihood(
+            survey,
+            observed,
+            n_single_bank=64,
+            n_binary_bank=64,
+            bank_seed=321,
+            parameter_names=("f_bin", "pi"),
+            config=config,
+        )
+        averaged = AveragedMixtureCRNPairwiseLikelihood(
+            survey,
+            observed,
+            n_single_bank=64,
+            n_binary_bank=64,
+            bank_seeds=(321,),
+            parameter_names=("f_bin", "pi"),
+            config=config,
+        )
+
+        theta = np.array([0.55, 0.1])
+        self.assertEqual(averaged(theta), single(theta))
+
     def test_run_averaged_mixture_crn_mcmc_smoke_shape(self):
         pop, survey = make_toy_survey()
         observed = np.array([5.0, 12.0, 25.0, 40.0])
@@ -280,6 +444,36 @@ class BinaryPopulationInferenceTests(unittest.TestCase):
             condition_by="baseline_days",
             baseline_bins=np.array([0.0, 50.0, 150.0, np.inf]),
             observed_baseline_days=observed_baselines,
+        )
+
+        self.assertEqual(sampler.get_chain().shape, (2, 8, 2))
+        self.assertTrue(np.all(np.isfinite(sampler.get_log_prob())))
+
+    def test_run_averaged_mixture_crn_pairwise_mcmc_smoke_shape(self):
+        pop, survey = make_toy_survey()
+        observed = np.array([[5.0], [12.0], [25.0], [40.0]])
+        config = PairwiseSummaryConfig(
+            delta_time_bins=(0.0, np.inf),
+            response="max_abs_delta_rv",
+            response_bins=(0.0, 10.0, 20.0, 50.0, 1.0e6),
+        )
+        np.random.seed(656)
+        sampler = run_averaged_mixture_crn_pairwise_mcmc(
+            pop,
+            survey,
+            observed,
+            n_single_bank=64,
+            n_binary_bank=64,
+            bank_seeds=(31,),
+            nwalkers=8,
+            nsteps=2,
+            nthreads=1,
+            pool_kind="none",
+            progress=False,
+            parameter_names=("f_bin", "pi"),
+            initial_position={"f_bin": 0.6, "pi": 0.0},
+            initial_scatter={"f_bin": 0.03, "pi": 0.05},
+            config=config,
         )
 
         self.assertEqual(sampler.get_chain().shape, (2, 8, 2))
@@ -314,6 +508,37 @@ class BinaryPopulationInferenceTests(unittest.TestCase):
         )
 
         self.assertEqual(sampler.get_chain().shape, (2, 8, 2))
+        self.assertTrue(np.all(np.isfinite(sampler.get_log_prob())))
+
+    @unittest.skipUnless("fork" in mp.get_all_start_methods(), "bank_static_process smoke uses fork")
+    def test_run_averaged_mixture_crn_mcmc_bank_static_process_smoke_shape(self):
+        pop, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        observed_baselines = np.array([30.0, 100.0, 120.0, 30.0])
+        np.random.seed(657)
+        sampler = run_averaged_mixture_crn_mcmc(
+            pop,
+            survey,
+            observed,
+            n_single_bank=64,
+            n_binary_bank=64,
+            bank_seeds=(41, 42),
+            nwalkers=10,
+            nsteps=2,
+            nthreads=2,
+            pool_kind="bank_static_process",
+            start_method="fork",
+            progress=False,
+            parameter_names=("f_bin", "pi", "kappa", "eta"),
+            initial_position={"f_bin": 0.6, "pi": 0.0, "kappa": 0.0, "eta": -0.4},
+            initial_scatter={"f_bin": 0.03, "pi": 0.05, "kappa": 0.05, "eta": 0.05},
+            bins=np.array([0.0, 1.0e6]),
+            condition_by="baseline_days",
+            baseline_bins=np.array([0.0, 50.0, 150.0, np.inf]),
+            observed_baseline_days=observed_baselines,
+        )
+
+        self.assertEqual(sampler.get_chain().shape, (2, 10, 4))
         self.assertTrue(np.all(np.isfinite(sampler.get_log_prob())))
 
 

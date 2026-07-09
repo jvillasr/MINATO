@@ -7,6 +7,15 @@ from .mixture_crn import (
     run_averaged_mixture_crn_mcmc,
     run_mixture_crn_mcmc,
 )
+from .pairwise_crn import (
+    AveragedMixtureCRNPairwiseLikelihood,
+    PairwiseMixtureCRNLikelihood,
+    PairwiseSummaryConfig,
+    compute_pairwise_response,
+    compute_pairwise_response_matrix,
+    compute_pairwise_summary,
+    run_averaged_mixture_crn_pairwise_mcmc,
+)
 
 # Backward-compatibility alias (previous name)
 BinarySimulations = BinaryPopulation
@@ -17,9 +26,16 @@ __all__ = [
     "BinarySurveySimulator",
     "run_mcmc",
     "run_averaged_mixture_crn_mcmc",
+    "run_averaged_mixture_crn_pairwise_mcmc",
     "run_mixture_crn_mcmc",
     "AveragedMixtureCRNLikelihood",
+    "AveragedMixtureCRNPairwiseLikelihood",
     "MixtureCRNLikelihood",
+    "PairwiseMixtureCRNLikelihood",
+    "PairwiseSummaryConfig",
+    "compute_pairwise_response",
+    "compute_pairwise_response_matrix",
+    "compute_pairwise_summary",
     "log_prior",
     "log_likelihood",
     "log_posterior",
