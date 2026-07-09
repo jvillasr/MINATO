@@ -1,5 +1,18 @@
 ## [Unreleased]
 ### Added
+* [2026-07-08] `binary_population` CRN MCMC runners now accept
+  `pool_kind="static_process"`, an emcee-compatible process pool that
+  initialises large fixed-bank likelihood objects once per worker instead of
+  resending them on every walker map call. On the WP1 `4x100k` averaged
+  baseline mixture-CRN timing diagnostic this reduces a 96-walker MCMC step
+  from about `273 s` with the normal process pool to about `16 s` with
+  `48` static workers.
+* [2026-07-08] `binary_population.AveragedMixtureCRNLikelihood` has now been
+  validated on the paper-scale four-bank baseline-conditioned WP1 diagnostic.
+  The public MINATO API exactly reproduces the previous paper-side prototype
+  for all `1271` grid points with `100000+100000` single/binary systems per
+  bank, validating the averaged baseline mixture-CRN likelihood for this
+  reference use case.
 * [2026-06-21] Experimental `binary_population` mixture/common-random-number
   likelihood for high-`N_obs` `dRV_max` inference. The new
   `MixtureCRNLikelihood` and `run_mixture_crn_mcmc` APIs model

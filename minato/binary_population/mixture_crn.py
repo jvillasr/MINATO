@@ -28,6 +28,69 @@ from .mcmc import (
 
 
 DEFAULT_BASELINE_BINS = np.array([0.0, 7.0, 30.0, 100.0, 365.0, np.inf])
+_STATIC_LOG_PROB = None
+
+
+def _static_log_prob_initializer(log_prob):
+    global _STATIC_LOG_PROB
+    _STATIC_LOG_PROB = log_prob
+
+
+def _static_log_prob_call(theta):
+    if _STATIC_LOG_PROB is None:
+        raise RuntimeError("Static CRN log-probability worker was not initialised.")
+    return _STATIC_LOG_PROB(theta)
+
+
+class StaticLogProbPool:
+    """
+    Minimal emcee-compatible process pool for large CRN likelihood objects.
+
+    ``multiprocessing.Pool.map(log_prob, coords)`` can repeatedly serialise the
+    callable object passed by emcee. For CRN likelihoods that object owns large
+    fixed random banks, so this pool initialises each worker with the
+    log-probability once and maps only small parameter vectors thereafter.
+    """
+
+    def __init__(self, log_prob, processes, start_method=None):
+        if start_method is None:
+            start_method = "spawn" if sys.platform in {"darwin", "win32"} else "fork"
+        ctx = mp.get_context(str(start_method))
+        self._pool = ctx.Pool(
+            processes=int(processes),
+            initializer=_static_log_prob_initializer,
+            initargs=(log_prob,),
+        )
+
+    def map(self, func, iterable):
+        return self._pool.map(_static_log_prob_call, iterable)
+
+    def close(self):
+        self._pool.close()
+
+    def join(self):
+        self._pool.join()
+
+    def terminate(self):
+        self._pool.terminate()
+
+
+def _make_emcee_pool(pool_kind, nthreads, log_prob, start_method=None):
+    if not nthreads or int(nthreads) <= 1 or pool_kind == "none":
+        return None
+    if pool_kind == "thread":
+        return ThreadPool(processes=int(nthreads))
+    if pool_kind == "process":
+        if start_method is None:
+            start_method = "spawn" if sys.platform in {"darwin", "win32"} else "fork"
+        ctx = mp.get_context(str(start_method))
+        return ctx.Pool(processes=int(nthreads))
+    if pool_kind == "static_process":
+        return StaticLogProbPool(log_prob, processes=int(nthreads), start_method=start_method)
+    raise ValueError(
+        f"Unsupported pool_kind={pool_kind!r}; use 'process', 'static_process', "
+        "'thread', or 'none'."
+    )
 
 
 @dataclass(frozen=True)
@@ -712,17 +775,7 @@ def run_mixture_crn_mcmc(
     if prev_roche_report is not None:
         population.roche_guard_report = False
 
-    pool = None
-    if nthreads and int(nthreads) > 1 and pool_kind != "none":
-        if pool_kind == "thread":
-            pool = ThreadPool(processes=int(nthreads))
-        elif pool_kind == "process":
-            if start_method is None:
-                start_method = "spawn" if sys.platform in {"darwin", "win32"} else "fork"
-            ctx = mp.get_context(str(start_method))
-            pool = ctx.Pool(processes=int(nthreads))
-        else:
-            raise ValueError(f"Unsupported pool_kind={pool_kind!r}; use 'process', 'thread', or 'none'.")
+    pool = _make_emcee_pool(pool_kind, nthreads, log_prob, start_method=start_method)
     try:
         sampler = emcee.EnsembleSampler(
             int(nwalkers),
@@ -824,17 +877,7 @@ def run_averaged_mixture_crn_mcmc(
     if prev_roche_report is not None:
         population.roche_guard_report = False
 
-    pool = None
-    if nthreads and int(nthreads) > 1 and pool_kind != "none":
-        if pool_kind == "thread":
-            pool = ThreadPool(processes=int(nthreads))
-        elif pool_kind == "process":
-            if start_method is None:
-                start_method = "spawn" if sys.platform in {"darwin", "win32"} else "fork"
-            ctx = mp.get_context(str(start_method))
-            pool = ctx.Pool(processes=int(nthreads))
-        else:
-            raise ValueError(f"Unsupported pool_kind={pool_kind!r}; use 'process', 'thread', or 'none'.")
+    pool = _make_emcee_pool(pool_kind, nthreads, log_prob, start_method=start_method)
     try:
         sampler = emcee.EnsembleSampler(
             int(nwalkers),

@@ -1,4 +1,5 @@
 import unittest
+import multiprocessing as mp
 
 import numpy as np
 import pandas as pd
@@ -271,6 +272,37 @@ class BinaryPopulationInferenceTests(unittest.TestCase):
             nsteps=2,
             nthreads=1,
             pool_kind="none",
+            progress=False,
+            parameter_names=("f_bin", "pi"),
+            initial_position={"f_bin": 0.6, "pi": 0.0},
+            initial_scatter={"f_bin": 0.03, "pi": 0.05},
+            bins=np.array([0.0, 1.0e6]),
+            condition_by="baseline_days",
+            baseline_bins=np.array([0.0, 50.0, 150.0, np.inf]),
+            observed_baseline_days=observed_baselines,
+        )
+
+        self.assertEqual(sampler.get_chain().shape, (2, 8, 2))
+        self.assertTrue(np.all(np.isfinite(sampler.get_log_prob())))
+
+    @unittest.skipUnless("fork" in mp.get_all_start_methods(), "static_process smoke uses fork")
+    def test_run_averaged_mixture_crn_mcmc_static_process_smoke_shape(self):
+        pop, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        observed_baselines = np.array([30.0, 100.0, 120.0, 30.0])
+        np.random.seed(655)
+        sampler = run_averaged_mixture_crn_mcmc(
+            pop,
+            survey,
+            observed,
+            n_single_bank=64,
+            n_binary_bank=64,
+            bank_seeds=(31, 32),
+            nwalkers=8,
+            nsteps=2,
+            nthreads=2,
+            pool_kind="static_process",
+            start_method="fork",
             progress=False,
             parameter_names=("f_bin", "pi"),
             initial_position={"f_bin": 0.6, "pi": 0.0},
