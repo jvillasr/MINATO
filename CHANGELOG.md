@@ -1,5 +1,10 @@
 ## [Unreleased]
 ### Added
+* [2026-07-09] `binary_population` mixture-CRN likelihoods can now consume a
+  caller-supplied per-epoch RV blending-bias sampler via `blending_kernel`.
+  The sampler is applied to simulated binary primary epoch RVs before
+  `dRV_max` or pairwise summaries are computed, while the empirical kernel data
+  and flux-fraction model remain project-owned inputs outside MINATO.
 * [2026-07-09] `binary_population` averaged mixture-CRN MCMC now supports
   `pool_kind="bank_static_process"`, an emcee-compatible process pool that
   parallelises likelihood work across `walker x bank` tasks before averaging

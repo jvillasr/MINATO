@@ -16,7 +16,13 @@ from minato.binary_population import (
     run_averaged_mixture_crn_pairwise_mcmc,
     run_mixture_crn_mcmc,
 )
-from minato.binary_population.mixture_crn import BankParallelAveragedLogProbPool
+from minato.binary_population.mixture_crn import (
+    BankParallelAveragedLogProbPool,
+    BinaryRandomBank,
+    CadenceRandomBank,
+    SingleRandomBank,
+    build_mixture_crn_banks,
+)
 
 
 def make_toy_survey():
@@ -37,6 +43,55 @@ def make_toy_survey():
     )
     survey.load_data(coverage)
     return pop, survey
+
+
+def make_single_template_survey():
+    pop = BinaryPopulation()
+    pop.roche_guard_report = False
+    pop.logP_min = 0.15
+    pop.logP_max = 3.5
+    pop.logP_powerlaw_mode = "direct"
+    pop.q_min = 0.2
+    pop.q_max = 1.0
+    survey = BinarySurveySimulator(pop)
+    coverage = pd.DataFrame(
+        {
+            "ID": [1, 1, 1],
+            "MJD": [60000.0, 60002.0, 60008.0],
+            "mean_rv_er": [1.0, 1.0, 1.0],
+        }
+    )
+    survey.load_data(coverage)
+    return pop, survey
+
+
+def make_one_system_banks(blend_unit=None):
+    cadence = CadenceRandomBank(
+        template_indices=np.array([0], dtype=np.int32),
+        noise_unit=(np.zeros(3),),
+    )
+    single_bank = SingleRandomBank(cadence=cadence)
+    binary_bank = BinaryRandomBank(
+        u_m1=np.array([0.5]),
+        u_logP=np.array([0.45]),
+        u_q=np.array([0.6]),
+        u_e=np.array([0.0]),
+        u_cos_i=np.array([0.5]),
+        u_omega=np.array([0.25]),
+        u_Tp=np.array([0.0]),
+        cadence=cadence,
+        blend_unit=blend_unit,
+    )
+    return single_bank, binary_bank
+
+
+class FluxAwareTestBlendKernel:
+    metadata = {"name": "flux-aware-test-kernel", "n_rows": 3}
+
+    def sample_bias(self, abs_delta_v, f_secondary, u):
+        if f_secondary is None:
+            raise ValueError("test kernel requires f_secondary")
+        return 100.0 * np.asarray(u) + 0.01 * float(f_secondary) * np.asarray(abs_delta_v)
 
 
 class BinaryPopulationInferenceTests(unittest.TestCase):
@@ -388,6 +443,138 @@ class BinaryPopulationInferenceTests(unittest.TestCase):
             pairwise_like(np.array([0.6, 0.1])),
             drv_like(np.array([0.6, 0.1])),
             places=10,
+        )
+
+    def test_blending_kernel_shifts_epoch_rvs_before_drvmax(self):
+        pop, survey = make_single_template_survey()
+        blend_unit = (np.array([0.0, 0.25, 0.75]),)
+        single_bank, binary_bank = make_one_system_banks(blend_unit=blend_unit)
+        kernel = FluxAwareTestBlendKernel()
+        like = MixtureCRNLikelihood(
+            survey,
+            np.array([1.0]),
+            single_bank=single_bank,
+            binary_bank=binary_bank,
+            parameter_names=("f_bin", "pi", "kappa", "eta"),
+            bins=np.array([0.0, 1.0e6]),
+            blending_kernel=kernel,
+            blending_flux_fraction=lambda **kwargs: 0.25,
+        )
+        params = {"f_bin": 1.0, "pi": 0.1, "kappa": 0.0, "eta": -0.4}
+
+        arrays = like._binary_intrinsic_arrays(params)
+        t_array = like.template_mjds[0]
+        v1_true, v2_true = pop.rvcurve(
+            t_array,
+            arrays["P"][0],
+            arrays["Tp"][0],
+            arrays["e"][0],
+            arrays["omega_deg"][0],
+            0.0,
+            arrays["K1"][0],
+            arrays["K2"][0],
+            SB2=True,
+        )
+        expected_bias = kernel.sample_bias(np.abs(v2_true - v1_true), 0.25, blend_unit[0])
+        expected_drv = np.ptp(v1_true + expected_bias)
+
+        np.testing.assert_allclose(like.simulate_binary_drv(params), [expected_drv])
+        self.assertTrue(like.blending_metadata["enabled"])
+        self.assertEqual(like.blending_metadata["name"], "flux-aware-test-kernel")
+
+    def test_blending_kernel_shifts_epoch_rvs_before_pairwise_summary(self):
+        pop, survey = make_single_template_survey()
+        blend_unit = (np.array([0.0, 0.25, 0.75]),)
+        single_bank, binary_bank = make_one_system_banks(blend_unit=blend_unit)
+        kernel = FluxAwareTestBlendKernel()
+        config = PairwiseSummaryConfig(
+            delta_time_bins=(0.0, np.inf),
+            response="max_abs_delta_rv",
+            response_bins=(0.0, 10.0, 100.0, 1000.0),
+        )
+        like = PairwiseMixtureCRNLikelihood(
+            survey,
+            np.array([[1.0]]),
+            single_bank=single_bank,
+            binary_bank=binary_bank,
+            parameter_names=("f_bin", "pi", "kappa", "eta"),
+            config=config,
+            blending_kernel=kernel,
+            blending_flux_fraction=lambda **kwargs: 0.25,
+        )
+        params = {"f_bin": 1.0, "pi": 0.1, "kappa": 0.0, "eta": -0.4}
+
+        arrays = like._binary_intrinsic_arrays(params)
+        t_array = like.template_mjds[0]
+        v1_true, v2_true = pop.rvcurve(
+            t_array,
+            arrays["P"][0],
+            arrays["Tp"][0],
+            arrays["e"][0],
+            arrays["omega_deg"][0],
+            0.0,
+            arrays["K1"][0],
+            arrays["K2"][0],
+            SB2=True,
+        )
+        expected_bias = kernel.sample_bias(np.abs(v2_true - v1_true), 0.25, blend_unit[0])
+        expected_response = np.ptp(v1_true + expected_bias)
+
+        np.testing.assert_allclose(
+            like.simulate_binary_pairwise_summary(params),
+            [[expected_response]],
+        )
+
+    def test_blending_kernel_requires_blend_unit_bank_draws(self):
+        _, survey = make_single_template_survey()
+        single_bank, binary_bank = make_one_system_banks(blend_unit=None)
+        like = MixtureCRNLikelihood(
+            survey,
+            np.array([1.0]),
+            single_bank=single_bank,
+            binary_bank=binary_bank,
+            parameter_names=("f_bin", "pi", "kappa", "eta"),
+            bins=np.array([0.0, 1.0e6]),
+            blending_kernel=FluxAwareTestBlendKernel(),
+            blending_flux_fraction=lambda **kwargs: 0.25,
+        )
+        params = {"f_bin": 1.0, "pi": 0.1, "kappa": 0.0, "eta": -0.4}
+
+        with self.assertRaisesRegex(ValueError, "blend_unit"):
+            like.simulate_binary_drv(params)
+
+    def test_blend_unit_bank_draws_are_opt_in_and_preserve_existing_crn_draws(self):
+        _, survey = make_single_template_survey()
+        plain_single, plain_binary = build_mixture_crn_banks(
+            survey,
+            n_single_bank=4,
+            n_binary_bank=5,
+            seed=123,
+        )
+        blend_single, blend_binary = build_mixture_crn_banks(
+            survey,
+            n_single_bank=4,
+            n_binary_bank=5,
+            seed=123,
+            include_blend_unit=True,
+        )
+
+        self.assertIsNone(plain_binary.blend_unit)
+        self.assertIsNotNone(blend_binary.blend_unit)
+        np.testing.assert_array_equal(
+            plain_single.cadence.template_indices,
+            blend_single.cadence.template_indices,
+        )
+        np.testing.assert_allclose(plain_binary.u_m1, blend_binary.u_m1)
+        np.testing.assert_allclose(plain_binary.u_logP, blend_binary.u_logP)
+        np.testing.assert_allclose(plain_binary.u_q, blend_binary.u_q)
+        np.testing.assert_allclose(plain_binary.u_e, blend_binary.u_e)
+        np.testing.assert_allclose(plain_binary.u_cos_i, blend_binary.u_cos_i)
+        np.testing.assert_allclose(plain_binary.u_omega, blend_binary.u_omega)
+        np.testing.assert_allclose(plain_binary.u_Tp, blend_binary.u_Tp)
+        np.testing.assert_array_equal(
+            plain_binary.cadence.template_indices,
+            blend_binary.cadence.template_indices,
         )
 
     def test_one_bank_averaged_pairwise_matches_single_bank(self):

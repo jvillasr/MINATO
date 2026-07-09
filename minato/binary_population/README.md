@@ -161,6 +161,52 @@ This API is experimental. Validate it against the baseline-binned `dRV_max`
 likelihood, bank-seed stability, and wall time before using it for paper
 claims.
 
+## Optional empirical per-epoch RV blending bias
+
+The CRN likelihoods can consume a caller-supplied empirical RV-bias sampler for
+binary epochs. MINATO does not ship or define any study-specific kernel data;
+the caller owns the calibration table, filtering, binning, and out-of-range
+fallback policy. During the likelihood evaluation MINATO computes
+`abs(RV_2,true - RV_1,true)`, calls the supplied sampler, adds the returned
+`Delta RV_blend` to the simulated primary epoch RV, and only then computes
+`dRV_max` or pairwise summaries.
+
+The sampler must either be callable or provide
+`sample_bias(abs_delta_v, f_secondary, u)`, where `u` is the fixed CRN
+unit-uniform draw for each epoch. If the sampler needs an effective secondary
+flux fraction, pass `blending_flux_fraction` as a scalar or as a callable that
+accepts `intrinsic_arrays`, `system_index`, and `n_epochs`.
+
+```python
+class MyBlendingKernel:
+    metadata = {"source": "my validated calibration table"}
+
+    def sample_bias(self, abs_delta_v, f_secondary, u):
+        # Project-owned lookup/sampling logic goes here.
+        ...
+
+
+def effective_secondary_flux_fraction(*, intrinsic_arrays, system_index, n_epochs):
+    # Project-owned flux-fraction model goes here.
+    return 0.25
+
+
+sampler = run_averaged_mixture_crn_mcmc(
+    pop,
+    survey,
+    dRV_real,
+    bank_seeds=(20260621, 20260622),
+    parameter_names=("f_bin", "pi", "kappa", "eta"),
+    blending_kernel=MyBlendingKernel(),
+    blending_flux_fraction=effective_secondary_flux_fraction,
+)
+print(sampler.mixture_crn_likelihood.blending_metadata)
+```
+
+For process pools, the supplied kernel and flux-fraction callable must be
+pickleable. Use `pool_kind="none"` or `pool_kind="thread"` while prototyping
+non-pickleable local callables.
+
 ## Key options (selected)
 
 - Fixed draws: set `M1_values`, `logP_values`, `q_values`, `e_values`, with `fixed_values_mode` = `"random"` or `"cycle"`.

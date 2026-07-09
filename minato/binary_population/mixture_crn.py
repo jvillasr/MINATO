@@ -18,6 +18,11 @@ from multiprocessing.pool import ThreadPool
 
 import numpy as np
 
+from .blending import (
+    blending_metadata,
+    resolve_blending_flux_fraction,
+    sample_blending_bias,
+)
 from .mcmc import (
     DEFAULT_PARAMETER_BOUNDS,
     _env_truthy,
@@ -240,6 +245,7 @@ class BinaryRandomBank:
     u_omega: np.ndarray
     u_Tp: np.ndarray
     cadence: CadenceRandomBank
+    blend_unit: tuple[np.ndarray, ...] | None = None
 
     @property
     def size(self) -> int:
@@ -343,26 +349,52 @@ def _build_cadence_bank(rng, n_bank, template_mjds) -> CadenceRandomBank:
     )
 
 
-def build_mixture_crn_banks(survey, n_single_bank, n_binary_bank, seed=None):
+def build_mixture_crn_banks(
+    survey,
+    n_single_bank,
+    n_binary_bank,
+    seed=None,
+    include_blend_unit=False,
+):
     """
     Build fixed single and binary random banks for a real-cadence survey.
+
+    Set ``include_blend_unit=True`` when the bank will be used with a
+    per-epoch blending kernel. The default preserves the no-kernel CRN bank
+    contents and memory footprint.
     """
     _, template_mjds, _ = survey.cadence_templates()
     rng = np.random.default_rng(seed)
     n_binary_bank = int(n_binary_bank)
+    single_cadence = _build_cadence_bank(rng, int(n_single_bank), template_mjds)
+    u_m1 = rng.random(n_binary_bank)
+    u_logP = rng.random(n_binary_bank)
+    u_q = rng.random(n_binary_bank)
+    u_e = rng.random(n_binary_bank)
+    u_cos_i = rng.random(n_binary_bank)
+    u_omega = rng.random(n_binary_bank)
+    u_Tp = rng.random(n_binary_bank)
+    binary_cadence = _build_cadence_bank(rng, n_binary_bank, template_mjds)
+    blend_unit = None
+    if include_blend_unit:
+        blend_unit = tuple(
+            rng.random(np.asarray(template_mjds[int(template_idx)]).size)
+            for template_idx in binary_cadence.template_indices
+        )
     return (
         SingleRandomBank(
-            cadence=_build_cadence_bank(rng, int(n_single_bank), template_mjds),
+            cadence=single_cadence,
         ),
         BinaryRandomBank(
-            u_m1=rng.random(n_binary_bank),
-            u_logP=rng.random(n_binary_bank),
-            u_q=rng.random(n_binary_bank),
-            u_e=rng.random(n_binary_bank),
-            u_cos_i=rng.random(n_binary_bank),
-            u_omega=rng.random(n_binary_bank),
-            u_Tp=rng.random(n_binary_bank),
-            cadence=_build_cadence_bank(rng, n_binary_bank, template_mjds),
+            u_m1=u_m1,
+            u_logP=u_logP,
+            u_q=u_q,
+            u_e=u_e,
+            u_cos_i=u_cos_i,
+            u_omega=u_omega,
+            u_Tp=u_Tp,
+            cadence=binary_cadence,
+            blend_unit=blend_unit,
         ),
     )
 
@@ -385,6 +417,8 @@ class MixtureCRNLikelihood:
         parameter_bounds=None,
         fixed_parameters=None,
         bins=None,
+        blending_kernel=None,
+        blending_flux_fraction=None,
     ):
         self.survey = survey
         self.population = survey.population
@@ -408,12 +442,19 @@ class MixtureCRNLikelihood:
                 n_single_bank=n_single_bank,
                 n_binary_bank=n_binary_bank,
                 seed=bank_seed,
+                include_blend_unit=blending_kernel is not None,
             )
         self.single_bank = single_bank
         self.binary_bank = binary_bank
         self.bank_seed = bank_seed
         self.bins = np.asarray(np.logspace(0.4, 3, 30) if bins is None else bins, dtype=float)
         self.n_real, _ = np.histogram(self.dRV_real, bins=self.bins)
+        self.blending_kernel = blending_kernel
+        self.blending_flux_fraction = blending_flux_fraction
+        self.blending_metadata = blending_metadata(
+            blending_kernel,
+            blending_flux_fraction=blending_flux_fraction,
+        )
 
         self.single_drv = self._simulate_single_drv()
         self.single_hist, _ = np.histogram(self.single_drv, bins=self.bins)
@@ -465,14 +506,38 @@ class MixtureCRNLikelihood:
         denom = np.power(m1 + m2, 2.0 / 3.0)
         factor = np.power(2.0 * np.pi * g_factor, 1.0 / 3.0) * np.power(period_sec, -1.0 / 3.0)
         k1 = factor * (m2 * sin_i) / denom
+        k2 = factor * (m1 * sin_i) / denom
 
         return {
+            "M1": m1,
+            "M2": m2,
+            "q": q,
             "P": period,
             "e": eccentricity,
             "Tp": tp,
             "omega_deg": omega_deg,
             "K1": k1,
+            "K2": k2,
         }
+
+    def _binary_blending_bias(self, arrays, idx, v1_true, v2_true):
+        if self.blending_kernel is None:
+            return np.zeros_like(np.asarray(v1_true, dtype=float), dtype=float)
+        blend_unit = None
+        if self.binary_bank.blend_unit is not None:
+            blend_unit = self.binary_bank.blend_unit[int(idx)]
+        secondary_flux_fraction = resolve_blending_flux_fraction(
+            self.blending_flux_fraction,
+            intrinsic_arrays=arrays,
+            system_index=int(idx),
+            n_epochs=len(v1_true),
+        )
+        return sample_blending_bias(
+            self.blending_kernel,
+            abs_velocity_separation=np.abs(np.asarray(v2_true) - np.asarray(v1_true)),
+            secondary_flux_fraction=secondary_flux_fraction,
+            blend_unit=blend_unit,
+        )
 
     def simulate_binary_drv(self, params):
         arrays = self._binary_intrinsic_arrays(params)
@@ -483,17 +548,36 @@ class MixtureCRNLikelihood:
             template_idx = int(template_idx)
             t_array = self.template_mjds[template_idx]
             rv_errors = self.template_rv_errors[template_idx]
-            v1_true = pop.rvcurve(
-                t_array,
-                arrays["P"][idx],
-                arrays["Tp"][idx],
-                arrays["e"][idx],
-                arrays["omega_deg"][idx],
-                0.0,
-                arrays["K1"][idx],
-                0.0,
-                SB2=False,
-            )
+            if self.blending_kernel is None:
+                v1_true = pop.rvcurve(
+                    t_array,
+                    arrays["P"][idx],
+                    arrays["Tp"][idx],
+                    arrays["e"][idx],
+                    arrays["omega_deg"][idx],
+                    0.0,
+                    arrays["K1"][idx],
+                    0.0,
+                    SB2=False,
+                )
+            else:
+                v1_true, v2_true = pop.rvcurve(
+                    t_array,
+                    arrays["P"][idx],
+                    arrays["Tp"][idx],
+                    arrays["e"][idx],
+                    arrays["omega_deg"][idx],
+                    0.0,
+                    arrays["K1"][idx],
+                    arrays["K2"][idx],
+                    SB2=True,
+                )
+                v1_true = v1_true + self._binary_blending_bias(
+                    arrays,
+                    idx,
+                    v1_true,
+                    v2_true,
+                )
             rv_obs = v1_true + bank.cadence.noise_unit[idx] * rv_errors
             d_rv[idx] = float(np.nanmax(rv_obs) - np.nanmin(rv_obs))
         return d_rv
@@ -551,6 +635,8 @@ class AveragedMixtureCRNLikelihood:
         baseline_bins=None,
         observed_baseline_days=None,
         likelihoods=None,
+        blending_kernel=None,
+        blending_flux_fraction=None,
     ):
         self.survey = survey
         self.population = survey.population
@@ -593,6 +679,8 @@ class AveragedMixtureCRNLikelihood:
                     parameter_bounds=self.parameter_bounds,
                     fixed_parameters=fixed_parameters,
                     bins=bins,
+                    blending_kernel=blending_kernel,
+                    blending_flux_fraction=blending_flux_fraction,
                 )
                 for seed in self.bank_seeds
             ]
@@ -611,6 +699,7 @@ class AveragedMixtureCRNLikelihood:
         self.template_rv_errors = self.reference.template_rv_errors
         self.bins = self.reference.bins
         self.fixed_parameters = dict(self.reference.fixed_parameters)
+        self.blending_metadata = dict(self.reference.blending_metadata)
         self._validate_likelihoods()
 
         if self.condition_by is None:
@@ -867,6 +956,8 @@ def run_mixture_crn_mcmc(
     moves=None,
     progress=None,
     bins=None,
+    blending_kernel=None,
+    blending_flux_fraction=None,
 ):
     """
     Run emcee with the deterministic mixture/common-random-number likelihood.
@@ -899,6 +990,8 @@ def run_mixture_crn_mcmc(
         parameter_bounds=parameter_bounds,
         fixed_parameters=fixed_parameters,
         bins=bins,
+        blending_kernel=blending_kernel,
+        blending_flux_fraction=blending_flux_fraction,
     )
     p0 = _initial_walker_positions(
         population,
@@ -960,6 +1053,8 @@ def run_averaged_mixture_crn_mcmc(
     condition_by=None,
     baseline_bins=None,
     observed_baseline_days=None,
+    blending_kernel=None,
+    blending_flux_fraction=None,
 ):
     """
     Run emcee with the experimental averaged mixture-CRN likelihood.
@@ -1001,6 +1096,8 @@ def run_averaged_mixture_crn_mcmc(
         condition_by=condition_by,
         baseline_bins=baseline_bins,
         observed_baseline_days=observed_baseline_days,
+        blending_kernel=blending_kernel,
+        blending_flux_fraction=blending_flux_fraction,
     )
     p0 = _initial_walker_positions(
         population,

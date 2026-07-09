@@ -13,6 +13,11 @@ from itertools import combinations
 
 import numpy as np
 
+from .blending import (
+    blending_metadata,
+    resolve_blending_flux_fraction,
+    sample_blending_bias,
+)
 from .mcmc import (
     _env_truthy,
     _initial_walker_positions,
@@ -263,6 +268,8 @@ class PairwiseMixtureCRNLikelihood:
         parameter_bounds=None,
         fixed_parameters=None,
         config=None,
+        blending_kernel=None,
+        blending_flux_fraction=None,
     ):
         self.survey = survey
         self.population = survey.population
@@ -289,10 +296,17 @@ class PairwiseMixtureCRNLikelihood:
                 n_single_bank=n_single_bank,
                 n_binary_bank=n_binary_bank,
                 seed=bank_seed,
+                include_blend_unit=blending_kernel is not None,
             )
         self.single_bank = single_bank
         self.binary_bank = binary_bank
         self.bank_seed = bank_seed
+        self.blending_kernel = blending_kernel
+        self.blending_flux_fraction = blending_flux_fraction
+        self.blending_metadata = blending_metadata(
+            blending_kernel,
+            blending_flux_fraction=blending_flux_fraction,
+        )
 
         self.observed_summary = _normalise_observed_summary(
             observed_pairwise_summary,
@@ -362,14 +376,38 @@ class PairwiseMixtureCRNLikelihood:
         denom = np.power(m1 + m2, 2.0 / 3.0)
         factor = np.power(2.0 * np.pi * g_factor, 1.0 / 3.0) * np.power(period_sec, -1.0 / 3.0)
         k1 = factor * (m2 * sin_i) / denom
+        k2 = factor * (m1 * sin_i) / denom
 
         return {
+            "M1": m1,
+            "M2": m2,
+            "q": q,
             "P": period,
             "e": eccentricity,
             "Tp": tp,
             "omega_deg": omega_deg,
             "K1": k1,
+            "K2": k2,
         }
+
+    def _binary_blending_bias(self, arrays, idx, v1_true, v2_true):
+        if self.blending_kernel is None:
+            return np.zeros_like(np.asarray(v1_true, dtype=float), dtype=float)
+        blend_unit = None
+        if self.binary_bank.blend_unit is not None:
+            blend_unit = self.binary_bank.blend_unit[int(idx)]
+        secondary_flux_fraction = resolve_blending_flux_fraction(
+            self.blending_flux_fraction,
+            intrinsic_arrays=arrays,
+            system_index=int(idx),
+            n_epochs=len(v1_true),
+        )
+        return sample_blending_bias(
+            self.blending_kernel,
+            abs_velocity_separation=np.abs(np.asarray(v2_true) - np.asarray(v1_true)),
+            secondary_flux_fraction=secondary_flux_fraction,
+            blend_unit=blend_unit,
+        )
 
     def _simulate_single_pairwise_summary(self):
         response = np.empty((self.single_bank.size, len(self.delta_time_bins) - 1), dtype=float)
@@ -394,17 +432,36 @@ class PairwiseMixtureCRNLikelihood:
             template_idx = int(template_idx)
             t_array = self.template_mjds[template_idx]
             rv_errors = self.template_rv_errors[template_idx]
-            v1_true = pop.rvcurve(
-                t_array,
-                arrays["P"][idx],
-                arrays["Tp"][idx],
-                arrays["e"][idx],
-                arrays["omega_deg"][idx],
-                0.0,
-                arrays["K1"][idx],
-                0.0,
-                SB2=False,
-            )
+            if self.blending_kernel is None:
+                v1_true = pop.rvcurve(
+                    t_array,
+                    arrays["P"][idx],
+                    arrays["Tp"][idx],
+                    arrays["e"][idx],
+                    arrays["omega_deg"][idx],
+                    0.0,
+                    arrays["K1"][idx],
+                    0.0,
+                    SB2=False,
+                )
+            else:
+                v1_true, v2_true = pop.rvcurve(
+                    t_array,
+                    arrays["P"][idx],
+                    arrays["Tp"][idx],
+                    arrays["e"][idx],
+                    arrays["omega_deg"][idx],
+                    0.0,
+                    arrays["K1"][idx],
+                    arrays["K2"][idx],
+                    SB2=True,
+                )
+                v1_true = v1_true + self._binary_blending_bias(
+                    arrays,
+                    idx,
+                    v1_true,
+                    v2_true,
+                )
             rv_obs = v1_true + bank.cadence.noise_unit[idx] * rv_errors
             response[idx] = compute_pairwise_response(
                 t_array,
@@ -481,6 +538,8 @@ class AveragedMixtureCRNPairwiseLikelihood:
         fixed_parameters=None,
         config=None,
         likelihoods=None,
+        blending_kernel=None,
+        blending_flux_fraction=None,
     ):
         self.survey = survey
         self.population = survey.population
@@ -506,6 +565,8 @@ class AveragedMixtureCRNPairwiseLikelihood:
                     parameter_bounds=self.parameter_bounds,
                     fixed_parameters=fixed_parameters,
                     config=self.config,
+                    blending_kernel=blending_kernel,
+                    blending_flux_fraction=blending_flux_fraction,
                 )
                 for seed in self.bank_seeds
             ]
@@ -527,6 +588,7 @@ class AveragedMixtureCRNPairwiseLikelihood:
         self.observed_counts = self.reference.observed_counts
         self.N_obs = self.reference.N_obs
         self.fixed_parameters = dict(self.reference.fixed_parameters)
+        self.blending_metadata = dict(self.reference.blending_metadata)
         self._validate_likelihoods()
         self.single_probability = np.mean(
             [likelihood.single_probability for likelihood in self.likelihoods],
@@ -625,6 +687,8 @@ def run_averaged_mixture_crn_pairwise_mcmc(
     moves=None,
     progress=None,
     config=None,
+    blending_kernel=None,
+    blending_flux_fraction=None,
 ):
     """Run emcee with the averaged pairwise mixture-CRN likelihood."""
 
@@ -657,6 +721,8 @@ def run_averaged_mixture_crn_pairwise_mcmc(
         parameter_bounds=parameter_bounds,
         fixed_parameters=fixed_parameters,
         config=config,
+        blending_kernel=blending_kernel,
+        blending_flux_fraction=blending_flux_fraction,
     )
     p0 = _initial_walker_positions(
         population,
