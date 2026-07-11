@@ -253,6 +253,16 @@ class BinaryRandomBank:
 
 
 @dataclass(frozen=True)
+class CadenceGroup:
+    """Bank rows sharing one cadence template, with aligned epoch draws."""
+
+    template_index: int
+    system_indices: np.ndarray
+    noise_unit: np.ndarray
+    blend_unit: np.ndarray | None = None
+
+
+@dataclass(frozen=True)
 class ConditionedBankState:
     """Per-bank cached probabilities for a conditioned CRN likelihood."""
 
@@ -347,6 +357,37 @@ def _build_cadence_bank(rng, n_bank, template_mjds) -> CadenceRandomBank:
         template_indices=np.asarray(template_indices, dtype=np.int32),
         noise_unit=noise_unit,
     )
+
+
+def _build_cadence_groups(
+    cadence: CadenceRandomBank,
+    blend_unit: tuple[np.ndarray, ...] | None = None,
+) -> list[CadenceGroup]:
+    groups: list[CadenceGroup] = []
+    template_indices = np.asarray(cadence.template_indices, dtype=np.int32)
+    for template_index in np.unique(template_indices):
+        system_indices = np.flatnonzero(template_indices == template_index).astype(np.int64)
+        noise_unit = np.column_stack(
+            [cadence.noise_unit[int(index)] for index in system_indices]
+        )
+        group_blend_unit = None
+        if blend_unit is not None:
+            group_blend_unit = np.column_stack(
+                [blend_unit[int(index)] for index in system_indices]
+            )
+        groups.append(
+            CadenceGroup(
+                template_index=int(template_index),
+                system_indices=system_indices,
+                noise_unit=np.asarray(noise_unit, dtype=float),
+                blend_unit=(
+                    None
+                    if group_blend_unit is None
+                    else np.asarray(group_blend_unit, dtype=float)
+                ),
+            )
+        )
+    return groups
 
 
 def build_mixture_crn_banks(
@@ -446,6 +487,10 @@ class MixtureCRNLikelihood:
             )
         self.single_bank = single_bank
         self.binary_bank = binary_bank
+        self.binary_cadence_groups = _build_cadence_groups(
+            self.binary_bank.cadence,
+            blend_unit=self.binary_bank.blend_unit,
+        )
         self.bank_seed = bank_seed
         self.bins = np.asarray(np.logspace(0.4, 3, 30) if bins is None else bins, dtype=float)
         self.n_real, _ = np.histogram(self.dRV_real, bins=self.bins)
@@ -539,47 +584,99 @@ class MixtureCRNLikelihood:
             blend_unit=blend_unit,
         )
 
+    def _binary_group_blending_bias(self, arrays, group, v1_true, v2_true):
+        if self.blending_kernel is None:
+            return np.zeros_like(np.asarray(v1_true, dtype=float), dtype=float)
+
+        n_epochs = int(v1_true.shape[0])
+        secondary_flux_columns = []
+        scalar_flux_values = []
+        all_flux_values_are_scalar = True
+        saw_none_flux_value = False
+        for idx in group.system_indices:
+            value = resolve_blending_flux_fraction(
+                self.blending_flux_fraction,
+                intrinsic_arrays=arrays,
+                system_index=int(idx),
+                n_epochs=n_epochs,
+            )
+            if value is None:
+                saw_none_flux_value = True
+                continue
+            value = np.asarray(value, dtype=float)
+            if value.shape == ():
+                scalar_value = float(value)
+                scalar_flux_values.append(scalar_value)
+                secondary_flux_columns.append(np.full(n_epochs, scalar_value, dtype=float))
+            elif value.shape == (n_epochs,):
+                all_flux_values_are_scalar = False
+                secondary_flux_columns.append(value)
+            else:
+                raise ValueError(
+                    "blending_flux_fraction callable returned an array with "
+                    "the wrong epoch length."
+                )
+        if saw_none_flux_value and secondary_flux_columns:
+            raise ValueError("blending_flux_fraction cannot mix None and numeric values.")
+        if saw_none_flux_value:
+            secondary_flux_fraction = None
+        elif (
+            all_flux_values_are_scalar
+            and scalar_flux_values
+            and np.all(np.asarray(scalar_flux_values) == scalar_flux_values[0])
+        ):
+            secondary_flux_fraction = float(scalar_flux_values[0])
+        else:
+            secondary_flux_fraction = np.column_stack(secondary_flux_columns)
+
+        return sample_blending_bias(
+            self.blending_kernel,
+            abs_velocity_separation=np.abs(np.asarray(v2_true) - np.asarray(v1_true)),
+            secondary_flux_fraction=secondary_flux_fraction,
+            blend_unit=group.blend_unit,
+        )
+
     def simulate_binary_drv(self, params):
         arrays = self._binary_intrinsic_arrays(params)
         d_rv = np.empty(self.binary_bank.size, dtype=float)
-        bank = self.binary_bank
         pop = self.population
-        for idx, template_idx in enumerate(bank.cadence.template_indices):
-            template_idx = int(template_idx)
-            t_array = self.template_mjds[template_idx]
-            rv_errors = self.template_rv_errors[template_idx]
+        for group in self.binary_cadence_groups:
+            indices = group.system_indices
+            t_array = np.asarray(self.template_mjds[group.template_index], dtype=float)
+            t_grid = t_array[:, None]
+            rv_errors = np.asarray(self.template_rv_errors[group.template_index], dtype=float)
             if self.blending_kernel is None:
                 v1_true = pop.rvcurve(
-                    t_array,
-                    arrays["P"][idx],
-                    arrays["Tp"][idx],
-                    arrays["e"][idx],
-                    arrays["omega_deg"][idx],
+                    t_grid,
+                    arrays["P"][indices],
+                    arrays["Tp"][indices],
+                    arrays["e"][indices],
+                    arrays["omega_deg"][indices],
                     0.0,
-                    arrays["K1"][idx],
+                    arrays["K1"][indices],
                     0.0,
                     SB2=False,
                 )
             else:
                 v1_true, v2_true = pop.rvcurve(
-                    t_array,
-                    arrays["P"][idx],
-                    arrays["Tp"][idx],
-                    arrays["e"][idx],
-                    arrays["omega_deg"][idx],
+                    t_grid,
+                    arrays["P"][indices],
+                    arrays["Tp"][indices],
+                    arrays["e"][indices],
+                    arrays["omega_deg"][indices],
                     0.0,
-                    arrays["K1"][idx],
-                    arrays["K2"][idx],
+                    arrays["K1"][indices],
+                    arrays["K2"][indices],
                     SB2=True,
                 )
-                v1_true = v1_true + self._binary_blending_bias(
+                v1_true = v1_true + self._binary_group_blending_bias(
                     arrays,
-                    idx,
+                    group,
                     v1_true,
                     v2_true,
                 )
-            rv_obs = v1_true + bank.cadence.noise_unit[idx] * rv_errors
-            d_rv[idx] = float(np.nanmax(rv_obs) - np.nanmin(rv_obs))
+            rv_obs = v1_true + group.noise_unit * rv_errors[:, None]
+            d_rv[indices] = np.nanmax(rv_obs, axis=0) - np.nanmin(rv_obs, axis=0)
         return d_rv
 
     def component_probabilities(self, params):

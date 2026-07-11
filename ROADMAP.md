@@ -35,6 +35,9 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 - Verify `binary_population` MCMC batching behaves as expected (correct normalization) and improves wall-time performance [][]
 - PRIORITY: Make `binary_population` inference scalable on large CPUs (process/MPI pool, summary-only simulation, reproducible seeding) and test on laptop + MPIA astro-nodes (small/large scale; 1-parameter `f_bin` and multi-parameter runs) in a dedicated branch [STARTED][2026-06-16]
 - Add and validate an experimental mixture/common-random-number likelihood for high-`N_obs` binary-population inference [Done][2026-07-08]
+- Optimise empirical-blending mixture-CRN binary-bank evaluation by grouping
+  systems with shared cadence templates while preserving fixed-bank numerical
+  outputs [Done][2026-07-11]
 - Add an experimental star-balanced pairwise mixture-CRN likelihood with a
   `dRV_max` collapse regression test [Done][2026-07-09]
 - Follow the larger binary-population inference branch plan in `BINARY_POPULATION_INFERENCE_PLAN.md`, including multi-bank averaging and time/cadence-conditioned likelihoods [Done][2026-07-08]

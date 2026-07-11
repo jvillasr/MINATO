@@ -482,6 +482,52 @@ class BinaryPopulationInferenceTests(unittest.TestCase):
         self.assertTrue(like.blending_metadata["enabled"])
         self.assertEqual(like.blending_metadata["name"], "flux-aware-test-kernel")
 
+    def test_grouped_binary_drv_matches_serial_blending_path(self):
+        pop, survey = make_toy_survey()
+        like = MixtureCRNLikelihood(
+            survey,
+            np.array([1.0, 5.0, 20.0]),
+            n_single_bank=12,
+            n_binary_bank=48,
+            bank_seed=20260710,
+            parameter_names=("f_bin", "pi", "kappa", "eta"),
+            bins=np.array([0.0, 10.0, 100.0, 1.0e6]),
+            blending_kernel=FluxAwareTestBlendKernel(),
+            blending_flux_fraction=lambda **kwargs: 0.25,
+        )
+        params = {"f_bin": 1.0, "pi": 0.1, "kappa": 0.0, "eta": -0.4}
+
+        grouped = like.simulate_binary_drv(params)
+
+        arrays = like._binary_intrinsic_arrays(params)
+        serial = np.empty(like.binary_bank.size, dtype=float)
+        for idx, template_idx in enumerate(like.binary_bank.cadence.template_indices):
+            template_idx = int(template_idx)
+            t_array = like.template_mjds[template_idx]
+            rv_errors = like.template_rv_errors[template_idx]
+            v1_true, v2_true = pop.rvcurve(
+                t_array,
+                arrays["P"][idx],
+                arrays["Tp"][idx],
+                arrays["e"][idx],
+                arrays["omega_deg"][idx],
+                0.0,
+                arrays["K1"][idx],
+                arrays["K2"][idx],
+                SB2=True,
+            )
+            v1_true = v1_true + like._binary_blending_bias(
+                arrays,
+                idx,
+                v1_true,
+                v2_true,
+            )
+            rv_obs = v1_true + like.binary_bank.cadence.noise_unit[idx] * rv_errors
+            serial[idx] = float(np.nanmax(rv_obs) - np.nanmin(rv_obs))
+
+        self.assertGreater(len(like.binary_cadence_groups), 1)
+        np.testing.assert_allclose(grouped, serial)
+
     def test_blending_kernel_shifts_epoch_rvs_before_pairwise_summary(self):
         pop, survey = make_single_template_survey()
         blend_unit = (np.array([0.0, 0.25, 0.75]),)

@@ -59,6 +59,11 @@
 * Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
 
 ### Changed
+* [2026-07-11] `binary_population` mixture-CRN binary-bank `dRV_max`
+  simulation now groups systems by shared cadence template before evaluating
+  RV curves and optional per-epoch blending biases. This preserves fixed-bank
+  outputs while substantially reducing empirical-blending runtime for
+  real-cadence inference.
 * [2026-06-16] `binary_population` likelihood evaluation now has an internal
   fast path for real-cadence `summary_only=True` calls that need only primary
   `dRV_max`. The path pre-packs cadence/error templates, skips DataFrame
