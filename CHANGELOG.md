@@ -59,6 +59,10 @@
 * Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
 
 ### Changed
+* [2026-07-12] Reconciled the binary-population inference plan with the merged
+  averaged, baseline-conditioned, pairwise, parallel-pool, and blending-hook
+  APIs, and separated remaining MINATO documentation work from paper-side
+  scientific validation.
 * [2026-07-11] `binary_population` mixture-CRN binary-bank `dRV_max`
   simulation now groups systems by shared cadence template before evaluating
   RV curves and optional per-epoch blending biases. This preserves fixed-bank

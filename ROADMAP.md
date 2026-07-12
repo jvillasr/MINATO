@@ -42,7 +42,10 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
   `dRV_max` collapse regression test [Done][2026-07-09]
 - Follow the larger binary-population inference branch plan in `BINARY_POPULATION_INFERENCE_PLAN.md`, including multi-bank averaging and time/cadence-conditioned likelihoods [Done][2026-07-08]
 - Validate the pairwise mixture-CRN likelihood against the baseline-binned
-  `dRV_max` reference at production scale [STARTED][2026-07-09]
+  `dRV_max` reference at production scale [Done][2026-07-10]
+- Reconcile `BINARY_POPULATION_INFERENCE_PLAN.md` with the merged public APIs,
+  completed controlled validation, and remaining documentation/release work
+  [Done][2026-07-12]
 - Update `binary_population` tutorial with HPC caveats and “how to run” guidance (threads vs processes vs MPI; choosing `N_sim`, `batch_size`, `nwalkers`, `nsteps`) [][]
 - Create/expand a tutorial for binary simulations (`minato.binary_population`) covering the main options and common workflows [Done][2025-12-15]
 - Validate and complete the SB1 tutorial: Gaussian vs Voigt (`profile`), impact on results, and a working legacy `lmfit` example [][]

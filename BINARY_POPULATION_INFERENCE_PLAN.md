@@ -1,140 +1,179 @@
-# Binary Population Inference Plan
+# Binary Population Inference Status And Remaining Plan
 
-This plan records the larger direction for
-`feature/binary-population-mixture-crn-likelihood-20260621`.
+This document records the completed binary-population mixture/common-random-
+number (CRN) work and the remaining MINATO tasks. The original implementation
+branch, `feature/binary-population-mixture-crn-likelihood-20260621`, has been
+merged into `develop`. The current merged reference is commit `27fdd4e`.
 
-The branch has two linked goals:
+The work had two linked goals:
 
-1. Make binary-population inference computationally usable for large observed samples.
-2. Make the likelihood scientifically stronger by using survey time/cadence information, not only the global `dRV_max` histogram.
+1. Make binary-population inference computationally usable for large observed
+   samples.
+2. Strengthen the observational likelihood by using survey time/cadence
+   information rather than only a global `dRV_max` histogram.
 
 ## Current Status
 
-The branch currently contains an experimental mixture/common-random-number
-likelihood and the fast `summary_only=True` likelihood path.
+The core implementation is complete and available from the public
+`minato.binary_population` API.
 
-The current MINATO implementation supports:
+Implemented capabilities include:
 
 - fixed random banks for deterministic likelihood evaluation;
 - continuous mixture weighting,
   `p_model = (1 - f_bin) p_single + f_bin p_binary`;
 - deterministic inverse-CDF transforms for `M1`, `logP`, `q`, and `e`;
-- clean access to loaded survey cadence/error templates via
-  `BinarySurveySimulator.cadence_templates()`;
-- a faster real-cadence `dRV_max` summary path;
-- `MixtureCRNLikelihood` and `run_mixture_crn_mcmc`;
-- unit/smoke tests for the restored likelihood path.
+- fast real-cadence `dRV_max` summaries without repeated DataFrame creation;
+- `MixtureCRNLikelihood` and `run_mixture_crn_mcmc` for single-bank inference;
+- `AveragedMixtureCRNLikelihood` and `run_averaged_mixture_crn_mcmc` for
+  averaged multi-bank inference;
+- optional conditioning on survey quantities, including baseline-bin
+  conditioning;
+- `static_process` pooling, which keeps large fixed banks resident in worker
+  processes;
+- `bank_static_process` pooling, which parallelises the expensive
+  `walker x bank` work for multi-parameter inference;
+- experimental star-balanced pairwise summaries based on time-binned
+  `max |Delta RV|` or RV-error-normalised `max X_ij`;
+- an optional caller-supplied per-epoch RV blending-bias hook; and
+- focused regression, equivalence, multiprocessing, pairwise, and blending
+  tests.
 
-The paper-side diagnostics showed that:
+## Validation Completed
 
-- the old stochastic likelihood was too noisy for efficient MCMC on the WP1 mock;
-- single-bank mixture-CRN fixes sampler sticking and makes likelihood calls deterministic;
-- the global `dRV_max` histogram constrains `f_bin` better than `pi`;
-- conditioning `dRV_max` on time baseline makes `pi` more informative;
-- single-bank baseline-conditioned likelihoods are jagged because finite-bank/bin noise is amplified;
-- four-bank averaging before likelihood scoring produced the best diagnostic grid, with a peak near the injected `f_bin=0.6`, `pi=0.1`.
+The following controlled checks have been completed in the
+`multiplicity_paper` reference analysis:
 
-The successful paper-side reference result is:
+- repeated CRN likelihood calls are deterministic;
+- one-bank averaged evaluation agrees with the corresponding single-bank
+  evaluation;
+- baseline-conditioned probabilities are reproducible and finite;
+- four-bank model probabilities are averaged before likelihood scoring, not
+  after taking logarithms;
+- the public MINATO averaged likelihood exactly reproduces all `1271` points
+  of the original paper-side `4 x 100000` baseline-conditioned grid;
+- a finer `17 x 25` method-comparison grid with four `100000+100000` banks
+  recovers the injected `(f_bin, pi) = (0.600, 0.100)` exactly with the
+  baseline-binned `dRV_max` likelihood;
+- the same production-scale comparison shows that the tested pairwise
+  `max X_ij`, joint `(dRV_max, Delta t_at_dRVmax)`, and Sana et al.-style
+  scores do not improve recovery over baseline-binned `dRV_max`;
+- full two-parameter baseline-conditioned and global `dRV_max` MCMC runs have
+  completed;
+- a `3000`-step four-parameter baseline-conditioned mock MCMC has completed
+  with `bank_static_process` pooling; and
+- paper-side real-data MCMC runs have exercised the generic blending hook and
+  shared-cadence optimisation at four-bank scale.
 
-- four fixed banks: `20260621`, `20260622`, `20260623`, `20260624`;
-- `100000` single-star and `100000` binary systems per bank;
-- baseline bins: `[0,7)`, `[7,30)`, `[30,100)`, `[100,365)`, `[365,inf)` days;
-- best grid point: `f_bin=0.611`, `pi=0.100`.
+The reference four-bank configuration remains:
 
-That four-bank averaged, baseline-conditioned method is not yet implemented in
-MINATO proper. It currently exists only in the paper-side grid helper.
+- bank seeds: `20260621`, `20260622`, `20260623`, `20260624`;
+- `100000` single-star and `100000` binary systems per bank; and
+- baseline bins: `[0,7)`, `[7,30)`, `[30,100)`, `[100,365)`,
+  `[365,inf)` days.
 
-## Phase 1: Stabilise Current Branch
+These values describe the validated reference case. They are not hard-coded
+requirements of the public API.
 
-- Review the WIP commit scope.
-- Decide whether all restored files belong in this branch, especially
-  `minato/spdis.py`.
-- Clean up the current WIP commit into reviewable commits if needed.
-- Keep the current single-bank mixture-CRN likelihood labelled experimental.
-- Confirm public API names are acceptable before expanding the interface.
+## Method Status
 
-## Phase 2: Performance Foundation
+### Validated reference
 
-- Keep the fast `summary_only=True` path for real-cadence `dRV_max`.
-- Avoid repeated `DataFrame` construction during likelihood evaluation.
-- Cache fixed observed histogram state where possible.
-- Use fixed random banks so repeated calls at the same parameters are deterministic.
-- Support multi-bank evaluation without unnecessary repeated setup work.
+Baseline-binned `dRV_max` is the current reference likelihood for controlled
+recovery and the first real-data analysis. It retains one robust `dRV_max`
+summary per star and conditions its distribution on the star's total survey
+baseline.
 
-## Phase 3: Time/Cadence-Aware Likelihood
+### Regression/control
 
-The current likelihood is based on a global `dRV_max` histogram.
+Global `dRV_max` remains useful as a cadence-blind control and backwards-
+compatibility check. It is not the preferred production constraint when
+baseline information is available.
 
-The next target is:
+### Experimental
 
-```text
-dRV_max conditioned on survey time/cadence information
-```
+The pairwise CRN API is implemented and has passed mechanics, collapse, and
+production-scale comparison tests. The currently tested time-binned
+`max X_ij` scoring form did not outperform baseline-binned `dRV_max`, so it
+remains experimental and should not be presented as the default likelihood.
 
-First implementation target:
+The caller-supplied blending hook is also optional. Its numerical behaviour is
+defined by the external kernel supplied by the caller; study-specific kernel
+data and flux-fraction choices do not belong in MINATO core.
 
-- baseline-binned likelihood using bins
-  `[0,7)`, `[7,30)`, `[30,100)`, `[100,365)`, `[365,inf)` days.
+## Completed Phases
 
-Future scientific extensions:
+1. **Branch stabilisation:** completed and merged into `develop`.
+2. **Performance foundation:** completed for the current fixed-bank workloads.
+3. **Time/cadence-aware likelihood:** baseline conditioning is implemented;
+   pairwise summaries are available experimentally.
+4. **Numerical-noise reduction:** averaged multi-bank scoring is implemented,
+   with both static and bank-parallel process pools.
+5. **Controlled validation:** deterministic, equivalence, mock-recovery, and
+   production-scale method-comparison gates are complete.
+6. **MCMC products:** two- and four-parameter mock chains have completed;
+   study-specific real-data interpretation remains paper-side work.
+7. **Merge:** the implementation and performance changes are merged into
+   `develop` and recorded in `CHANGELOG.md` and `ROADMAP.md`.
 
-- pairwise `Delta MJD/HJD` information, closer to the Sana et al. style;
-- number-of-epochs conditioning;
-- RV-error conditioning;
-- broader cadence-class conditioning if needed.
+## Remaining MINATO Work
 
-## Phase 4: Reduce Numerical Noise
+### 1. User documentation
 
-- Implement multi-bank averaging in MINATO.
-- Average model probabilities or histograms across banks before scoring.
-- Do not average log likelihoods after the fact.
-- Start with four banks: `20260621`, `20260622`, `20260623`, `20260624`.
-- Keep bank-seed diagnostics available.
-- If jaggedness remains, test a simulation-uncertainty-aware likelihood rather than only increasing MCMC length.
+Update the binary-population tutorial and complete the module README with one
+compact end-to-end example covering:
 
-## Phase 5: Validation
+- survey cadence input;
+- fixed-bank mixture-CRN construction;
+- averaged multi-bank likelihood evaluation;
+- baseline conditioning through `condition_by` and `baseline_bins`;
+- choosing between `static_process` and `bank_static_process`;
+- fitted versus fixed population parameters; and
+- the optional blending-kernel interface.
 
-Use mock data first.
+The documentation should identify baseline-binned `dRV_max` as the validated
+reference and pairwise likelihoods as experimental.
 
-Required checks:
+### 2. Release validation
 
-- repeated likelihood calls are deterministic;
-- one-bank averaged mode matches single-bank mode;
-- baseline-bin counts are reproducible and correctly normalised;
-- four-bank averaged likelihood returns finite values;
-- the four-bank baseline-conditioned grid peaks near the injected truth for the WP1 mock;
-- MCMC acceptance and mobility are healthy;
-- posterior summaries are stable enough under bank-seed choices;
-- final corner plots recover injected `f_bin` and `pi` for the mock.
+Before the next release:
 
-## Phase 6: MCMC And Science Products
+- run the focused binary-population tests in the intended release environment;
+- run one small tutorial-scale averaged baseline-conditioned inference;
+- verify public docstrings and exported API names;
+- record practical memory and CPU guidance for bank size, bank count, walker
+  count, step count, and pool choice; and
+- include the binary-population changes in the release notes.
 
-Only after the averaged baseline-conditioned grid is smooth enough:
+### 3. Optional future research
 
-- run one full MCMC using the averaged baseline-conditioned likelihood;
-- make the final corner plot;
-- report medians, credible intervals, acceptance fraction, and autocorrelation/ESS if available;
-- document fixed parameters, fitted parameters, bank sizes, bank seeds, baseline bins, and caveats.
+Further pairwise work should start from a specific failure hypothesis, not by
+adding more summary variants. Possible future directions include:
 
-## Phase 7: Documentation And Merge
+- richer per-star pairwise response vectors that retain more continuous
+  information without weighting high-epoch stars by their raw pair count;
+- explicit number-of-epochs or cadence-class conditioning;
+- RV-error and cadence-pattern robustness tests; and
+- likelihoods that account for finite simulation uncertainty.
 
-- Update `CHANGELOG.md` under `Unreleased`.
-- Keep `ROADMAP.md` status aligned with actual progress.
-- Add a short usage example or tutorial note covering:
-  - survey cadence input;
-  - mixture-CRN likelihood;
-  - bank averaging;
-  - baseline-conditioned likelihood.
-- Merge only after the experimental API and validation story are coherent.
+These are research extensions rather than blockers for the current
+baseline-binned `dRV_max` workflow.
+
+## Paper-Side Scientific Gates
+
+The following tasks use MINATO but are owned by the science analysis rather
+than MINATO core:
+
+- diagnose convergence and identifiability in the completed four-parameter
+  mock chain;
+- rerun the first LMC real-data inference with wider `pi` support;
+- calibrate finite-sample reliability before reporting subtype-separated
+  constraints; and
+- prepare the main-method description and controlled method-comparison
+  appendix.
 
 ## Immediate Next Step
 
-Implement the successful paper-side method in MINATO proper:
-
-```text
-four-bank averaged + baseline-conditioned mixture-CRN likelihood
-```
-
-Use the paper-side grid evaluator as the reference implementation, but keep the
-MINATO API general enough to support simulated survey-coverage tables as well
-as real survey cadence tables loaded with `BinarySurveySimulator.load_data(...)`.
+Update the binary-population tutorial and module documentation to expose the
+merged averaged, baseline-conditioned, and parallel APIs with clear method-
+status labels.
