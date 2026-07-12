@@ -1,33 +1,69 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "minato"
+name = "minato-astro"
 version = "0.2.0"
-description = "MINATO: Massive bINaries Analysis TOols"
+description = "Tools for analysing massive stars and binary-star populations"
 readme = "README.md"
-requires-python = ">=3.10"
-license = { file = "LICENSE.txt" }
+requires-python = ">=3.12,<3.14"
+license = "MIT"
+license-files = ["LICENSE.txt"]
+keywords = ["astronomy", "massive-stars", "binary-stars", "spectroscopy"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Astronomy",
+]
 dependencies = [
   "astropy",
+  "astroplan",
   "corner",
   "emcee",
   "exojax",
   "jax",
-  "kepler.py",
   "lmfit",
   "matplotlib",
   "multiprocess",
-  "numpy",
+  "numpy>=2.2,<2.3",
   "numpyro",
   "pandas",
   "scipy",
   "tqdm",
 ]
 
+[project.urls]
+Homepage = "https://github.com/jvillasr/MINATO"
+Documentation = "https://github.com/jvillasr/MINATO/tree/main/minato"
+Issues = "https://github.com/jvillasr/MINATO/issues"
+Repository = "https://github.com/jvillasr/MINATO.git"
+
 [tool.setuptools.packages.find]
 include = ["minato*"]
 
 [project.optional-dependencies]
-dev = ["ipykernel>=7.1.0"]
+dev = [
+  "ipykernel>=7.1.0",
+  "nbclient",
+  "nbformat",
+]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "osx-arm64"]
+
+[tool.pixi.dependencies]
+python = "3.13.*"
+astroplan = "*"
+numpy = "2.2.*"
+
+[tool.pixi.pypi-dependencies]
+minato-astro = { path = ".", editable = true }
+numba = ">=0.65"
+
+[tool.pixi.tasks]
+test = "python -m unittest discover -s tests"

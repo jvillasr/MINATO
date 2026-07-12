@@ -4,6 +4,8 @@
 .DS_Store*
 .vscode/
 .codex
+.pixi/
+.pixi-cache/
 __pycache*
 *.egg-info/
 build/

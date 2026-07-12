@@ -121,6 +121,69 @@ preserves older behaviour and samples
 mode to use when comparing `pi` to literature-style period distributions over a
 positive log-period interval.
 
+## Validated averaged mixture-CRN likelihood
+
+For larger observed samples, prefer the averaged mixture/common-random-number
+likelihood over the older stochastic `run_mcmc` path. It builds fixed random
+banks once, averages model probabilities across banks, and then scores the
+Poisson likelihood. The current validated reference for cadence-aware work is
+baseline-binned `dRV_max`.
+
+```python
+import numpy as np
+import pandas as pd
+from minato.binary_population import (
+    BinaryPopulation,
+    BinarySurveySimulator,
+    run_averaged_mixture_crn_mcmc,
+)
+
+coverage_df = pd.read_csv("path/to/coverage.csv")  # columns: ID, MJD, mean_rv_er
+dRV_real = np.loadtxt("path/to/dRV_max_values.txt")
+observed_baseline_days = np.loadtxt("path/to/baseline_days_values.txt")
+
+pop = BinaryPopulation()
+pop.logP_min = 0.15
+pop.logP_max = 3.5
+pop.logP_powerlaw_mode = "direct"
+pop.q_min = 0.1
+pop.q_max = 1.0
+
+survey = BinarySurveySimulator(pop)
+survey.load_data(coverage_df)
+
+sampler = run_averaged_mixture_crn_mcmc(
+    pop,
+    survey,
+    dRV_real,
+    n_single_bank=100_000,
+    n_binary_bank=100_000,
+    bank_seeds=(20260621, 20260622, 20260623, 20260624),
+    parameter_names=("f_bin", "pi", "kappa", "eta"),
+    parameter_bounds={
+        "f_bin": (0.0, 1.0),
+        "pi": (-3.0, 3.0),
+        "kappa": (-4.0, 4.0),
+        "eta": (-0.95, 4.0),
+    },
+    fixed_parameters={},
+    condition_by="baseline_days",
+    baseline_bins=(0, 7, 30, 100, 365, np.inf),
+    observed_baseline_days=observed_baseline_days,
+    pool_kind="bank_static_process",
+    nthreads=48,
+)
+chain = sampler.get_chain(discard=500, thin=10, flat=True)
+print(np.median(chain, axis=0))
+```
+
+Use `pool_kind="static_process"` to parallelise over walkers when each walker
+can own all banks. Use `pool_kind="bank_static_process"` when multi-bank,
+multi-parameter evaluations need the extra `walker x bank` parallelism. Keep
+bank sizes, bank counts, walker counts, and process counts modest for tutorial
+runs, then scale them on CPU nodes after a small deterministic smoke test. MPI
+is not currently exposed by the public runner API.
+
 ## Experimental pairwise mixture-CRN likelihood
 
 The pairwise CRN likelihood scores a star-balanced summary vector instead of

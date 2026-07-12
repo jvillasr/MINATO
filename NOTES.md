@@ -1,5 +1,130 @@
 # MINATO Notes
 
+## 2026-07-12 - Promote observing and adopt Python 3.13
+
+Scope:
+- Replaced the recovered top-level `Observing/` directory with the installable
+  `minato.observing` package.
+- Added phase-window generation, Astroplan observability checks, and night
+  visibility plotting. Data are returned to callers; printing and CSV output
+  are optional, and existing files require `overwrite=True`.
+- Added focused observing tests and a clean, offline-capable tutorial at
+  `minato/tutorials/observing_tutorial.ipynb`.
+- Set Python 3.13 as the development baseline and declared Python 3.12-3.13
+  support. Pinned NumPy to the 2.2 line across package, Pixi, and mamba
+  definitions so Python 3.13 installs use binary wheels.
+- Replaced `kepler.py` with a vectorised SciPy/Halley solver in
+  `minato.binary_population.orbits`.
+- Regenerated `uv.lock`, `pixi.lock`, and `conda-lock.yml` for the updated
+  runtime and dependency policy.
+
+Numerical and performance checks:
+- Against `kepler.py`, 100,000 random elliptic orbits differed by at most
+  `2.8e-13` radians after angle wrapping. A 100,000-epoch, `e=0.92` RV curve
+  differed by at most `7.4e-11 km/s`.
+- The isolated SciPy solver was about 2.5 times slower in that microbenchmark
+  (`0.027 s` versus `0.011 s`), with no meaningful change in RV results.
+
+Validation:
+- A clean uv Python 3.13 environment installed 132 packages and passed all 54
+  unit tests with NumPy 2.2.6.
+- A separate clean uv Python 3.12 environment passed the same 54 tests, so both
+  ends of the declared Python support range are validated.
+- A locked Pixi Python 3.13 environment passed the same 54 tests.
+- `uv lock --check`, `pixi lock --check`, and the three-platform conda-lock
+  input-hash check passed.
+- The observing tutorial executed successfully with `nbclient`; the disposable
+  executed copy is `/tmp/minato-observing-tutorial-executed.ipynb`.
+- `uv build` created
+  `/tmp/minato-dist-py313-final/minato_astro-0.2.0-py3-none-any.whl` and the
+  matching source archive. The wheel includes `minato.observing`,
+  `minato.spdis`, and the SciPy orbital solver, and excludes development logs,
+  tutorials, and atmosphere-model files.
+- Installing that wheel with dependencies into `/tmp/minato-wheeltest` worked
+  without the source checkout. Installed imports for `minato.observing`,
+  `minato.binary_population`, and `minato.spdis` passed with current unlocked
+  package-index dependencies as well as with the committed locks.
+
+Remaining validation:
+- A direct `conda-lock install --micromamba` attempt made no prefix progress
+  and was stopped after several minutes. The lock itself is current for
+  `linux-64`, `osx-64`, and `osx-arm64`; repeat the install on the laptop.
+- Complete representative SB1/SB2 release workflows.
+- Existing invalid-escape warnings in `span.py` and `spdis.py`, plus Python
+  3.13 multiprocessing fork warnings, remain follow-up work.
+
+## 2026-07-12 - Start 0.3.0 release preparation
+
+Scope:
+- Started release preparation from clean `develop` after the binary-population
+  inference status update.
+- Approved `0.3.0` rather than `1.0.0`. The official release date is defined as
+  the date when the approved merge from `develop` is committed on `main`.
+- Approved the distribution name `minato-astro` because `minato` is occupied
+  by an unrelated PyPI project. The import namespace remains `minato`.
+- Added Pixi configuration to `pyproject.toml`, generated `pixi.lock` for
+  `linux-64`, `osx-64`, and `osx-arm64`, and refreshed `uv.lock`.
+- Kept `minato_env.yml` as the mamba development manifest and added the local
+  editable package plus `astroplan`; generated `conda-lock.yml` for `linux-64`,
+  `osx-64`, and `osx-arm64`. The editable checkout is installed separately
+  after a locked environment because conda-lock excludes `-e .`.
+- Recovered useful `Observing/` Python sources from `archive-develop` without
+  archived notebooks, figures, or the hard-coded runner. The directory remains
+  outside the installable package.
+- Confirmed `minato/spdis.py` was already identical to `archive-develop` and
+  repaired its package-relative `myRC` import.
+- Reworked the main README and tutorial index to document current modules,
+  installation choices, development-only material, and tutorial status.
+- Expanded `minato/tutorials/binary_population_tutorial.ipynb` and the module
+  README with baseline-conditioned averaged mixture-CRN guidance and current
+  process-pool choices.
+- Added `RELEASE_PREPARATION_PLAN.md` with package, branch-content, version, and
+  Read the Docs recommendations.
+
+Audit findings:
+- PyPI already serves an unrelated `minato` distribution, so MINATO must not
+  document `pip install minato`.
+- `pyproject.toml` and `minato/__init__.py` still report version `0.2.0`; do not
+  bump until the release checks pass and the merge is ready.
+- `CHANGELOG.md` still uses `[Unreleased]`; do not move entries to a dated
+  release section until the release is approved.
+- Tracked hygiene checks found no tracked `__pycache__`, `.DS_Store`, or
+  token-like files.
+- `minato/models/` contains many tracked atmosphere-grid files; review package
+  contents before building a distribution.
+- The archived observing helpers need API redesign and tests before they move
+  into `minato.observing`.
+- Existing SB1/SB2 notebooks contain large outputs and require a separate
+  clean-up and execution pass before release.
+
+Validation:
+- `UV_CACHE_DIR=.uv-cache uv lock --check` passed with 176 resolved packages.
+- `pixi lock --check` passed against `pixi.lock` for three platforms.
+- `conda-lock lock --micromamba --file minato_env.yml --platform linux-64
+  --platform osx-64 --platform osx-arm64` generated `conda-lock.yml`.
+  A subsequent `--check-input-hash` pass confirmed all three platform specs are
+  current without re-solving.
+- `PYTHONDONTWRITEBYTECODE=1 ./.venv/bin/python -m unittest discover -s
+  tests` passed 48 tests. Importing `minato.spdis` still reports archived
+  invalid-escape deprecation warnings that should be cleaned before promoting
+  the module beyond experimental status.
+- `jq empty minato/tutorials/binary_population_tutorial.ipynb` passed. All
+  notebook code cells also executed sequentially in one Python namespace with
+  the expensive MCMC/CRN flags left off.
+- `UV_CACHE_DIR=.uv-cache uv build --out-dir /tmp/minato-dist-2` built
+  `/tmp/minato-dist-2/minato_astro-0.2.0-py3-none-any.whl` and
+  `/tmp/minato-dist-2/minato_astro-0.2.0.tar.gz` without packaging warnings.
+  The wheel is about 146 KB and excludes `Observing/`, development logs,
+  tutorials, and the tracked atmosphere-model tree.
+- `git diff --check` passed before the final logbook update.
+
+Remaining validation:
+- Create genuinely fresh environments from `uv.lock`, `pixi.lock`, and
+  `conda-lock.yml`, then run the same import and unit-test smoke checks.
+- Execute the notebook with `nbclient`/`nbconvert` and retained outputs in a
+  disposable copy; the repository notebook intentionally remains clean.
+- Run representative SB1 and SB2 workflows before release.
+
 ## 2026-06-14 - Replace synthetic-spectrum creation tutorial
 
 Scope:

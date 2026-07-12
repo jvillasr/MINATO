@@ -1,83 +1,134 @@
 # MINATO: Massive bINaries Analysis TOols
 
-Python tools for the comprehensive analysis of massive binary stars, focusing on precise radial velocity measurement, spectral line profile fitting, and robust time series analysis.
+MINATO is a Python toolkit for analysing massive stars and binary-star systems.
+It provides spectral fitting, radial-velocity measurements, time-series tools,
+binary-population inference, and synthetic-spectrum utilities.
 
-## Version 0.1.0
-- **Spectral analysis (`span`)**: 
-  - Simultaneous spectral fitting of binary stars using synthetic models. 
-  - Computes effective temperatures, log surface gravities, rotational velocities, He/H ratios, and the light ratio of the binary.
+The latest stable release is `v0.2.0`. The `develop` branch contains the
+candidate work for `v0.3.0` and may include experimental or development-only
+modules.
 
-## Version 0.2.0
+## Modules
 
-### Added Features:
-
-- **Radial Velocity Determination and Time Series Analysis (`ravel`)**
-
-  - **Spectral Line Profile Fitting (`SLfit`)**
-    - Supports single-lined (SB1) and double-lined (SB2) spectroscopic binaries.
-    - Automated Gaussian/Lorentzian line profile fitting with customizable priors.
-    - For SB2s:
-      - Probabilistic modeling using Bayesian inference with Numpyro. 
-      - Direct radial velocity computation.
-
-  - **Radial Velocity Analysis for SB1s (`GetRVs`)**
-    - Automated computation of radial velocities (RVs) from fitted spectral lines.
-    - Weighted mean RV calculations with built-in outlier rejection based on median absolute deviation (MAD).
-    - Comprehensive statistical summaries and error propagation for reliable velocity measurements.
-
-  - **Time Series and Period Analysis**
-    - Implementation of Lomb-Scargle periodograms with false alarm probability (FAP) estimation.
-    - Automatic peak detection with adjustable significance thresholds.
-    - Probabilistic sinusoidal model fitting to phased radial velocity curves for orbital characterisation.
-
-
-### Planned Future Features
-
-- Simulations of binary populations
-- Spectral Energy Distribution (SED) fitting
-- Automated spectral classification of massive stars
+| Module | Purpose | Status |
+| --- | --- | --- |
+| `minato.span` | Simultaneous atmosphere-model fitting for disentangled binary spectra | Stable |
+| `minato.ravel` | SB1/SB2 line-profile fitting, radial velocities, and period analysis | Stable |
+| `minato.binary_population` | Intrinsic binary populations, survey simulation, and scalable population inference | Release candidate |
+| `minato.synthetic` | Synthetic single-star and binary spectra with configurable atmosphere-grid backends | Release candidate |
+| `minato.observing` | Orbital-phase scheduling, observability checks, and night-visibility plots | Release candidate |
+| `minato.spdis` | Shift-and-add spectral disentangling | Experimental |
 
 ## Installation
 
-Clone the repository:
+### pip
+
+The existing `v0.2.0` tag predates Python packaging metadata, so it still
+requires the historical clone-and-environment workflow. During `0.3.0`
+preparation, the installable development snapshot can be installed directly
+from GitHub without a manual clone:
+
 ```bash
-git clone https://github.com/jvillasr/MINATO/
+python -m pip install "git+https://github.com/jvillasr/MINATO.git@develop"
 ```
-Use your favourite dependency manager:
+
+This follows a moving development branch. Use a tagged release once `0.3.0` is
+published.
+
+The planned PyPI distribution name is `minato-astro`, while the import name
+remains `minato`:
+
+```python
+import minato
+print(minato.__version__)
+```
+
+Do not run `pip install minato`: that PyPI name belongs to an unrelated file-I/O
+library. `pip install minato-astro` will be documented after the first PyPI
+publication.
+
+### Development environments
+
+Clone the repository when developing MINATO or running repository tutorials:
+
 ```bash
+git clone https://github.com/jvillasr/MINATO.git
 cd MINATO
-mamba env create -f minato_env.yml
+git switch develop
 ```
 
-## Usage
+Choose one environment manager.
 
-Detailed examples are provided in the `minato/tutorials` directory.
+With mamba:
 
-## Dependencies
+```bash
+mamba env create -f minato_env.yml
+mamba activate minato
+```
 
-- tested under Python 3.10
-- astropy
-- jax
-- lmfit
-- matplotlib
-- numpy
-- numpyro
-- pandas
-- scipy
-- tqdm
+For the exact locked environment, install `conda-lock` once, then run:
 
-## Contributing and Issues
-Contributions and bug reports are welcome! Please submit an issue on GitHub or open a pull request.
+```bash
+conda-lock install --name minato conda-lock.yml
+mamba activate minato
+python -m pip install --no-deps -e .
+```
+
+The final command installs the current checkout; editable local projects are
+deliberately not embedded in `conda-lock.yml`.
+
+With uv:
+
+```bash
+uv sync --frozen --extra dev
+```
+
+With Pixi:
+
+```bash
+pixi install --locked
+```
+
+`pyproject.toml` is the package dependency definition. `uv.lock`, `pixi.lock`,
+and `conda-lock.yml` provide exact resolved environments. The current locks
+cover Linux x86-64, Intel macOS, and Apple Silicon macOS where supported by the
+respective manager.
+
+MINATO uses Python 3.13 for development and supports Python 3.12-3.13. The
+orbital solver is implemented with SciPy, avoiding the Python 3.10-only wheels
+from the former `kepler.py` dependency.
+
+## Quick start
+
+```python
+from minato.binary_population import BinaryPopulation
+
+population = BinaryPopulation()
+sample = population.generate_intrinsic_sample_vectorized(N=1_000, f_bin=0.7)
+print(sample.head())
+```
+
+See the [tutorial index](minato/README.md) for module-specific walkthroughs.
+
+## Documentation
+
+Module documentation currently lives beside the code and in clean tutorial
+notebooks. A versioned Sphinx/MyST-NB site hosted on Read the Docs is under
+consideration for the `1.0.0` documentation milestone.
+
+## Contributing and issues
+
+Bug reports and contributions are welcome through
+[GitHub Issues](https://github.com/jvillasr/MINATO/issues) and pull requests.
+Ongoing development targets `develop`; `main` contains release-ready code.
 
 ## Citation
 
-If you use MINATO in your research, please cite:
+If you use MINATO in your research, please cite the relevant method:
 
-- For `span`:
-> [Villaseñor et al., 2023, MNRAS, 525, 5121, 10.1093/mnras/stad2533](https://ui.adsabs.harvard.edu/abs/2023MNRAS.525.5121V/abstract)
-- For `ravel`:
-> [Villaseñor et al., 2025, A&A accepted, 10.48550/arXiv.2503.21936](https://ui.adsabs.harvard.edu/abs/2025arXiv250321936V/abstract)
+- `span`: [Villaseñor et al. (2023), MNRAS, 525, 5121](https://ui.adsabs.harvard.edu/abs/2023MNRAS.525.5121V/abstract)
+- `ravel`: [Villaseñor et al. (2025), A&A](https://ui.adsabs.harvard.edu/abs/2025arXiv250321936V/abstract)
 
-## License
+## Licence
 
-This project is licensed under the MIT License. See `LICENSE` for more information.
+MINATO is distributed under the MIT Licence. See [LICENSE.txt](LICENSE.txt).

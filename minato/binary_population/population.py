@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
-import kepler
+
+from .orbits import solve_kepler
 
 
 class BinaryPopulation:
@@ -322,7 +323,7 @@ class BinaryPopulation:
         """
         omega = omega_deg * np.pi / 180.0
         M = (2 * np.pi / P) * (t - Tp)
-        E = kepler.solve(M, e)
+        E = solve_kepler(M, e)
         theta = 2.0 * np.arctan(np.sqrt((1 + e) / (1 - e)) * np.tan(E / 2.0))
 
         v1 = gamma + K1 * (np.cos(theta + omega) + e * np.cos(omega))

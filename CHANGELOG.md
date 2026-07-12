@@ -1,5 +1,14 @@
 ## [Unreleased]
 ### Added
+* [2026-07-12] Added the installable `minato.observing` package for generating
+  orbital-phase windows, applying Astroplan observability constraints, and
+  plotting night-time target visibility without forced display or file output.
+* [2026-07-12] Added a clean, offline-capable `minato.observing` tutorial using
+  an explicit observatory location and synthetic target inputs.
+* [2026-07-12] Added a multi-platform `conda-lock.yml` for exact mamba/conda
+  dependency environments on Linux x86-64, Intel macOS, and Apple Silicon.
+* [2026-07-12] Added a Pixi workspace and cross-platform `pixi.lock` alongside
+  the existing uv and mamba development workflows.
 * [2026-07-09] `binary_population` mixture-CRN likelihoods can now consume a
   caller-supplied per-epoch RV blending-bias sampler via `blending_kernel`.
   The sampler is applied to simulated binary primary epoch RVs before
@@ -59,6 +68,23 @@
 * Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
 
 ### Changed
+* [2026-07-12] Moved the development baseline to Python 3.13, declared support
+  for Python 3.12-3.13, and aligned uv, Pixi, and mamba environments on NumPy
+  2.2 for Python 3.13 binary-wheel availability.
+* [2026-07-12] Replaced the `kepler.py` orbital dependency with a tested SciPy
+  Kepler-equation solver, removing reliance on extension wheels that stop at
+  Python 3.10.
+* [2026-07-12] Approved `0.3.0` and the `minato-astro` distribution name, with
+  the official release date defined by the `develop`-to-`main` merge commit.
+* [2026-07-12] Prepared package metadata and installation documentation for the
+  proposed `minato-astro` distribution name, while retaining `import minato`
+  and warning users about the unrelated `minato` project on PyPI.
+* [2026-07-12] Expanded the binary-population tutorial with deterministic
+  mixture-CRN guidance, baseline conditioning, CPU pool selection, and safer
+  opt-in inference cells.
+* [2026-07-12] Started release-preparation documentation for `0.3.0` by
+  adding a user-facing averaged, baseline-conditioned mixture-CRN example and
+  listing the binary-population tutorial in the tutorial index.
 * [2026-07-12] Reconciled the binary-population inference plan with the merged
   averaged, baseline-conditioned, pairwise, parallel-pool, and blending-hook
   APIs, and separated remaining MINATO documentation work from paper-side
@@ -91,6 +117,8 @@
 * The SB1 and SB2 `ravel` tutorials now include an upfront note on setting `XLA_FLAGS` before importing `minato.ravel` on shared CPU servers.
 
 ### Fixed
+* [2026-07-12] `minato.spdis` now imports `myRC` package-relatively, so the
+  module can be imported from an installed MINATO distribution.
 * [2026-07-08] `AtmFit` light-ratio grid scoring now keeps observations in the original disentangling scale and dilutes models instead, avoiding biased cross-`lr` likelihood rankings.
 * [2026-05-05] SB1 fit plots no longer swap epoch and line axes when `n_epochs == n_lines`; plots now draw a coherent high-likelihood posterior sample.
 * [2026-05-05] Probabilistic SB1/Na/SB2 interpolation windows now drop non-finite or non-positive-error points before interpolation, avoiding red/NIR collapse from bad pixels.

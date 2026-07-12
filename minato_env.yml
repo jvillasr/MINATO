@@ -3,14 +3,15 @@ channels:
   - conda-forge
   # - defaults
 dependencies:
-  - python=3.10
+  - python=3.13
   - pip
   - astropy
+  - astroplan
   - corner
   - jax
   - lmfit
   - matplotlib
-  - numpy
+  - numpy=2.2
   - numpyro
   - pandas
   - scipy
@@ -18,5 +19,5 @@ dependencies:
   - emcee
   - multiprocess
   - pip:
-      - kepler.py
       - exojax
+      - -e .

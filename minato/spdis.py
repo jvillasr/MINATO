@@ -1,3 +1,5 @@
+"""Experimental spectral-disentangling tools."""
+
 import sys
 import os
 import numpy as np
@@ -11,7 +13,7 @@ from astropy.io import ascii
 from astropy.table import Table
 from astropy.constants import c
 from datetime import date
-import myRC
+from . import myRC
 
 class SpecDisent:
     def __init__(self, lines, orbparams, epochs, spectra, extension='.fits'):

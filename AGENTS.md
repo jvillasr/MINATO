@@ -42,8 +42,10 @@ Future: tutorials may move to a ReadTheDocs-style site; write notebooks so they 
 
 ## Branch workflow for documentation
 - `develop` is the working branch for ongoing development, and development branches should normally be created from `develop`.
-- `AGENTS.md`, `ROADMAP.md`, and `CHANGELOG.md` are tracked on `develop` so they are available on any machine used for development.
-- `main` is the release branch. If a release merge from `develop` brings in development-only project-management files that you do not want to keep on `main`, remove them in a follow-up commit on `main` before tagging the release.
+- Development records such as `AGENTS.md`, `ROADMAP.md`, `NOTES.md`, `CHANGELOG.md`, and `*_PLAN.md` are tracked on `develop` so they are available on any machine used for development.
+- `main` is the release branch. The official release date is the date when the approved release merge from `develop` is committed on `main`.
+- Prepare the merge with `git merge --no-commit --no-ff develop`, remove development-only records and unfinished archive recovery from the pending merge tree, validate the resulting release tree, and then create the merge commit.
+- Copy the approved user-facing change summary into the GitHub release notes instead of keeping development records on `main`.
 - Do not use local-only ignore rules to hide these files during development; they should stay visible and versioned on development branches.
 
 ### 1) ROADMAP.md (to-do list)
