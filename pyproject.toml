@@ -67,3 +67,4 @@ numba = ">=0.65"
 
 [tool.pixi.tasks]
 test = "python -m unittest discover -s tests"
+ravel-smoke = { cmd = "python -m unittest tests.test_ravel", env = { MINATO_RUN_RAVEL_SMOKE = "1", JAX_ENABLE_X64 = "True", XLA_FLAGS = "--xla_force_host_platform_device_count=1", MPLBACKEND = "Agg" } }

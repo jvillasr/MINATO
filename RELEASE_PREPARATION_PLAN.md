@@ -57,10 +57,11 @@ package namespace.
 
 Remaining environment work:
 
-1. Complete a fresh mamba installation from `conda-lock.yml`; lock generation
-   and input-hash validation pass, but the astro-node install stalled before
-   creating its prefix.
-2. Publish the validated wheel to TestPyPI before the real package index.
+1. Publish the validated wheel to TestPyPI before the real package index.
+
+Fresh Python 3.13 environments created from the mamba, uv, and Pixi locks pass
+the unit suite. The mamba check also verifies that the resolved NumPy 2.2.6
+installation has no broken package requirements.
 
 The mamba lock covers third-party dependencies. Install the current checkout
 with `python -m pip install --no-deps -e .` after `conda-lock install`; editable
@@ -132,12 +133,14 @@ generated API pages for `binary_population` and `synthetic`.
 ## Release gates
 
 - Approve `0.3.0`, the release date, and `minato-astro`.
-- Complete the fresh mamba environment check; uv and Pixi Python 3.13
-  environments already pass the full unit suite.
-- Add CI for package build, imports, and unit tests.
-- Validate the binary-population tutorial and a representative SB1/SB2 run.
+- Keep the validated mamba, uv, and Pixi locks unchanged unless dependency
+  updates are intentionally reviewed and retested.
+- Confirm the new GitHub Actions jobs pass after pushing `develop`.
+- Complete the full multi-epoch SB1/SB2 tutorial validation; reduced synthetic
+  probabilistic fits now run in CI.
+- Validate the binary-population tutorial in the final release environment.
 - Decide whether `spdis` is documented experimental API or excluded from the
   release notes.
 - Review and approve `minato.observing` as part of the `0.3.0` public surface.
-- Inspect wheel and source-distribution contents for models, tutorial outputs,
-  logs, and secrets.
+- Publish the release candidate to TestPyPI and verify installation from the
+  package index before publishing to PyPI.

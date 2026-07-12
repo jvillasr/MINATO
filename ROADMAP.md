@@ -21,20 +21,21 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 - Audit repository for committed secrets (e.g., `.token`) and remove/rotate if needed [][]
 - Clean repo hygiene (remove tracked `.DS_Store`, `__pycache__`, large artifacts) [][]
 - Review dependency footprint (`pyproject.toml`, `minato_env.yml`, and lock files) and remove unused requirements [STARTED][2026-07-12]
-- Do fresh locked-environment install checks with mamba, uv, and Pixi [STARTED][2026-07-12]
+- Do fresh locked-environment install checks with mamba, uv, and Pixi [Done][2026-07-12]
 - Decide/record branch policy (e.g., `develop` → `main`, required reviews) [Done][2026-04-16]
 
 ## Milestone: Next release (target: `0.3.0`)
 
 - Approve version `0.3.0` and define the release date as the `develop`-to-`main` merge date [Done][2026-07-12]
 - Approve the `minato-astro` distribution name while preserving `import minato` [Done][2026-07-12]
-- Add and validate reproducible mamba, uv, and Pixi workflows; commit exact lock files for supported platforms [STARTED][2026-07-12]
+- Add and validate reproducible mamba, uv, and Pixi workflows; commit exact lock files for supported platforms [Done][2026-07-12]
 - Move the development baseline to Python 3.13, support Python 3.12-3.13, and remove Python 3.10-only dependencies [Done][2026-07-12]
 - Bump `minato/__init__.py::__version__` to the release version [][]
 - Move items from `CHANGELOG.md` `[Unreleased]` into a new dated release section [][]
 - Ensure “what changed” notes exist for users (README + tutorials where needed) [STARTED][2026-07-12]
 - Add a short upgrade note if outputs/files changed (paths, CSV formats, column names) [][]
-- Run a full validation pass (smoke tests + a representative SB1 + SB2 run) [][]
+- Run a full validation pass (smoke tests + a representative SB1 + SB2 run) [STARTED][2026-07-12]
+- Add reduced synthetic probabilistic SB1/SB2 release smoke tests to CI [Done][2026-07-12]
 - Verify `binary_population` MCMC batching behaves as expected (correct normalization) and improves wall-time performance [][]
 - PRIORITY: Make `binary_population` inference scalable on large CPUs (process/MPI pool, summary-only simulation, reproducible seeding) and test on laptop + MPIA astro-nodes (small/large scale; 1-parameter `f_bin` and multi-parameter runs) in a dedicated branch [STARTED][2026-06-16]
 - Add and validate an experimental mixture/common-random-number likelihood for high-`N_obs` binary-population inference [Done][2026-07-08]
@@ -54,7 +55,7 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 - Validate and complete the SB1 tutorial: Gaussian vs Voigt (`profile`), impact on results, and a working legacy `lmfit` example [][]
 - Benchmark `ravel` SB1 scaling on astro-nodes using the PoWR multiepoch binary sample (`R=2000`, `SNR=25`) and document the recommended `XLA_FLAGS` / `num_chains` / `chain_method` setup [STARTED][2026-04-16]
 - Benchmark and optimise the P117-style SB1 batch workflow for large campaigns: 4 fit families per star, no plots, tuned warmup/sample depth, epoch-count batching, and validated `n_workers` × `n_cpus_per_worker` packing before multi-node scale-out [STARTED][2026-04-17]
-- Refresh the SB2 tutorial to match current code and include new functionality (two-stage sampling, diagnostics, stitching) [][]
+- Refresh the SB2 tutorial to match current code and include new functionality (two-stage sampling, diagnostics, stitching) [STARTED][2026-07-12]
 - Make MINATO installable via `pip`, validate wheel/sdist contents, and publish the approved distribution through TestPyPI and PyPI [STARTED][2026-07-12]
 - Repair, test, and document `minato.spdis` as an explicitly experimental or supported module [STARTED][2026-07-12]
 - Recover useful `Observing/` sources on `develop`, then redesign them as a tested `minato.observing` package before any release [Done][2026-07-12]
@@ -65,7 +66,7 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 
 ## Backlog (not tied to a milestone yet)
 
-- Add CI (format/lint + tests) [][]
+- Add CI for supported-Python tests, RAVEL smoke tests, lock checking, and package builds [Done][2026-07-12]
 - Add a packaging config (`pyproject.toml`) for `pip install -e .` workflows [Done][2026-07-12]
 - Add SB2 support for component-specific RV uncertainties in `binary_population` (e.g., `rv_errors1`/`rv_errors2`, separate cadence/error columns, optional error ratios) [][]
 - Add a `binary_population` survey-coverage generator that can create simulated `ID`/`MJD`/`mean_rv_er` cadence tables from a high-level survey design, so users do not need to hand-build coverage inputs before calling `BinarySurveySimulator.load_data(...)` [][]

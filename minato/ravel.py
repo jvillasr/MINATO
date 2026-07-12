@@ -2405,40 +2405,40 @@ def _fit_sb2_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hline
         μ = λ0 * (1 + Δv_τk / c_kms)  # Broadcasts: (K, n_lines, nepochs) then add an extra axis
         μ = μ[:, :, :, None]  # Final shape: (K, n_lines, nepochs, 1)
 
-    # Prepare the observed wavelengths for model evaluation
-    λ_expanded = λ[None, :, :, :]  # Shape: (1, n_lines, nepochs, ndata)
-    is_hline_expanded = is_hline[None, :, None, None]  # Shape: (1, n_lines, 1, 1)
+        # Prepare the observed wavelengths for model evaluation
+        λ_expanded = λ[None, :, :, :]  # Shape: (1, n_lines, nepochs, ndata)
+        is_hline_expanded = is_hline[None, :, None, None]  # Shape: (1, n_lines, 1, 1)
 
-    # Compute the model profiles for each component
-    gaussian_profile = gaussian(λ_expanded, amp, μ, wid)
-    lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
-    voigt_profile = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
+        # Compute the model profiles for each component
+        gaussian_profile = gaussian(λ_expanded, amp, μ, wid)
+        lorentzian_profile = lorentzian(λ_expanded, amp, μ, wid)
+        voigt_profile = pseudo_voigt(λ_expanded, amp, μ, wid_G, wid_L)
 
-    if profile == 'Voigt':
-        non_h_profile = voigt_profile
-    elif profile == 'Gaussian':
-        non_h_profile = gaussian_profile
-    else:
-        raise ValueError('Profile to fit must be one of Voigt or Gaussian')
+        if profile == 'Voigt':
+            non_h_profile = voigt_profile
+        elif profile == 'Gaussian':
+            non_h_profile = gaussian_profile
+        else:
+            raise ValueError('Profile to fit must be one of Voigt or Gaussian')
 
-    if Hprofile == 'Lorentzian':
-        h_profile = lorentzian_profile
-    elif Hprofile == 'Voigt':
-        h_profile = voigt_profile
-    elif Hprofile == 'Gaussian':
-        h_profile = gaussian_profile
-    else:
-        raise ValueError('Hprofile must be one of Lorentzian, Voigt or Gaussian')
+        if Hprofile == 'Lorentzian':
+            h_profile = lorentzian_profile
+        elif Hprofile == 'Voigt':
+            h_profile = voigt_profile
+        elif Hprofile == 'Gaussian':
+            h_profile = gaussian_profile
+        else:
+            raise ValueError('Hprofile must be one of Lorentzian, Voigt or Gaussian')
 
-    comp_profile = jnp.where(is_hline_expanded, h_profile, non_h_profile)
+        comp_profile = jnp.where(is_hline_expanded, h_profile, non_h_profile)
 
-    Ck = npro.deterministic("C_λk", comp_profile)
+        Ck = npro.deterministic("C_λk", comp_profile)
 
-    # Sum over components and add continuum to yield the predicted flux
-    fλ_pred = npro.deterministic("fλ_pred", ε + Ck.sum(axis=0))
+        # Sum over components and add continuum to yield the predicted flux
+        fλ_pred = npro.deterministic("fλ_pred", ε + Ck.sum(axis=0))
 
-    # Likelihood: compare predicted flux with observed flux
-    npro.sample("fλ", dist.StudentT(df=8, loc=fλ_pred, scale=σ_fλ), obs=fλ)
+        # Likelihood: compare predicted flux with observed flux
+        npro.sample("fλ", dist.StudentT(df=8, loc=fλ_pred, scale=σ_fλ), obs=fλ)
     
     # ------------------------
     # MCMC Sampling Procedure
@@ -2490,9 +2490,11 @@ def _fit_sb2_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hline
     }
 
     # RV priors for second MCMC run, switched relative to the first
-    dv_prior = np.squeeze(np.mean(np.asarray(trace1["Δv_τk"]), axis=0))  # (K,E)
-    if dv_prior.ndim != 2:
-        raise ValueError(f"dv_prior shape {dv_prior.shape}, expected (2, E)")
+    n_fit_epochs = int(x_waves.shape[1])
+    dv_prior = np.mean(np.asarray(trace1["Δv_τk"]), axis=0).reshape(
+        K,
+        n_fit_epochs,
+    )
     dv_prior_sw = dv_prior[::-1, :]  # swapping component RVs
 
     # ------------------------------------
@@ -2594,7 +2596,18 @@ def _fit_sb2_probmod_impl(lines, wavelengths, fluxes, f_errors, lines_dic, Hline
 
     rng_key2 = random.PRNGKey(2)
     kernel2  = NUTS(conditioned_rv_model)
-    mcmc2    = MCMC(kernel2, num_warmup=1000, num_chains=4, num_samples=2000)
+    mcmc2_kwargs = dict(
+        num_warmup=num_warmup,
+        num_chains=num_chains,
+        num_samples=num_samples,
+        chain_method=chain_method,
+        progress_bar=bool(progress),
+    )
+    try:
+        mcmc2 = MCMC(kernel2, **mcmc2_kwargs)
+    except TypeError:
+        mcmc2_kwargs.pop("progress_bar", None)
+        mcmc2 = MCMC(kernel2, **mcmc2_kwargs)
     mcmc2.run(
         rng_key2, extra_fields=("potential_energy",),
         λ=x_waves, fλ=y_fluxes, σ_fλ=y_errors, K=K, is_hline=is_hline, 

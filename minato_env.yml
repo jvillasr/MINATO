@@ -19,5 +19,6 @@ dependencies:
   - emcee
   - multiprocess
   - pip:
+      - "numpy>=2.2,<2.3"
       - exojax
       - -e .

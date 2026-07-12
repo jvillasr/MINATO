@@ -1,5 +1,49 @@
 # MINATO Notes
 
+## 2026-07-12 - Add CI and repair the SB2 release path
+
+Scope:
+- Added `.github/workflows/ci.yml` with Python 3.12/3.13 unit-test jobs, a
+  Python 3.13 reduced RAVEL SB1/SB2 smoke job, and a package-build job.
+- Added `tests/test_ravel.py`. The normal suite checks a deterministic classic
+  SB1 fit; `MINATO_RUN_RAVEL_SMOKE=1` enables reduced one-line, one-epoch
+  probabilistic SB1 and SB2 fits.
+- Fixed an indentation regression that left the SB2 profile and likelihood
+  block outside the nested NumPyro model and caused `NameError: name 'λ' is
+  not defined`.
+- Fixed single-epoch SB2 prior shaping by retaining an explicit epoch axis.
+- Made the second SB2 MCMC stage honour all public sampling and progress
+  controls instead of hard-coding `4 x (1000 + 2000)` draws.
+- Removed hard-coded laptop import paths from the RAVEL tutorials and pointed
+  the SB2 source cells at the existing `SB2_case1` and `SB2_case2` synthetic
+  directories. Existing notebook outputs were left untouched.
+
+Validation:
+- Python 3.12 and Python 3.13 normal suites passed 56 tests with one gated
+  probabilistic smoke test skipped.
+- The enabled RAVEL smoke suite passed both classic/probabilistic tests in
+  about 17 seconds. Posterior RV arrays were finite with SB1 shape
+  `(10, 1, 1)` and SB2 shape `(10, 2, 1, 1)`.
+- `uv lock --check`, `pixi lock --check`, workflow YAML parsing, notebook JSON
+  parsing, tutorial fixture discovery, and `git diff --check` passed.
+- A fresh mamba installation resolved Python 3.13.14, NumPy 2.2.6, and Numba
+  0.66.0. Installing the checkout with `--no-deps` left no broken requirements,
+  and all 56 tests passed with the opt-in RAVEL smoke skipped.
+
+Mamba lock correction:
+- The first clean installation exposed a mixed-manager conflict: ExoJAX's
+  PyPI dependency resolution replaced conda's NumPy 2.2.6 with NumPy 2.4.6,
+  violating MINATO's declared `numpy<2.3` requirement.
+- `minato_env.yml` now repeats the NumPy 2.2 constraint in its pip subsection,
+  and `conda-lock.yml` was regenerated for Linux x86-64, Intel macOS, and Apple
+  Silicon. Direct conda-lock parser checks reproduce all three recorded input
+  hashes exactly.
+
+Remaining validation:
+- Push `develop` and confirm all GitHub Actions jobs pass.
+- Run the full multi-epoch SB1/SB2 tutorials in isolated output directories;
+  the reduced smoke verifies code paths, not production posterior quality.
+
 ## 2026-07-12 - Promote observing and adopt Python 3.13
 
 Scope:

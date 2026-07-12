@@ -13,9 +13,9 @@
 version: 1
 metadata:
   content_hash:
-    linux-64: 15042880b041277a6a441699b45857052571c8750d89f15f7f71499add23c246
-    osx-64: 15a5775bdb3c26ffc3734b0d33ee2600d16c4cb692b39c94656ec5974ef71cc4
-    osx-arm64: ded3829ddaf7b2fc60460aafcb7125ea182d4bea319984d0de71f62fff46d4a9
+    linux-64: 640d357297c4584cb789590d7acaaba7ff0b2a583b85ccbe1cfa29bc3e2b806c
+    osx-64: a10d0479c15b54c0c70702a8458875e81f138973fcb93c95ffac163a14c3f688
+    osx-arm64: e5e7cb85f7fc6a2e8b91555ef82e8a9612ba458fea8d124159ac7d2e5b0693e2
   channels:
   - url: conda-forge
     used_env_vars: []
@@ -13943,36 +13943,6 @@ package:
   url: https://files.pythonhosted.org/packages/35/ae/d58558d8043de0c49f385ea2fa789e3cfe4d436c96be80200c5292f45f15/numexpr-2.14.1-cp313-cp313-macosx_11_0_arm64.whl
   hash:
     sha256: dce0b5a0447baa7b44bc218ec2d7dcd175b8eee6083605293349c0c1d9b82fb6
-  category: main
-  optional: false
-- name: numpy
-  version: 2.4.6
-  manager: pip
-  platform: linux-64
-  dependencies: {}
-  url: https://files.pythonhosted.org/packages/a5/9d/3584b9984ca4c047aea75214ce1a4c4c73d849bd71b604264b7f5653f8a8/numpy-2.4.6-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
-  hash:
-    sha256: a7830bab239b79cda9c08c2da014761cafb48da6150e1da17ac06283f43b6089
-  category: main
-  optional: false
-- name: numpy
-  version: 2.4.6
-  manager: pip
-  platform: osx-64
-  dependencies: {}
-  url: https://files.pythonhosted.org/packages/fb/82/bdab26d7438c6791ca31b7c024ca37c1eab8b726ba236129005cd4a06e45/numpy-2.4.6-cp313-cp313-macosx_10_13_x86_64.whl
-  hash:
-    sha256: 511dbaf848decaaaf4b4ca48032619fb3138710c4bf7da7617765edad1ef96b0
-  category: main
-  optional: false
-- name: numpy
-  version: 2.4.6
-  manager: pip
-  platform: osx-arm64
-  dependencies: {}
-  url: https://files.pythonhosted.org/packages/1b/30/a80189bcc7f5e4258b3fbc3968d909d1756f54d023299ecc39ad6fdb9ef8/numpy-2.4.6-cp313-cp313-macosx_11_0_arm64.whl
-  hash:
-    sha256: bf162abab1c1a736333192707cef898e735a5ca00f38f27eeedf44b39d9e85eb
   category: main
   optional: false
 - name: peakutils

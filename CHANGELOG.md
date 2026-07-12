@@ -1,5 +1,7 @@
 ## [Unreleased]
 ### Added
+* [2026-07-12] Added GitHub Actions checks for Python 3.12 and 3.13, package
+  building, and reduced probabilistic RAVEL SB1/SB2 release smoke tests.
 * [2026-07-12] Added the installable `minato.observing` package for generating
   orbital-phase windows, applying Astroplan observability constraints, and
   plotting night-time target visibility without forced display or file output.
@@ -68,6 +70,14 @@
 * Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
 
 ### Changed
+* [2026-07-12] Constrained NumPy on both sides of the mixed conda/PyPI mamba
+  installation so ExoJAX cannot replace the locked NumPy 2.2 build with an
+  incompatible newer release.
+* [2026-07-12] RAVEL's second SB2 sampling stage now honours the caller's
+  warm-up, sample, chain, chain-method, and progress settings instead of always
+  running a hard-coded four-chain production sample.
+* [2026-07-12] Updated the RAVEL SB1/SB2 tutorial source cells to use installed
+  MINATO imports and the actual bundled synthetic-spectrum directories.
 * [2026-07-12] Moved the development baseline to Python 3.13, declared support
   for Python 3.12-3.13, and aligned uv, Pixi, and mamba environments on NumPy
   2.2 for Python 3.13 binary-wheel availability.
@@ -117,6 +127,10 @@
 * The SB1 and SB2 `ravel` tutorials now include an upfront note on setting `XLA_FLAGS` before importing `minato.ravel` on shared CPU servers.
 
 ### Fixed
+* [2026-07-12] Restored the SB2 profile and likelihood calculations to the
+  nested NumPyro model, fixing a `NameError` that prevented SB2 fitting.
+* [2026-07-12] Preserved the epoch dimension in the SB2 second-stage RV prior,
+  allowing supported single-epoch fits to complete.
 * [2026-07-12] `minato.spdis` now imports `myRC` package-relatively, so the
   module can be imported from an installed MINATO distribution.
 * [2026-07-08] `AtmFit` light-ratio grid scoring now keeps observations in the original disentangling scale and dilutes models instead, avoiding biased cross-`lr` likelihood rankings.
