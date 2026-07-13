@@ -1,5 +1,23 @@
 # MINATO Notes
 
+## 2026-07-13 - Trace the RAVEL SB2 indentation regression
+
+- `git blame` and the relevant patches identify `b9cc352f` (`Tag SB1/SB2 fit
+  plots with chosen profile`, 2025-11-29) as the first regression. An unrelated
+  plot-filename edit dedented the wavelength-preparation lines inside the SB2
+  NumPyro model but left the following profile lines indented, producing an
+  immediate `IndentationError`.
+- `261df900` (`Restore classic SB1 uncertainty band via lmfit`, 2025-11-30)
+  made the file syntactically valid while adding profile controls by dedenting
+  the remaining SB2 profile and likelihood block. This placed the block outside
+  `sb2_model`, where model arguments such as `λ` were unavailable at runtime.
+- Compiling the historical files reproduces the sequence: `b9cc352f` fails at
+  parse time, while `261df900` parses but retains the incorrect function scope.
+  Commit `1676a28` restores the complete block to `sb2_model`, and the new
+  probabilistic SB2 smoke test protects the path in CI.
+- The main README now previews the implemented `0.3.0` highlights and clearly
+  separates them from the remaining release gates.
+
 ## 2026-07-12 - Add CI and repair the SB2 release path
 
 Scope:

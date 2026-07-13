@@ -70,6 +70,8 @@
 * Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
 
 ### Changed
+* [2026-07-13] Added a README preview of the planned `0.3.0` features, release
+  date policy, and remaining validation gates.
 * [2026-07-12] Constrained NumPy on both sides of the mixed conda/PyPI mamba
   installation so ExoJAX cannot replace the locked NumPy 2.2 build with an
   incompatible newer release.

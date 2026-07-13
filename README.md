@@ -8,6 +8,27 @@ The latest stable release is `v0.2.0`. The `develop` branch contains the
 candidate work for `v0.3.0` and may include experimental or development-only
 modules.
 
+## Upcoming `v0.3.0`
+
+The next planned release is `v0.3.0`. Its official release date will be the
+date when the approved `develop` release is merged into `main`.
+
+Planned highlights already available on `develop` include:
+
+- installation as the `minato-astro` Python distribution while retaining
+  `import minato`;
+- Python 3.12-3.13 support and reproducible mamba, uv, and Pixi environments;
+- new `binary_population`, `synthetic`, and `observing` modules;
+- expanded scalable binary-population inference and tutorials;
+- repaired RAVEL SB2 probabilistic fitting, configurable two-stage sampling,
+  and automated SB1/SB2 smoke tests;
+- automated tests and package builds for the supported Python versions.
+
+Before release, the candidate still requires full tutorial validation, a final
+decision on the experimental `spdis` module, approval of the public
+`observing` API, successful CI on the pushed branch, and installation testing
+through TestPyPI. Until those checks pass, `v0.2.0` remains the stable release.
+
 ## Modules
 
 | Module | Purpose | Status |
@@ -113,8 +134,9 @@ See the [tutorial index](minato/README.md) for module-specific walkthroughs.
 ## Documentation
 
 Module documentation currently lives beside the code and in clean tutorial
-notebooks. A versioned Sphinx/MyST-NB site hosted on Read the Docs is under
-consideration for the `1.0.0` documentation milestone.
+notebooks. A versioned Sphinx/MyST-NB site hosted on Read the Docs is planned
+after the `0.3.0` tutorial set is cleaned and validated, with the aim of having
+versioned documentation in place before `1.0.0`.
 
 ## Contributing and issues
 

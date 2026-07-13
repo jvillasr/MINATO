@@ -28,6 +28,7 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 
 - Approve version `0.3.0` and define the release date as the `develop`-to-`main` merge date [Done][2026-07-12]
 - Approve the `minato-astro` distribution name while preserving `import minato` [Done][2026-07-12]
+- Add a high-level `0.3.0` preview and release-status section to the main README [Done][2026-07-13]
 - Add and validate reproducible mamba, uv, and Pixi workflows; commit exact lock files for supported platforms [Done][2026-07-12]
 - Move the development baseline to Python 3.13, support Python 3.12-3.13, and remove Python 3.10-only dependencies [Done][2026-07-12]
 - Bump `minato/__init__.py::__version__` to the release version [][]
