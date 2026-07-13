@@ -4,13 +4,25 @@ Run tutorials from an installed development environment at the repository root.
 Start with the small synthetic examples before using local spectra or large CPU
 runs.
 
+MINATO releases contain no atmosphere grids, trained models, spectra, fitted
+results, or tutorial datasets. Tutorials must generate small synthetic inputs
+during execution or ask for explicit paths to user-supplied resources. Public
+TLUSTY and PoWR grids can be used after obtaining them separately and following
+their own licence and citation guidance.
+
 ## Spectral analysis
 
 1. [`span_example.ipynb`](tutorials/span_example.ipynb) - atmosphere fitting
-   with `minato.span`.
+   with `minato.span`, user-supplied model grids, and synthetic disentangled
+   spectra.
 2. [`working_with_atmfit_results.ipynb`](tutorials/working_with_atmfit_results.ipynb)
-   - inspect and plot atmosphere-fit results.
-3. [`plot_model.ipynb`](tutorials/plot_model.ipynb) - inspect model spectra.
+   - inspect and plot user-supplied atmosphere-fit results.
+3. [`plot_model.ipynb`](tutorials/plot_model.ipynb) - inspect a model spectrum
+   supplied by the user.
+
+These legacy spectral-analysis notebooks are being revised to remove bundled
+models, real example spectra, fixed result files, and machine-specific paths.
+Their data-free execution is a `0.3.0` release gate.
 
 ## Radial velocities
 
@@ -22,7 +34,8 @@ runs.
    - CPU-oriented batch execution.
 
 The SB1 and SB2 notebooks still need output clean-up and a full release
-validation pass.
+validation pass. Release versions will generate their input spectra from a
+small analytic synthetic example instead of reading bundled spectra.
 
 ## Synthetic spectra
 
@@ -51,8 +64,14 @@ the validated averaged mixture-CRN workflow and CPU pool choices.
 The [`observing` module guide](observing/README.md) provides shorter API
 examples and documents explicit output-file handling.
 
-## Experimental modules
+## Development-only external adaptation
 
-`minato.spdis` is importable from an installed package but still needs focused
-tests and a clean synthetic tutorial before it can move beyond experimental
-status.
+The repository retains a class-based adaptation of
+[Disentangling_Shift_And_Add](https://github.com/TomerShenar/Disentangling_Shift_And_Add)
+under [`minato.contrib`](contrib/README.md). It is not part of the released
+MINATO product, is not installed as `minato.spdis`, and is excluded from
+releases. A `develop` checkout provides it as `minato.contrib.spdis`. Use the
+upstream project for credit, citations, permissions, and supported usage. In
+particular, cite Gonzalez & Levato (2006) for the shift-and-add algorithm and
+Shenar et al. (2020, 2022) as requested by the upstream authors; do not cite
+MINATO as the source of this method.

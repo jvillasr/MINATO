@@ -1,5 +1,70 @@
 # MINATO Notes
 
+## 2026-07-13 - Define external-code and data-free release boundaries
+
+Decisions:
+- The adapted shift-and-add class comes from
+  `TomerShenar/Disentangling_Shift_And_Add` and is not a MINATO product. It is
+  retained as `minato.contrib.spdis` for development checkouts only, removed
+  from the released `minato` package surface, and excluded from packages and
+  release branches.
+- The upstream README credits Tomer Shenar, with contributions from Matthias
+  Fabry and Julia Bodensteiner, and requests citations to Gonzalez & Levato
+  (2006), Shenar et al. (2020), and Shenar et al. (2022). No software licence
+  file was present in the upstream repository during this audit, so the local
+  adaptation must not be redistributed under MINATO's MIT licence without an
+  explicit permission and licence review.
+- MINATO wheels, source archives, and the final `main` release tree will
+  contain no atmosphere grids, trained models, spectra, fitted results, or
+  tutorial datasets. These files may remain tracked on `develop`.
+- Tutorials will use small synthetic spectra generated during execution where
+  possible. SPAN examples may use public TLUSTY or PoWR grids obtained
+  separately by users under the original terms and citation guidance.
+
+Repository audit:
+- `minato/models/` contains 2,532 tracked files and occupies about 180 MB.
+- The tutorial tree contains 155 tracked non-notebook files: 82 PNG, 56 text,
+  12 PDF, four CSV, and one Feather file.
+- Bundled RAVEL synthetic fixtures occupy about 98 MB. Existing RAVEL output
+  directories occupy about 35 MB, 13 MB, and 13 MB.
+- `minato/tutorials/example_spectra/` contains two real disentangled spectra
+  used by the legacy SPAN notebooks.
+- Previous wheel and source builds excluded the model and tutorial trees by
+  package-discovery behaviour, but included `minato.spdis`; this was not a
+  sufficiently explicit release guarantee.
+
+Implementation:
+- Added `MANIFEST.in` exclusions and
+  `scripts/check_release_artifacts.py`, with a matching CI step, to reject
+  development records, contributed code, package data, model trees, and
+  tutorial trees in release artefacts.
+- Updated package import tests, the main README, tutorial index, release plan,
+  roadmap, and changelog to reflect the approved boundaries.
+
+Validation:
+- Rebuilt the repository `.venv` from `uv.lock` with Python 3.13.5 and 132
+  locked packages. The environment is complete and directly runnable again.
+- The full Python 3.13 unit suite passed 62 tests with the opt-in
+  probabilistic RAVEL smoke test skipped.
+- `uv lock --check`, notebook JSON parsing, workflow YAML parsing,
+  `py_compile`, and `git diff --check` passed.
+- Fresh wheel and source archives were built in
+  `/tmp/minato-dist-contrib-namespace-20260713`. The artefact checker passed
+  both; they contain no `minato.contrib`, `minato.spdis`, model, tutorial, or
+  non-Python package data.
+- A no-dependency installation of the wheel in
+  `/tmp/minato-wheeltest-contrib-namespace-20260713` imported `minato` from the
+  isolated environment and confirmed that both `minato.contrib` and
+  `minato.spdis` are absent.
+
+Remaining work:
+- Rewrite and execute the legacy SPAN, result-inspection, and RAVEL notebooks
+  without bundled files or machine-specific paths.
+- Clean notebook outputs and remove all model/data/output assets from the
+  pending `main` merge tree, then validate that exact tree before release.
+- Publish the final candidate to TestPyPI and repeat the installation check
+  from the package index.
+
 ## 2026-07-13 - Trace the RAVEL SB2 indentation regression
 
 - `git blame` and the relevant patches identify `b9cc352f` (`Tag SB1/SB2 fit

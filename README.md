@@ -5,15 +5,15 @@ It provides spectral fitting, radial-velocity measurements, time-series tools,
 binary-population inference, and synthetic-spectrum utilities.
 
 The latest stable release is `v0.2.0`. The `develop` branch contains the
-candidate work for `v0.3.0` and may include experimental or development-only
-modules.
+release candidate for `v0.3.0` and may also contain material that is explicitly
+excluded from releases.
 
-## Upcoming `v0.3.0`
+## `v0.3.0` release candidate
 
-The next planned release is `v0.3.0`. Its official release date will be the
-date when the approved `develop` release is merged into `main`.
+The next release is `v0.3.0`. Its official release date will be the date when
+the approved `develop` release is merged into `main`.
 
-Planned highlights already available on `develop` include:
+The release candidate includes:
 
 - installation as the `minato-astro` Python distribution while retaining
   `import minato`;
@@ -24,10 +24,10 @@ Planned highlights already available on `develop` include:
   and automated SB1/SB2 smoke tests;
 - automated tests and package builds for the supported Python versions.
 
-Before release, the candidate still requires full tutorial validation, a final
-decision on the experimental `spdis` module, approval of the public
-`observing` API, successful CI on the pushed branch, and installation testing
-through TestPyPI. Until those checks pass, `v0.2.0` remains the stable release.
+Before release, the candidate still requires data-free tutorial validation,
+approval of the public `observing` API, successful CI with the final artefact
+checks, and installation testing through TestPyPI. Until those checks pass,
+`v0.2.0` remains the stable release.
 
 ## Modules
 
@@ -38,7 +38,33 @@ through TestPyPI. Until those checks pass, `v0.2.0` remains the stable release.
 | `minato.binary_population` | Intrinsic binary populations, survey simulation, and scalable population inference | Release candidate |
 | `minato.synthetic` | Synthetic single-star and binary spectra with configurable atmosphere-grid backends | Release candidate |
 | `minato.observing` | Orbital-phase scheduling, observability checks, and night-visibility plots | Release candidate |
-| `minato.spdis` | Shift-and-add spectral disentangling | Experimental |
+
+## Models and data
+
+MINATO releases do not distribute atmosphere grids, trained models, observed
+or synthetic spectra, fitted results, or tutorial datasets. Users provide the
+models and data needed for their analysis and remain responsible for the
+licences and citations attached to those resources.
+
+Tutorials use small synthetic inputs generated during execution where
+possible. Model-backed examples accept user-supplied paths and may use public
+TLUSTY or PoWR grids obtained separately under their respective terms and
+citation guidance.
+
+## Development-only contributed code
+
+`develop` retains a local class-based adaptation of
+[Tomer Shenar's Disentangling_Shift_And_Add project](https://github.com/TomerShenar/Disentangling_Shift_And_Add)
+for development work. It is not a MINATO module or product, is not available as
+`minato.spdis`, and is excluded from MINATO packages and release branches.
+Developers working from a `develop` checkout can import it as
+`minato.contrib.spdis`. All credit, usage permissions, and scientific citations
+belong to the upstream project. Do not cite MINATO as the source of this
+method. The upstream README asks users to cite Gonzalez & Levato (2006) for the
+shift-and-add algorithm and Shenar et al. (2020, 2022) for the implementation
+and applications; see the
+[development adaptation notes](minato/contrib/README.md) for the full citation
+guidance.
 
 ## Installation
 
@@ -153,4 +179,7 @@ If you use MINATO in your research, please cite the relevant method:
 
 ## Licence
 
-MINATO is distributed under the MIT Licence. See [LICENSE.txt](LICENSE.txt).
+Released MINATO code is distributed under the MIT Licence. See
+[LICENSE.txt](LICENSE.txt). Development-only contributed code is separately
+attributed and is excluded from that release licence and from release
+artefacts.

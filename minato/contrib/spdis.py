@@ -1,4 +1,11 @@
-"""Experimental spectral-disentangling tools."""
+"""Development-only MINATO adaptation of upstream disentangling code.
+
+The original shift-and-add implementation is maintained at
+https://github.com/TomerShenar/Disentangling_Shift_And_Add. This adapted class
+is retained for development work and is not part of the MINATO package or
+release artefacts. Credit and scientific citations belong to the upstream
+project; see the README beside this module.
+"""
 
 import sys
 import os
@@ -13,7 +20,7 @@ from astropy.io import ascii
 from astropy.table import Table
 from astropy.constants import c
 from datetime import date
-from . import myRC
+from minato import myRC
 
 class SpecDisent:
     def __init__(self, lines, orbparams, epochs, spectra, extension='.fits'):

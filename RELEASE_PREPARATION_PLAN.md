@@ -15,6 +15,12 @@ plans, or experimental archive recovery on `main`.
   archive recovery from the pending merge tree before committing the merge.
 - Retain `mamba`, `uv`, and `pixi` workflows. Treat `pyproject.toml` as the
   package dependency definition and commit each manager's generated lock file.
+- Distribute no atmosphere grids, trained models, spectra, fitted results, or
+  tutorial datasets. Users supply their own models and data.
+- Keep the adapted shift-and-add code as a development-only external
+  contribution, with all credit and citations directed to
+  `TomerShenar/Disentangling_Shift_And_Add`. Do not release it as a MINATO
+  module or under the MINATO licence.
 
 ## Remaining recommendation
 
@@ -28,8 +34,8 @@ release checks pass and the merge is ready to be committed.
 
 `0.3.0` accurately signals a substantial feature release whose public surface
 is still settling. `binary_population`, `synthetic`, and `observing` are new,
-`spdis` is still experimental, the package has not yet been published under
-its final PyPI name, and CI plus versioned documentation are incomplete.
+the package has not yet been published under its final PyPI name, and the
+data-free tutorials plus versioned documentation are incomplete.
 
 Use `1.0.0` when MINATO has:
 
@@ -38,7 +44,7 @@ Use `1.0.0` when MINATO has:
 - locked and validated environments on supported platforms;
 - automated tests for the supported Python versions;
 - clean, executed tutorials and versioned user/API documentation;
-- a documented policy for external atmosphere grids and other large data.
+- a validated policy for user-supplied atmosphere grids and other data.
 
 ## Distribution and environments
 
@@ -78,13 +84,26 @@ Keep the following on `develop` and release-preparation branches, but out of
 - `CHANGELOG.md`
 - `*_PLAN.md` and `*_PLANS.md`
 - benchmark logs and local run notes
+- `minato/contrib/`, including the external shift-and-add adaptation
+- `minato/models/`
+- tutorial spectra, fitted results, plots, tables, and other generated assets
+
+The cleaned tutorial notebooks and their Markdown documentation may remain on
+`main`, but their outputs must be cleared and their examples must generate
+small synthetic inputs or require explicit user paths. `MANIFEST.in` excludes
+the entire tutorial tree from package-index artefacts, and
+`scripts/check_release_artifacts.py` independently verifies that wheels and
+source archives contain no package data, models, external contributions, or
+development records.
 
 Approved release flow:
 
 1. Complete and approve the release checks on `develop`.
 2. Check out `main` and run `git merge --no-commit --no-ff develop`.
 3. Remove development-only records and unfinished archive recovery from the
-   pending merge tree without changing `develop`.
+   pending merge tree without changing `develop`. Also remove tracked models,
+   contributed external code, tutorial datasets, and generated tutorial
+   outputs.
 4. Update release-facing version metadata, the README, and GitHub release
    notes, then validate the exact pending release tree.
 5. Commit the merge. The merge commit date is the official release date.
@@ -98,13 +117,29 @@ on `develop` and absent from the release tree.
 
 ## Archive recovery
 
-- `minato/spdis.py` is already identical to the copy on `archive-develop`. Its
-  package-relative import has been repaired, but it still needs focused tests,
-  API documentation, and a small synthetic tutorial before release.
+- The adapted shift-and-add class is retained only at
+  `minato/contrib/spdis.py` on `develop`, where it is imported as
+  `minato.contrib.spdis`. It is derived from
+  `TomerShenar/Disentangling_Shift_And_Add`, whose upstream README owns the
+  credit and citation guidance. The adaptation is not `minato.spdis` and is
+  excluded from packages and release branches.
 - Useful archived observing logic has been redesigned as the installable
   `minato.observing` package. It has synthetic unit tests, a clean executable
   tutorial, explicit output-file protection, and no archived notebook outputs
   or figures.
+
+## Tutorial input policy
+
+- RAVEL and disentangling examples must create small analytic or synthetic
+  spectra during execution instead of bundling observed or pre-rendered
+  spectra.
+- SPAN examples may demonstrate public TLUSTY or PoWR grids, but users must
+  obtain those grids separately, provide their local paths, and follow the
+  original licence and citation instructions.
+- Atmosphere-fit result tutorials must generate a small result in an earlier
+  cell or accept an explicit user-supplied result path.
+- Notebooks committed to the release tree must have no outputs, local absolute
+  paths, or dependencies on files removed from `main`.
 
 ## Documentation strategy
 
@@ -132,15 +167,17 @@ generated API pages for `binary_population` and `synthetic`.
 
 ## Release gates
 
-- Approve `0.3.0`, the release date, and `minato-astro`.
+- Keep the approved `0.3.0`, merge-date, and `minato-astro` decisions recorded.
 - Keep the validated mamba, uv, and Pixi locks unchanged unless dependency
   updates are intentionally reviewed and retested.
 - Confirm the new GitHub Actions jobs pass after pushing `develop`.
 - Complete the full multi-epoch SB1/SB2 tutorial validation; reduced synthetic
   probabilistic fits now run in CI.
+- Rewrite and validate the spectral-analysis and RAVEL tutorials against the
+  data-free input policy.
 - Validate the binary-population tutorial in the final release environment.
-- Decide whether `spdis` is documented experimental API or excluded from the
-  release notes.
+- Build wheel and source archives and pass
+  `scripts/check_release_artifacts.py` before TestPyPI publication.
 - Review and approve `minato.observing` as part of the `0.3.0` public surface.
 - Publish the release candidate to TestPyPI and verify installation from the
   package index before publishing to PyPI.

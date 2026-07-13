@@ -1,5 +1,8 @@
 ## [Unreleased]
 ### Added
+* [2026-07-13] Added an automated release-artefact policy check that rejects
+  wheels and source archives containing models, spectra, tutorial data,
+  development records, or external contributed code.
 * [2026-07-12] Added GitHub Actions checks for Python 3.12 and 3.13, package
   building, and reduced probabilistic RAVEL SB1/SB2 release smoke tests.
 * [2026-07-12] Added the installable `minato.observing` package for generating
@@ -70,6 +73,17 @@
 * Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
 
 ### Changed
+* [2026-07-13] MINATO releases are now explicitly data-free: users provide
+  their own atmosphere grids, spectra, and analysis data. The tutorial policy
+  now requires generated synthetic inputs or explicit paths to separately
+  obtained public TLUSTY/PoWR grids.
+* [2026-07-13] Moved the adapted shift-and-add class out of the installable
+  `minato.spdis` namespace into the development-only `minato.contrib.spdis`
+  namespace, with all credit, citations, permissions, and supported usage
+  directed to the upstream `TomerShenar/Disentangling_Shift_And_Add` project.
+* [2026-07-13] Reframed the README as a `0.3.0` release candidate and replaced
+  the unresolved `spdis` gate with the approved external-code and data-free
+  release policies.
 * [2026-07-13] Added a README preview of the planned `0.3.0` features, release
   date policy, and remaining validation gates.
 * [2026-07-12] Constrained NumPy on both sides of the mixed conda/PyPI mamba
@@ -133,8 +147,6 @@
   nested NumPyro model, fixing a `NameError` that prevented SB2 fitting.
 * [2026-07-12] Preserved the epoch dimension in the SB2 second-stage RV prior,
   allowing supported single-epoch fits to complete.
-* [2026-07-12] `minato.spdis` now imports `myRC` package-relatively, so the
-  module can be imported from an installed MINATO distribution.
 * [2026-07-08] `AtmFit` light-ratio grid scoring now keeps observations in the original disentangling scale and dilutes models instead, avoiding biased cross-`lr` likelihood rankings.
 * [2026-05-05] SB1 fit plots no longer swap epoch and line axes when `n_epochs == n_lines`; plots now draw a coherent high-likelihood posterior sample.
 * [2026-05-05] Probabilistic SB1/Na/SB2 interpolation windows now drop non-finite or non-positive-error points before interpolation, avoiding red/NIR collapse from bad pixels.
