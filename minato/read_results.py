@@ -1407,9 +1407,14 @@ def _pooled_profile_levels(panel_values, fractions):
     return np.quantile(np.concatenate(finite_values), fractions)
 
 
-def _profile_1d(work, parameter, values):
+def _profile_1d(
+    work,
+    parameter,
+    values,
+    score_column='_span_delta_score',
+):
     return (
-        work.groupby(parameter, sort=True)['_span_delta_score']
+        work.groupby(parameter, sort=True)[score_column]
         .min()
         .reindex(values)
         .to_numpy(dtype=float)
@@ -1907,6 +1912,7 @@ def plot_corner(
     reference_values=None,
     contour_mode='auto',
     region_fractions=(0.10, 0.25, 0.50),
+    diagonal_mode='profile',
 ):
     """Plot one- and two-dimensional SPAN profiles as a corner figure.
 
@@ -1931,7 +1937,10 @@ def plot_corner(
     quantiles as shared score thresholds in every panel. The quantiles are
     given by ``region_fractions``. ``score_kind`` is inferred from
     ``df.attrs`` but may be supplied after loading a format that discarded
-    those attributes.
+    those attributes. ``diagonal_mode='legacy'`` restores SPAN's original
+    rescaled polynomial profiles and displayed diagnostic intervals for an
+    unweighted table; it does not change the lower panels or create formal
+    confidence intervals.
     No file is created unless ``save`` is supplied.
 
     Returns
@@ -1941,6 +1950,8 @@ def plot_corner(
     """
     if grid_size < 10:
         raise ValueError("grid_size must be at least 10")
+    if diagonal_mode not in {'profile', 'legacy'}:
+        raise ValueError("diagonal_mode must be 'profile' or 'legacy'")
     region_fractions = np.asarray(region_fractions, dtype=float)
     if (
         region_fractions.shape != (3,)
@@ -1970,6 +1981,19 @@ def plot_corner(
         score_kind=score_kind,
     )
     contour_mode = _resolve_contour_mode(contour_mode, resolved_score_kind)
+    if diagonal_mode == 'legacy':
+        if resolved_score_kind != 'rss':
+            raise ValueError(
+                "diagonal_mode='legacy' is only valid for an unweighted RSS table"
+            )
+        if dof is None:
+            raise ValueError("dof is required for the legacy diagonal mode")
+        score_min = float(score.min())
+        if score_min <= 0:
+            raise ValueError(
+                "legacy diagonal rescaling requires a positive minimum score"
+            )
+        work['_span_legacy_delta_score'] = score / score_min * dof - dof
     reference_values = {} if reference_values is None else dict(reference_values)
     for name, value in list(reference_values.items()):
         if name in {'TA', 'TB', 'teffA', 'teffB'} and value > 1000:
@@ -2028,12 +2052,25 @@ def plot_corner(
         for index, name in enumerate(parameter_names):
             axis = axes[index, index]
             x_values = parameter_values[name]
-            profile = _profile_1d(work, name, x_values)
+            score_column = (
+                '_span_legacy_delta_score'
+                if diagonal_mode == 'legacy'
+                else '_span_delta_score'
+            )
+            profile = _profile_1d(
+                work,
+                name,
+                x_values,
+                score_column=score_column,
+            )
             valid = np.isfinite(profile)
             x_profile = x_values[valid]
             y_profile = profile[valid]
             fine_x = np.linspace(x_profile.min(), x_profile.max(), grid_size * 5)
-            if len(x_profile) >= 2:
+            if diagonal_mode == 'legacy' and len(x_profile) >= 4:
+                coefficients = fit_poly(x_profile, y_profile)
+                fine_profile = np.polyval(coefficients, fine_x)
+            elif len(x_profile) >= 2:
                 fine_profile = scInterp.PchipInterpolator(
                     x_profile,
                     y_profile,
@@ -2041,7 +2078,8 @@ def plot_corner(
                 )(fine_x)
             else:
                 fine_profile = np.full_like(fine_x, y_profile[0])
-            fine_profile = np.maximum(fine_profile, 0.0)
+            if diagonal_mode != 'legacy':
+                fine_profile = np.maximum(fine_profile, 0.0)
 
             axis.plot(
                 x_profile,
@@ -2054,7 +2092,10 @@ def plot_corner(
                 zorder=4,
             )
             axis.plot(fine_x, fine_profile, color='dodgerblue', lw=1.8, zorder=3)
-            if resolved_score_kind == 'chi2':
+            show_interval = (
+                resolved_score_kind == 'chi2' or diagonal_mode == 'legacy'
+            )
+            if show_interval:
                 axis.axhline(
                     interval_levels[0],
                     color='crimson',
@@ -2064,7 +2105,7 @@ def plot_corner(
                 )
             best_x = float(work.loc[best_index, name])
             best_y = float(
-                work.loc[work[name] == best_x, '_span_delta_score'].min()
+                work.loc[work[name] == best_x, score_column].min()
             )
             axis.scatter(
                 best_x,
@@ -2076,7 +2117,7 @@ def plot_corner(
                 linewidth=0.8,
                 zorder=5,
             )
-            if resolved_score_kind == 'chi2':
+            if show_interval:
                 profile_value, lower_error, upper_error = _profile_interval(
                     fine_x,
                     fine_profile,
@@ -2108,7 +2149,7 @@ def plot_corner(
                 y_profile[visible_profile],
                 fine_profile[visible_fine],
             ]
-            if resolved_score_kind == 'chi2':
+            if show_interval:
                 displayed_parts.append(np.array([interval_levels[0]]))
             displayed_scores = np.concatenate(displayed_parts)
             displayed_scores = displayed_scores[np.isfinite(displayed_scores)]
@@ -2288,9 +2329,13 @@ def plot_corner(
                     axis.set_ylabel(labels.get(name, name), fontsize=24)
 
         score_label = (
-            r'$\Delta\chi^2$'
-            if resolved_score_kind == 'chi2'
-            else r'$\Delta\mathrm{RSS}$'
+            r'$\mathrm{scaled}\ \Delta\mathrm{RSS}$'
+            if diagonal_mode == 'legacy'
+            else (
+                r'$\Delta\chi^2$'
+                if resolved_score_kind == 'chi2'
+                else r'$\Delta\mathrm{RSS}$'
+            )
         )
         axes[0, 0].set_ylabel(score_label, fontsize=24)
         score_offset = axes[0, 0].yaxis.get_offset_text()

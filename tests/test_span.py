@@ -781,6 +781,53 @@ class SpanResultPlotTests(unittest.TestCase):
             np.quantile(np.array([0.0, 1.0, 2.0, 3.0, 4.0, 20.0]), fractions),
         )
 
+    def test_legacy_diagonal_mode_restores_profile_values_and_intervals(self):
+        rows = []
+        values = np.linspace(-2.0, 2.0, 5)
+        for x_value in values:
+            for y_value in values:
+                rows.append(
+                    {
+                        "x": x_value,
+                        "y": y_value,
+                        "chi2_tot": (
+                            10.0
+                            + (x_value - 0.3) ** 2
+                            + (y_value + 0.2) ** 2
+                        ),
+                        "ndata": 100,
+                    }
+                )
+        results = pd.DataFrame(rows)
+
+        with patch("matplotlib.pyplot.show"):
+            figure = read_results.plot_corner(
+                results,
+                {"x": values, "y": values},
+                contour_mode="rank",
+                diagonal_mode="legacy",
+                grid_size=40,
+            )
+            figure.canvas.draw()
+
+        diagonal_axes = [figure.axes[0], figure.axes[3]]
+        self.assertEqual(
+            diagonal_axes[0].get_ylabel(),
+            r"$\mathrm{scaled}\ \Delta\mathrm{RSS}$",
+        )
+        self.assertTrue(
+            all("^{+" in axis.get_title() for axis in diagonal_axes)
+        )
+        self.assertTrue(
+            all(
+                any(
+                    np.isclose(line.get_ydata(), 1.0).all()
+                    for line in axis.lines
+                )
+                for axis in diagonal_axes
+            )
+        )
+
     def test_weighted_corner_uses_joint_confidence_regions(self):
         results = self._correlation_results()
         raw_score = results["chi2_tot"].copy()

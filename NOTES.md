@@ -16,12 +16,13 @@ Implementation:
   Weighted one-dimensional profiles use `Delta chi2 = 1, 4, 9`; every weighted
   two-dimensional panel uses the same `2.30, 6.18, 11.83` levels. Reduced
   chi-square does not set confidence contours.
-- Unweighted plots now omit sigma thresholds and uncertainty text and reject
-  requests for confidence contours. Their descriptive regions use the pooled
+- Unweighted plots reject requests for confidence contours. Their descriptive
+  regions use the pooled
   10%, 25%, and 50% quantiles of all 2D profile nodes as three shared
-  `Delta RSS` thresholds, replacing panel-specific ranks. PCHIP is the default
-  one-dimensional interpolation and cannot overshoot its sampled profile
-  values.
+  `Delta RSS` thresholds, replacing panel-specific ranks. The optional legacy
+  diagonal mode restores the original rescaled polynomial profiles,
+  interpolated values, and asymmetric diagnostic intervals without treating
+  them as formal confidence intervals.
 - Kept the shipped SPAN tutorial unweighted because the disentangling process
   did not propagate per-pixel covariance. The notebook explains how to enable
   weighted fitting and why repeated noise/disentangling realisations are still
@@ -30,7 +31,7 @@ Implementation:
 Validation:
 - `python -m compileall -q minato tests scripts` passed.
 - `jq empty minato/tutorials/span_example.ipynb` and `git diff --check` passed.
-- `.venv/bin/python -m unittest tests.test_span` passed all 27 focused tests in
+- `.venv/bin/python -m unittest tests.test_span` passed all 28 focused tests in
   the shared MINATO Python 3.13 environment.
 - The complete real-PoWR tutorial evaluated 196,000 combinations in 0.41 s
   after rendering the model grid. Its best residual sum of squares is 4.418768
@@ -38,6 +39,11 @@ Validation:
   the overlap found during visual inspection of the first regenerated figure.
   A second visual pass confirmed that pooled score levels give the same
   narrow light-ratio extent in every lower panel.
+- The final visual pass combined those pooled lower-panel levels with the
+  explicit legacy diagonal mode. It reproduced the original interpolated
+  values (`f_B=0.113`, `T_eff,A=32.39 kK`, `log g_A=4.04`,
+  `vsini_A=80.5 km/s`, `T_eff,B=21.07 kK`, `log g_B=4.09`, and
+  `vsini_B=114.7 km/s`) and their original asymmetric diagnostic intervals.
 
 ## 2026-07-15 - Restore SPAN's standard result plots
 
