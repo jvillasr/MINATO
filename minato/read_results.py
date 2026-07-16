@@ -435,7 +435,7 @@ def compute_bestfit(
                 ylabel = (
                     r'$\Delta\chi^2$'
                     if resolved_score_kind == 'chi2'
-                    else 'Squared-residual score above best fit'
+                    else r'$\Delta\mathrm{RSS}$'
                 )
                 ax[i].set_ylabel(ylabel, fontsize=label_size)
             xrange = minval[0][-1] - minval[0][0]
@@ -1864,7 +1864,7 @@ def plot_corr(
         colour_label = (
             r'$\Delta\chi^2$'
             if resolved_score_kind == 'chi2'
-            else 'Squared-residual score above best fit'
+            else r'$\Delta\mathrm{RSS}$'
         )
         colorbar.set_label(colour_label, fontsize=11)
         colorbar.ax.tick_params(labelsize=8)
@@ -2277,7 +2277,7 @@ def plot_corner(
         score_label = (
             r'$\Delta\chi^2$'
             if resolved_score_kind == 'chi2'
-            else 'Squared-residual score above best fit'
+            else r'$\Delta\mathrm{RSS}$'
         )
         axes[0, 0].set_ylabel(score_label, fontsize=24)
         score_offset = axes[0, 0].yaxis.get_offset_text()

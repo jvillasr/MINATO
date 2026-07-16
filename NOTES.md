@@ -18,8 +18,9 @@ Implementation:
   chi-square does not set confidence contours.
 - Unweighted plots now omit sigma thresholds and uncertainty text, default to
   explicitly panel-specific rank regions, and reject requests for confidence
-  contours. PCHIP is the default one-dimensional interpolation and cannot
-  overshoot its sampled profile values.
+  contours. Their score axis is labelled `Delta RSS`. PCHIP is the default
+  one-dimensional interpolation and cannot overshoot its sampled profile
+  values.
 - Kept the shipped SPAN tutorial unweighted because the disentangling process
   did not propagate per-pixel covariance. The notebook explains how to enable
   weighted fitting and why repeated noise/disentangling realisations are still
@@ -28,11 +29,12 @@ Implementation:
 Validation:
 - `python -m compileall -q minato tests scripts` passed.
 - `jq empty minato/tutorials/span_example.ipynb` and `git diff --check` passed.
-- Numerical and figure tests were added in `tests/test_span.py`.
-  `python -m unittest tests.test_span` could not import `pandas` because this
-  node exposes only system Python 3.9 rather than a MINATO environment. The
-  suite and real-PoWR tutorial still require execution in the Python 3.12/3.13
-  mamba, uv, or Pixi environment.
+- `.venv/bin/python -m unittest tests.test_span` passed all 26 focused tests in
+  the shared MINATO Python 3.13 environment.
+- The complete real-PoWR tutorial evaluated 196,000 combinations in 0.41 s
+  after rendering the model grid. Its best residual sum of squares is 4.418768
+  and its best-fit RMS residual is 0.0205. The compact `Delta RSS` label removes
+  the overlap found during visual inspection of the first regenerated figure.
 
 ## 2026-07-15 - Restore SPAN's standard result plots
 

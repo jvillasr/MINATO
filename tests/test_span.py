@@ -694,7 +694,7 @@ class SpanResultPlotTests(unittest.TestCase):
         self.assertEqual(figure.axes[6].get_xlabel(), r"$f_B$")
         self.assertEqual(
             diagonal_axes[0].get_ylabel(),
-            "Squared-residual score above best fit",
+            r"$\Delta\mathrm{RSS}$",
         )
         np.testing.assert_allclose(
             read_results._profile_confidence_levels(1),
