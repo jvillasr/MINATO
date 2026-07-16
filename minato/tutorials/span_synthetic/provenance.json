@@ -1,0 +1,80 @@
+{
+  "generator": "scripts/generate_span_tutorial_data.py",
+  "powr_grid": "GAL-OB-Vd3",
+  "powr_grid_url": "https://www.astro.physik.uni-potsdam.de/~wrh/PoWR/details_gal-ob-vink-models.php",
+  "primary": {
+    "model": "32-40",
+    "teff_K": 32000.0,
+    "logg": 4.0,
+    "mass_msun": 19.04,
+    "vsini_kms": 80.0
+  },
+  "secondary": {
+    "model": "22-42",
+    "teff_K": 22000.0,
+    "logg": 4.2,
+    "mass_msun": 7.59,
+    "vsini_kms": 120.0,
+    "light_fraction": 0.10787849968872534
+  },
+  "orbit": {
+    "period_days": 17.0,
+    "inclination_deg": 90.0,
+    "eccentricity": 0.0,
+    "omega_deg": 0.0,
+    "gamma_kms": 0.0,
+    "epoch_zero_mjd": 60000.0,
+    "primary_semi_amplitude_kms": 70.47535590698475,
+    "secondary_semi_amplitude_kms": 176.7919336586284
+  },
+  "observation": {
+    "number_of_epochs": 10,
+    "resolving_power": 40000.0,
+    "snr": 100.0,
+    "wavelength_min_A": 3979.9999999999973,
+    "wavelength_max_A": 4579.984551887178,
+    "velocity_step_kms": 2.5,
+    "seed": 20260713
+  },
+  "inputs": {
+    "primary_normalised": {
+      "path": "gal-ob-vd3_32-40_line.txt",
+      "sha256": "fab0f8e0b723d44af16a31d231522905af2519106e074c5f94aab6a6a587b369"
+    },
+    "secondary_normalised": {
+      "path": "gal-ob-vd3_22-42_line.txt",
+      "sha256": "0ef51b65d26a093cc0d98a838c249d3640ef0df11580fe8613af64b753dfc79e"
+    },
+    "primary_calibrated": {
+      "path": "gal-ob-vd3_32-40_line_calib.txt",
+      "sha256": "2fd978df4f72df7d179818b9866318272845c92828acba1a006a2e1d23ff1963"
+    },
+    "secondary_calibrated": {
+      "path": "gal-ob-vd3_22-42_line_calib.txt",
+      "sha256": "f1c4d80ea70afc776f66c77b96f2fad8f4b26ddec25ca3e8838b63aab20cd3e2"
+    }
+  },
+  "disentangling": {
+    "implementation": "minato.contrib.spdis development-only adaptation",
+    "upstream": "https://github.com/TomerShenar/Disentangling_Shift_And_Add",
+    "iterations": 500,
+    "lines_A": [
+      4009,
+      4026,
+      4102,
+      4121,
+      4144,
+      4233,
+      4267,
+      4340,
+      4388,
+      4471,
+      4553
+    ],
+    "method_citations": [
+      "Gonzalez & Levato (2006), A&A, 448, 283",
+      "Shenar et al. (2020), A&A, 639, A6",
+      "Shenar et al. (2022), A&A, 665, A148"
+    ]
+  }
+}

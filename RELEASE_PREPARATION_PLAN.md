@@ -15,8 +15,10 @@ plans, or experimental archive recovery on `main`.
   archive recovery from the pending merge tree before committing the merge.
 - Retain `mamba`, `uv`, and `pixi` workflows. Treat `pyproject.toml` as the
   package dependency definition and commit each manager's generated lock file.
-- Distribute no atmosphere grids, trained models, spectra, fitted results, or
-  tutorial datasets. Users supply their own models and data.
+- Distribute no atmosphere grids, trained models, observed spectra, or fitted
+  results. Users supply their own scientific models and data. The GitHub
+  release tree may retain the two approved, provenance-tracked synthetic SPAN
+  fixtures; package-index archives continue to exclude the tutorial tree.
 - Keep the adapted shift-and-add code as a development-only external
   contribution, with all credit and citations directed to
   `TomerShenar/Disentangling_Shift_And_Add`. Do not release it as a MINATO
@@ -35,7 +37,7 @@ release checks pass and the merge is ready to be committed.
 `0.3.0` accurately signals a substantial feature release whose public surface
 is still settling. `binary_population`, `synthetic`, and `observing` are new,
 the package has not yet been published under its final PyPI name, and the
-data-free tutorials plus versioned documentation are incomplete.
+release tutorial set plus versioned documentation are incomplete.
 
 Use `1.0.0` when MINATO has:
 
@@ -86,15 +88,18 @@ Keep the following on `develop` and release-preparation branches, but out of
 - benchmark logs and local run notes
 - `minato/contrib/`, including the external shift-and-add adaptation
 - `minato/models/`
-- tutorial spectra, fitted results, plots, tables, and other generated assets
+- observed tutorial spectra, fitted results, plots, tables, and unapproved
+  generated assets
 
 The cleaned tutorial notebooks and their Markdown documentation may remain on
 `main`, but their outputs must be cleared and their examples must generate
-small synthetic inputs or require explicit user paths. `MANIFEST.in` excludes
-the entire tutorial tree from package-index artefacts, and
+small synthetic inputs, use an explicitly approved synthetic fixture, or
+require explicit user paths. The two SPAN disentangled fixtures and their
+provenance are approved for the GitHub release tree. `MANIFEST.in` excludes the
+entire tutorial tree from package-index artefacts, and
 `scripts/check_release_artifacts.py` independently verifies that wheels and
-source archives contain no package data, models, external contributions, or
-development records.
+source archives contain no package data, models, tests, external contributions,
+or development records.
 
 Approved release flow:
 
@@ -102,8 +107,9 @@ Approved release flow:
 2. Check out `main` and run `git merge --no-commit --no-ff develop`.
 3. Remove development-only records and unfinished archive recovery from the
    pending merge tree without changing `develop`. Also remove tracked models,
-   contributed external code, tutorial datasets, and generated tutorial
-   outputs.
+   contributed external code, observed tutorial datasets, and unapproved
+   generated tutorial outputs. Retain the approved synthetic SPAN fixtures and
+   their provenance.
 4. Update release-facing version metadata, the README, and GitHub release
    notes, then validate the exact pending release tree.
 5. Commit the merge. The merge commit date is the official release date.
@@ -135,7 +141,10 @@ on `develop` and absent from the release tree.
   spectra.
 - SPAN examples may demonstrate public TLUSTY or PoWR grids, but users must
   obtain those grids separately, provide their local paths, and follow the
-  original licence and citation instructions.
+  original licence and citation instructions. The SPAN fitting tutorial may
+  consume the two approved synthetic disentangled fixtures; their generation
+  remains reproducible on `develop` and credits the upstream disentangling
+  implementation.
 - Atmosphere-fit result tutorials must generate a small result in an earlier
   cell or accept an explicit user-supplied result path.
 - Notebooks committed to the release tree must have no outputs, local absolute
@@ -173,8 +182,10 @@ generated API pages for `binary_population` and `synthetic`.
 - Confirm the new GitHub Actions jobs pass after pushing `develop`.
 - Complete the full multi-epoch SB1/SB2 tutorial validation; reduced synthetic
   probabilistic fits now run in CI.
-- Rewrite and validate the spectral-analysis and RAVEL tutorials against the
-  data-free input policy.
+- Complete the remaining spectral-analysis and RAVEL tutorial rewrites against
+  the approved external-model and synthetic-input policy. The SPAN fitting
+  tutorial itself is rewritten and its complete real-PoWR workflow is
+  validated.
 - Validate the binary-population tutorial in the final release environment.
 - Build wheel and source archives and pass
   `scripts/check_release_artifacts.py` before TestPyPI publication.

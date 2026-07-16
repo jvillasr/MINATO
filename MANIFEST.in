@@ -9,3 +9,4 @@ global-exclude .DS_Store
 recursive-exclude minato/contrib *
 recursive-exclude minato/models *
 recursive-exclude minato/tutorials *
+recursive-exclude tests *

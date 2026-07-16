@@ -4,25 +4,42 @@ Run tutorials from an installed development environment at the repository root.
 Start with the small synthetic examples before using local spectra or large CPU
 runs.
 
-MINATO releases contain no atmosphere grids, trained models, spectra, fitted
-results, or tutorial datasets. Tutorials must generate small synthetic inputs
-during execution or ask for explicit paths to user-supplied resources. Public
-TLUSTY and PoWR grids can be used after obtaining them separately and following
-their own licence and citation guidance.
+MINATO does not provide atmosphere grids, trained models, observed spectra, or
+fitted results. Tutorials generate synthetic inputs or request explicit paths
+to user-supplied resources. Public TLUSTY and PoWR grids can be used after
+obtaining them separately and following their own licence and citation
+guidance.
 
 ## Spectral analysis
 
-1. [`span_example.ipynb`](tutorials/span_example.ipynb) - atmosphere fitting
-   with `minato.span`, user-supplied model grids, and synthetic disentangled
-   spectra.
+1. [`span_example.ipynb`](tutorials/span_example.ipynb) - fast, grid-based
+   stellar-atmosphere fitting for a binary star with `minato.span`, a
+   user-downloaded PoWR `GAL-OB-Vd3` grid, equal 25 km/s rotational-velocity
+   steps, the native irregular PoWR gravity boundary, and two supplied
+   synthetic disentangled spectra with full generation provenance.
 2. [`working_with_atmfit_results.ipynb`](tutorials/working_with_atmfit_results.ipynb)
    - inspect and plot user-supplied atmosphere-fit results.
 3. [`plot_model.ipynb`](tutorials/plot_model.ipynb) - inspect a model spectrum
    supplied by the user.
 
-These legacy spectral-analysis notebooks are being revised to remove bundled
-models, real example spectra, fixed result files, and machine-specific paths.
-Their data-free execution is a `0.3.0` release gate.
+The SPAN notebook has been rewritten without bundled atmosphere models,
+machine-specific paths, destructive renaming, copied fitting-model files, or
+fixed fitted results. It renders the requested atmosphere models in memory
+through `minato.synthetic`, explicitly excludes calibrated PoWR products,
+validates the model flux scale, and passes the grid directly to SPAN. SPAN
+scores each component grid once per light ratio and combines the scores, which
+keeps large binary-star grid searches fast and transparent. Its fit table
+remains in memory, and a combined profile-score corner plot presents the
+one-dimensional profiles and two-dimensional correlations without creating an
+output file. Because the tutorial inputs have no per-pixel uncertainties, the
+figure reports nominal profiled intervals rather than reduced chi-squared or
+formal uncertainties. Its diagonal panels retain the score profiles, while
+nested lower-panel rank regions show the relatively best parts of the coarse
+grid without presenting them as formal confidence regions. The
+standalone result plots
+remain available through `compute_bestfit` and `plot_corr`. The two remaining
+legacy spectral-analysis
+notebooks still need the corresponding release clean-up and validation.
 
 ## Radial velocities
 

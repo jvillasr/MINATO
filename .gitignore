@@ -6,6 +6,8 @@
 .codex
 .pixi/
 .pixi-cache/
+.tmp/
+.minato_tutorial_work/
 __pycache*
 *.egg-info/
 build/

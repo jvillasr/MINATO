@@ -1,5 +1,11 @@
 ## [Unreleased]
 ### Added
+* [2026-07-13] Added a reproducible SPAN tutorial with two provenance-tracked
+  synthetic disentangled spectra, official PoWR download instructions, a
+  coarse O+B fitting grid, and in-memory result inspection.
+* [2026-07-13] Added `RenderedAtmosphereGrid` and `render_atmosphere_grid` to
+  render user-supplied atmosphere nodes into noiseless, common-sampling,
+  rotationally and instrumentally broadened models in memory.
 * [2026-07-13] Added an automated release-artefact policy check that rejects
   wheels and source archives containing models, spectra, tutorial data,
   development records, or external contributed code.
@@ -73,10 +79,44 @@
 * Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
 
 ### Changed
-* [2026-07-13] MINATO releases are now explicitly data-free: users provide
-  their own atmosphere grids, spectra, and analysis data. The tutorial policy
-  now requires generated synthetic inputs or explicit paths to separately
-  obtained public TLUSTY/PoWR grids.
+* [2026-07-15] Enlarged the SPAN corner-plot typography, added fitted values
+  with TeX-formatted asymmetric nominal intervals above every diagonal panel,
+  adopted `f_B` for the companion light fraction, separated the scientific
+  scale multiplier from the result title, restored the project Times-style
+  typography, and zoomed the tutorial's displayed `f_B` range to 0.05-0.20.
+  The original diagonal score profiles remain unchanged, while lower panels
+  now use nested blue-grey regions, black outlines, red injected-value
+  guides, and red best-grid markers. The tutorial uses best-10%, best-25%, and
+  best-50% rank contours because its coarse unweighted grid cannot resolve
+  formal 2D confidence thresholds. Shape-preserving PCHIP boundaries replace
+  saturated score heatmaps and cubic-interpolation plateaus.
+* [2026-07-15] Combined SPAN's one-dimensional profiles and two-dimensional
+  correlations into a reusable profile-score corner plot for the tutorial,
+  while retaining both standalone plotting APIs.
+* [2026-07-15] Reframed SPAN documentation around its main strength: fast,
+  transparent, grid-based stellar-atmosphere fitting for disentangled
+  binary-star spectra.
+* [2026-07-15] Extended the SPAN tutorial's secondary-temperature grid to
+  16-26 kK and taught in-memory SPAN fitting to respect irregular atmosphere
+  grids such as PoWR's temperature-dependent upper-gravity boundary.
+* [2026-07-14] The SPAN tutorial now keeps its fitting grid and result table in
+  memory and creates no output files or directories during execution.
+* [2026-07-14] SPAN can now fit component-specific in-memory atmosphere grids
+  through `modelsA_grid` and `modelsB_grid`. Binary scores are evaluated per
+  component and light ratio before the full parameter table is assembled,
+  removing intermediate model files and repeated spectral comparisons while
+  retaining the legacy model-directory interface.
+* [2026-07-14] Expanded the SPAN notebook into a guided tutorial with an
+  explanation before every calculation, explicit labels for the two
+  disentangled inputs, the origin of their provenance record, descriptive
+  outputs, and score-profile interpretation.
+* [2026-07-13] SPAN now accepts decimal atmosphere-grid values and commented
+  spectrum files, interpolates model spectra onto the observed wavelength
+  sampling, and provides explicit wavelength-shift, worker, and chunk controls.
+* [2026-07-13] MINATO package archives now exclude atmosphere grids, observed
+  spectra, fitted results, tutorials, development tests, and contributed code.
+  The GitHub SPAN tutorial retains only its two approved synthetic fixtures and
+  requires an explicitly configured, separately downloaded PoWR grid.
 * [2026-07-13] Moved the adapted shift-and-add class out of the installable
   `minato.spdis` namespace into the development-only `minato.contrib.spdis`
   namespace, with all credit, citations, permissions, and supported usage
@@ -143,6 +183,34 @@
 * The SB1 and SB2 `ravel` tutorials now include an upfront note on setting `XLA_FLAGS` before importing `minato.ravel` on shared CPU servers.
 
 ### Fixed
+* [2026-07-15] Rebuilt SPAN's two-dimensional profile-correlation plot for
+  current result tables, including `chi2_tot` selection, irregular atmosphere
+  grids, explicit joint best-model markers, portable rendering, and no
+  implicit output files.
+* [2026-07-15] Restored SPAN's standard fitted profile plot at the end of the
+  tutorial, including an explicit minimum-score marker at every parameter-grid
+  value. The plotting helper no longer creates implicit report files, requires
+  external LaTeX, mutates its input table, or emits ill-conditioned polynomial
+  warnings for valid sparse profile grids.
+* [2026-07-14] Regenerated the SPAN tutorial spectra with the upstream-default
+  500 shift-and-add iterations, substantially reducing the under-converged
+  secondary Balmer-wing bias seen with the earlier 100-iteration fixtures.
+* [2026-07-14] Prevented calibrated or logarithmic PoWR products from silently
+  entering continuum-normalised SPAN fits. Duplicate atmosphere nodes are now
+  rejected, directory scans support explicit file filtering, rendered fitting
+  grids validate complete source flux arrays, and the tutorial tells users to
+  provide one normalised grid before reporting model sources and RMS
+  diagnostics.
+* [2026-07-14] Made the local PoWR model-directory setting explicit and its
+  configuration cell self-contained in the SPAN tutorial, including the exact
+  line to edit and the optional `MINATO_POWR_GRID` override.
+* [2026-07-13] Replaced SPAN's invalid model-flux-divided residual statistic
+  with a non-negative unweighted squared-residual score for normalised spectra
+  without uncertainty columns.
+* [2026-07-13] Corrected SPAN's accidentally evaluated H-delta interval from
+  4064-4117 Angstrom to the intended 4087-4130 Angstrom window.
+* [2026-07-13] Updated the development-only shift-and-add text reader to accept
+  standard commented metadata headers used by the synthetic tutorial inputs.
 * [2026-07-12] Restored the SB2 profile and likelihood calculations to the
   nested NumPyro model, fixing a `NameError` that prevented SB2 fitting.
 * [2026-07-12] Preserved the epoch dimension in the SB2 second-stage RV prior,

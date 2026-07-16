@@ -20,11 +20,13 @@ The release candidate includes:
 - Python 3.12-3.13 support and reproducible mamba, uv, and Pixi environments;
 - new `binary_population`, `synthetic`, and `observing` modules;
 - expanded scalable binary-population inference and tutorials;
+- a reproducible tutorial for SPAN's fast, grid-based stellar-atmosphere
+  fitting of disentangled binary-star spectra;
 - repaired RAVEL SB2 probabilistic fitting, configurable two-stage sampling,
   and automated SB1/SB2 smoke tests;
 - automated tests and package builds for the supported Python versions.
 
-Before release, the candidate still requires data-free tutorial validation,
+Before release, the candidate still requires the remaining tutorial validation,
 approval of the public `observing` API, successful CI with the final artefact
 checks, and installation testing through TestPyPI. Until those checks pass,
 `v0.2.0` remains the stable release.
@@ -33,23 +35,28 @@ checks, and installation testing through TestPyPI. Until those checks pass,
 
 | Module | Purpose | Status |
 | --- | --- | --- |
-| `minato.span` | Simultaneous atmosphere-model fitting for disentangled binary spectra | Stable |
+| `minato.span` | Fast, grid-based stellar-atmosphere fitting for disentangled binary-star spectra | Stable |
 | `minato.ravel` | SB1/SB2 line-profile fitting, radial velocities, and period analysis | Stable |
 | `minato.binary_population` | Intrinsic binary populations, survey simulation, and scalable population inference | Release candidate |
-| `minato.synthetic` | Synthetic single-star and binary spectra with configurable atmosphere-grid backends | Release candidate |
+| `minato.synthetic` | Synthetic single-star, binary, and in-memory fitting grids with configurable atmosphere backends | Release candidate |
 | `minato.observing` | Orbital-phase scheduling, observability checks, and night-visibility plots | Release candidate |
 
 ## Models and data
 
-MINATO releases do not distribute atmosphere grids, trained models, observed
-or synthetic spectra, fitted results, or tutorial datasets. Users provide the
-models and data needed for their analysis and remain responsible for the
-licences and citations attached to those resources.
+MINATO does not distribute atmosphere grids, trained models, observed spectra,
+or fitted results. Users provide the models and data needed for their analysis
+and remain responsible for the licences and citations attached to those
+resources.
 
-Tutorials use small synthetic inputs generated during execution where
-possible. Model-backed examples accept user-supplied paths and may use public
-TLUSTY or PoWR grids obtained separately under their respective terms and
-citation guidance.
+The SPAN tutorial includes two synthetic disentangled spectra with generation
+provenance. Its PoWR atmosphere grid must still be downloaded from the official
+provider under the PoWR terms and citation guidance. Other model-backed
+examples likewise accept explicit user-supplied paths.
+
+SPAN is designed for fast and transparent searches over explicit atmosphere,
+rotation, and light-ratio grids. Its component scores are evaluated separately
+and then combined, making broad binary-star grid searches inexpensive while
+keeping every tested model visible to the user.
 
 ## Development-only contributed code
 

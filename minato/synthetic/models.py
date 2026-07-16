@@ -240,6 +240,80 @@ class ObservationModel:
             raise ValueError("wavelength_min must be smaller than wavelength_max")
 
 
+@dataclass
+class RenderedAtmosphereGrid:
+    """In-memory atmosphere spectra keyed by ``(teff, logg, vsini)``."""
+
+    models: dict[tuple[float, float, float], Spectrum]
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.models:
+            raise ValueError("rendered atmosphere grid must contain at least one model")
+
+        normalised: dict[tuple[float, float, float], Spectrum] = {}
+        reference_wavelength: np.ndarray | None = None
+        for raw_key, spectrum in self.models.items():
+            if len(raw_key) != 3:
+                raise ValueError("rendered model keys must be (teff, logg, vsini)")
+            if not isinstance(spectrum, Spectrum):
+                raise TypeError("rendered atmosphere grid values must be Spectrum objects")
+            key = self._key(*raw_key)
+            if key in normalised:
+                raise ValueError(f"duplicate rendered atmosphere model: {key}")
+            if reference_wavelength is None:
+                reference_wavelength = spectrum.wavelength
+            elif spectrum.wavelength.shape != reference_wavelength.shape or not np.allclose(
+                spectrum.wavelength,
+                reference_wavelength,
+                rtol=0.0,
+                atol=1e-10,
+            ):
+                raise ValueError("all rendered atmosphere models must share one wavelength grid")
+            normalised[key] = spectrum
+
+        self.models = normalised
+        self.metadata = dict(self.metadata)
+
+    @staticmethod
+    def _key(teff: float, logg: float, vsini: float) -> tuple[float, float, float]:
+        values = (float(teff), float(logg), float(vsini))
+        if not all(np.isfinite(value) for value in values):
+            raise ValueError("rendered atmosphere-grid parameters must be finite")
+        if values[0] <= 0:
+            raise ValueError("rendered atmosphere-grid temperatures must be positive")
+        if values[2] < 0:
+            raise ValueError("rendered atmosphere-grid vsini values must be non-negative")
+        return tuple(round(value, 10) for value in values)
+
+    @property
+    def wavelength(self) -> np.ndarray:
+        """Return the common model wavelength grid."""
+
+        return next(iter(self.models.values())).wavelength
+
+    @property
+    def parameter_nodes(self) -> tuple[tuple[float, float, float], ...]:
+        """Return sorted ``(teff, logg, vsini)`` model keys."""
+
+        return tuple(sorted(self.models))
+
+    def get_model(self, teff: float, logg: float, vsini: float) -> Spectrum:
+        """Return one exactly matching rendered model."""
+
+        key = self._key(teff, logg, vsini)
+        try:
+            return self.models[key]
+        except KeyError as error:
+            raise LookupError(
+                f"rendered atmosphere model is unavailable: "
+                f"Teff={key[0]:g} K, logg={key[1]:g}, vsini={key[2]:g} km/s"
+            ) from error
+
+    def __len__(self) -> int:
+        return len(self.models)
+
+
 @dataclass(frozen=True)
 class IsochronePoint:
     """Interpolated stellar parameters from an isochrone bank."""

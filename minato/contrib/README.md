@@ -31,3 +31,10 @@ from minato.contrib.spdis import SpecDisent
 
 Do not document or import it as `minato.spdis`; the `minato.contrib` namespace
 marks it as external, development-only code.
+
+The development script `scripts/generate_span_tutorial_data.py` uses this
+adaptation to reproduce the synthetic disentangled inputs for the public SPAN
+tutorial. The released tutorial consumes only the resulting synthetic spectra;
+it does not expose `minato.contrib.spdis` as a supported MINATO API. The
+upstream credit and citation requirements listed above still apply to that
+generation step.

@@ -18,6 +18,12 @@ class ReleaseArtifactPolicyTests(unittest.TestCase):
         self.assertTrue(violations("minato/contrib/spdis.py"))
         self.assertTrue(violations("minato_astro-0.3.0/contrib/adaptation.py"))
 
+    def test_development_tests_are_rejected(self):
+        self.assertIn(
+            "contains a development-only or data tree",
+            violations("minato_astro-0.3.0/tests/test_span.py"),
+        )
+
     def test_development_record_is_rejected(self):
         self.assertIn(
             "contains a development record",

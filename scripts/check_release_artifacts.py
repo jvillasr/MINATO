@@ -19,6 +19,7 @@ FORBIDDEN_TREES = {
     ("minato", "contrib"),
     ("minato", "models"),
     ("minato", "tutorials"),
+    ("tests",),
 }
 
 

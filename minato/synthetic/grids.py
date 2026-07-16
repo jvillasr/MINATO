@@ -14,6 +14,7 @@ from .models import Spectrum, Star
 
 
 ParameterParser = Callable[[Path], Mapping[str, Any] | None]
+FileFilter = Callable[[Path], bool]
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,23 @@ class TextAtmosphereGrid:
         self.nodes = tuple(nodes)
         if not self.nodes:
             raise ValueError("TextAtmosphereGrid needs at least one atmosphere node")
+        duplicate_nodes = _find_duplicate_nodes(self.nodes)
+        if duplicate_nodes:
+            details = []
+            for (teff, logg), paths in list(duplicate_nodes.items())[:5]:
+                details.append(
+                    f"Teff={teff:g} K, logg={logg:g}: "
+                    + ", ".join(str(path) for path in paths)
+                )
+            if len(duplicate_nodes) > 5:
+                details.append(
+                    f"... and {len(duplicate_nodes) - 5} more duplicate nodes"
+                )
+            raise ValueError(
+                "duplicate atmosphere-grid nodes are ambiguous; each (Teff, logg) "
+                "pair must select one file. Use file_filter=... or an explicit index. "
+                + " | ".join(details)
+            )
         self.wavelength_column = int(wavelength_column)
         self.flux_column = int(flux_column)
         self.teff_scale = float(teff_scale)
@@ -136,6 +154,7 @@ class TextAtmosphereGrid:
         recursive: bool = True,
         filename_pattern: str | re.Pattern[str] | None = None,
         parser: ParameterParser | None = None,
+        file_filter: FileFilter | None = None,
         extensions: Iterable[str] | None = None,
         **kwargs: Any,
     ) -> "TextAtmosphereGrid":
@@ -145,6 +164,8 @@ class TextAtmosphereGrid:
         ``format`` may be ``"auto"``, ``"minato"``, ``"powr"``, ``"tlusty"``,
         or ``"fastwind"``. For unconventional names, pass either a regex with
         named groups or a parser function returning ``{"teff": ..., "logg": ...}``.
+        Use ``file_filter`` when one directory contains several products for
+        the same atmosphere node, for example normalised and calibrated files.
         """
 
         root_path = Path(root)
@@ -158,6 +179,21 @@ class TextAtmosphereGrid:
         if filename_pattern is not None and parser is not None:
             raise ValueError("use either filename_pattern or parser, not both")
         files = _find_model_files(root_path, recursive=recursive, extensions=extensions)
+        candidate_count = len(files)
+        if file_filter is not None:
+            if not callable(file_filter):
+                raise TypeError("file_filter must be callable")
+            files = [path for path in files if file_filter(path)]
+            if candidate_count and not files:
+                filter_name = getattr(
+                    file_filter,
+                    "__name__",
+                    type(file_filter).__name__,
+                )
+                raise ValueError(
+                    f"file_filter {filter_name!r} rejected all {candidate_count} "
+                    f"candidate atmosphere-model files in {root_path}"
+                )
 
         if parser is not None:
             format_name = "custom" if format == "auto" else format
@@ -393,6 +429,18 @@ def _find_model_files(
             continue
         files.append(path)
     return sorted(files)
+
+
+def _find_duplicate_nodes(
+    nodes: Iterable[AtmosphereGridNode],
+) -> dict[tuple[float, float], tuple[Path, ...]]:
+    """Return atmosphere parameter pairs associated with more than one file."""
+
+    grouped: dict[tuple[float, float], list[Path]] = {}
+    for node in nodes:
+        key = (float(node.teff), float(node.logg))
+        grouped.setdefault(key, []).append(node.path)
+    return {key: tuple(paths) for key, paths in grouped.items() if len(paths) > 1}
 
 
 def _nodes_from_parser(

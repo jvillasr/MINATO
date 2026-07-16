@@ -1,22 +1,59 @@
+"""Fast, grid-based stellar-atmosphere fitting for binary-star spectra."""
+
 import time
 import sys
 import csv
 import os
 import itertools
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.interpolate as inter
 from glob import glob
 from datetime import timedelta, date, datetime
-from math import prod
 # from multiprocessing import Pool
 from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
 current_date = str(date.today())
 
+
+def _format_model_value(value):
+    """Return a stable filename representation for a numerical grid value."""
+    numeric = float(value)
+    if not np.isfinite(numeric):
+        raise ValueError("model-grid values must be finite")
+    if numeric.is_integer():
+        return str(int(numeric))
+    return np.format_float_positional(numeric, trim="-")
+
+
+def _model_stem(parameters):
+    """Build the filename stem used by SPAN's precomputed model grids."""
+    return "".join(f"{key}{_format_model_value(value)}" for key, value in parameters.items())
+
+
 class AtmFit:
-    def __init__(self, spectrumA, spectrumB, grid=None, lrat0=None, modelsA_path=None, modelsB_path=None, binary=False, crop_nebular=False, He2H=False, He_ini=0.1):
+    """Fit one or two stellar spectra through an explicit atmosphere grid."""
+
+    def __init__(
+        self,
+        spectrumA,
+        spectrumB,
+        grid=None,
+        lrat0=None,
+        modelsA_path=None,
+        modelsB_path=None,
+        modelsA_grid=None,
+        modelsB_grid=None,
+        binary=False,
+        crop_nebular=False,
+        He2H=False,
+        He_ini=0.1,
+        wavelength_shift=-0.2,
+        max_workers=None,
+        chunksize=1,
+    ):
         """
         Initialize the atmosphere fitting class.
 
@@ -36,6 +73,13 @@ class AtmFit:
                         Type: str
         :param modelsB_path: Path to the folder containing models for star B.
                         Type: str
+        :param modelsA_grid: In-memory
+                        :class:`minato.synthetic.RenderedAtmosphereGrid` for
+                        star A, used instead of ``modelsA_path``.
+        :param modelsB_grid: In-memory
+                        :class:`minato.synthetic.RenderedAtmosphereGrid` for
+                        star B, used instead of ``modelsB_path``. Binary fits
+                        may pass the same object for both components.
         :param binary: Flag to indicate if the system is a binary or single star.
                         Default: False
                         Type: bool
@@ -48,6 +92,16 @@ class AtmFit:
         :param He_ini: Initial He/H ratio to be used when modifying the He/H ratio.
                         Default: 0.1
                         Type: float
+        :param wavelength_shift: Offset in Angstrom applied to both input spectra.
+                        The legacy default is -0.2; use 0.0 for spectra already
+                        on their intended rest-wavelength scale.
+                        Type: float
+        :param max_workers: Maximum number of SPAN worker processes. ``None``
+                        keeps the ProcessPoolExecutor default.
+                        Type: int or None
+        :param chunksize: Number of parameter combinations submitted in each
+                        multiprocessing chunk.
+                        Type: int
         """
         self.grid = grid
         
@@ -56,26 +110,49 @@ class AtmFit:
         self.lrat0 = lrat0
         self.modelsA_path = modelsA_path
         self.modelsB_path = modelsB_path
+        self.modelsA_grid = modelsA_grid
+        self.modelsB_grid = modelsB_grid
+        if modelsA_grid is not None and modelsA_path is not None:
+            raise ValueError("use either modelsA_grid or modelsA_path, not both")
+        if modelsB_grid is not None and modelsB_path is not None:
+            raise ValueError("use either modelsB_grid or modelsB_path, not both")
+        for name, model_grid in (
+            ('modelsA_grid', modelsA_grid),
+            ('modelsB_grid', modelsB_grid),
+        ):
+            if model_grid is not None and not hasattr(model_grid, 'get_model'):
+                raise TypeError(f"{name} must define get_model(teff, logg, vsini)")
         self.binary = binary
+        if binary and (modelsA_grid is None) != (modelsB_grid is None):
+            raise ValueError("binary in-memory fitting requires modelsA_grid and modelsB_grid")
+        if not binary and modelsB_grid is not None:
+            raise ValueError("modelsB_grid is only valid for binary fitting")
         self.He2H = He2H
         self.crop_nebular = crop_nebular
         self.He_ini = He_ini
+        self.wavelength_shift = float(wavelength_shift)
+        if max_workers is not None and int(max_workers) < 1:
+            raise ValueError("max_workers must be positive or None")
+        if int(chunksize) < 1:
+            raise ValueError("chunksize must be positive")
+        self.max_workers = None if max_workers is None else int(max_workers)
+        self.chunksize = int(chunksize)
         self.missing_models = False
         self.warning_printed = False
         
     lines_dic = {
-                    3995: { 'region':[3990, 4000],  'HeH_region':[], 'title':'N II $\lambda$3995'},
-                    4026: { 'region':[4005, 4033],  'HeH_region':[4005, 4033], 'title':'He I $\lambda$4009/26'},
-                    4102: { 'region':[4084-20, 4117],  'HeH_region':[4091, 4111], 'title':'H$\delta$'},
-                    4121: { 'region':[4117, 4135],  'HeH_region':[4120, 4122], 'title':'He I $\lambda$4121, Si II $\lambda$4128/32'},
-                    4144: { 'region':[4137, 4151],  'HeH_region':[4142, 4146], 'title':'He I $\lambda$4144'},
-                    4233: { 'region':[4225, 4241],  'HeH_region':[], 'title':'Fe II $\lambda$4233'},
-                    4267: { 'region':[4260, 4275],  'HeH_region':[], 'title':'C II $\lambda$4267'},
-                    4340: { 'region':[4320, 4362],  'HeH_region':[4330, 4350], 'title':'H$\gamma$'},
-                    4388: { 'region':[4380, 4396],  'HeH_region':[4386.5, 4389.5], 'title':'He I $\lambda$4388'},
-                    4471: { 'region':[4465, 4485],  'HeH_region':[4471, 4473], 'title':'He I $\lambda$4471, Mg II $\lambda$4481'},
+                    3995: { 'region':[3990, 4000],  'HeH_region':[], 'title':r'N II $\lambda$3995'},
+                    4026: { 'region':[4005, 4033],  'HeH_region':[4005, 4033], 'title':r'He I $\lambda$4009/26'},
+                    4102: { 'region':[4087, 4130],  'HeH_region':[4091, 4111], 'title':r'H$\delta$'},
+                    4121: { 'region':[4117, 4135],  'HeH_region':[4120, 4122], 'title':r'He I $\lambda$4121, Si II $\lambda$4128/32'},
+                    4144: { 'region':[4137, 4151],  'HeH_region':[4142, 4146], 'title':r'He I $\lambda$4144'},
+                    4233: { 'region':[4225, 4241],  'HeH_region':[], 'title':r'Fe II $\lambda$4233'},
+                    4267: { 'region':[4260, 4275],  'HeH_region':[], 'title':r'C II $\lambda$4267'},
+                    4340: { 'region':[4320, 4362],  'HeH_region':[4330, 4350], 'title':r'H$\gamma$'},
+                    4388: { 'region':[4380, 4396],  'HeH_region':[4386.5, 4389.5], 'title':r'He I $\lambda$4388'},
+                    4471: { 'region':[4465, 4485],  'HeH_region':[4471, 4473], 'title':r'He I $\lambda$4471, Mg II $\lambda$4481'},
                     # 4553: { 'region':[4536, 4560],  'HeH_region':[], 'title':'Fe II $\lambda$4550/56, Si III $\lambda$4553'} }
-                    4553: { 'region':[4536, 4560],  'HeH_region':[], 'title':'He II $\lambda$4542, Si III $\lambda$4553'} }
+                    4553: { 'region':[4536, 4560],  'HeH_region':[], 'title':r'He II $\lambda$4542, Si III $\lambda$4553'} }
 
     def user_dic(self, lines):
         """
@@ -146,6 +223,12 @@ class AtmFit:
             if lrat is not None:
                 self.lrat = lrat
 
+            modA_f = self.model_on_observed_grid(self.wavA, modA_w, modA_f)
+            modA_w = self.wavA
+            if self.binary:
+                modB_f = self.model_on_observed_grid(self.wavB, modB_w, modB_f)
+                modB_w = self.wavB
+
             # slice data to regions for chi^2 computation
             dst_A_w_slc, dst_A_f_slc = self.slicedata(self.wavA, fluA, self.user_dicA)
             dst_B_w_slc, dst_B_f_slc = self.slicedata(self.wavB, fluB, self.user_dicB) if self.binary else (None, None)
@@ -196,6 +279,17 @@ class AtmFit:
             
             return row
 
+    def model_on_observed_grid(self, observed_wavelength, model_wavelength, model_flux):
+        """Interpolate one model onto an observed wavelength grid."""
+        observed_wavelength = np.asarray(observed_wavelength, dtype=float)
+        model_wavelength = np.asarray(model_wavelength, dtype=float)
+        model_flux = np.asarray(model_flux, dtype=float)
+        if model_wavelength.size != model_flux.size:
+            raise ValueError("model wavelength and flux arrays must have the same length")
+        if observed_wavelength[0] < model_wavelength[0] or observed_wavelength[-1] > model_wavelength[-1]:
+            raise ValueError("model wavelength range does not cover the observed spectrum")
+        return np.interp(observed_wavelength, model_wavelength, model_flux)
+
     def compute_chi2(self, dic_lines_A, dic_lines_B):
         """
         Perform parameter grid search and compute chi-squared values for different model combinations.
@@ -221,16 +315,13 @@ class AtmFit:
         nparams = len(self.grid)
         self.nparams = nparams
 
-        # compute length of the grid
-        gridlen = prod([len(x) for x in self.grid])
-        
         # retrieve wavelength from the disentangled spectra
-        wavA, wavB = self.get_wave()
+        wavA, wavB = self.get_wave(shift=self.wavelength_shift)
         self.wavA = wavA
         self.wavB = wavB
         # setting the dictionaries with the spectral lines selected for the fit
         usr_dicA = self.user_dic(dic_lines_A)
-        usr_dicB = self.user_dic(dic_lines_B)
+        usr_dicB = self.user_dic(dic_lines_B) if self.binary else {}
         self.user_dicA = usr_dicA
         self.user_dicB = usr_dicB
 
@@ -245,13 +336,28 @@ class AtmFit:
         self.cols = cols
         t0 = time.time()
 
+        if self.modelsA_grid is not None:
+            output = self._compute_chi2_rendered_grid()
+            tf = time.time()
+            print('Computation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
+            return output
+
         # Get all possible combinations of parameters
         parameters = list(itertools.product(*self.grid.values()))
         # print('parameters:', parameters)
         
         # Compute chi2 values for each set of parameters
-        with ProcessPoolExecutor() as executor:
-            results = list(tqdm(executor.map(self.compute_single_set, parameters), total=len(parameters)))
+        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+            results = list(
+                tqdm(
+                    executor.map(
+                        self.compute_single_set,
+                        parameters,
+                        chunksize=self.chunksize,
+                    ),
+                    total=len(parameters),
+                )
+            )
         if self.missing_models:
             print('WARNING: Some models were not found')
 
@@ -266,6 +372,258 @@ class AtmFit:
         output = pd.DataFrame.from_dict(result_dic)
         # print('total number of points used in the fit:', ndata)
         return output
+
+    def _compute_chi2_rendered_grid(self):
+        """Score an in-memory synthetic grid without writing intermediate files."""
+
+        if self.He2H:
+            raise NotImplementedError(
+                "He2H fitting is not yet supported with in-memory model grids"
+            )
+
+        if self.binary:
+            expected_keys = {'lr', 'TA', 'gA', 'vA', 'TB', 'gB', 'vB'}
+            if set(self.grid) != expected_keys:
+                raise ValueError(
+                    "rendered binary grids require lr, TA, gA, vA, TB, gB, and vB"
+                )
+
+            light_ratios = [float(value) for value in self.grid['lr']]
+            if any(not 0 < value < 1 for value in light_ratios):
+                raise ValueError("binary light ratios must be strictly between 0 and 1")
+            if len(set(light_ratios)) != len(light_ratios):
+                raise ValueError("binary light ratios must not contain duplicates")
+            initial_light_ratio = self.lrat0 if self.lrat0 is not None else 0.3
+            if not 0 < float(initial_light_ratio) < 1:
+                raise ValueError("lrat0 must be strictly between 0 and 1")
+
+            observed_flux_a, observed_flux_b = self.get_flux()
+            scores_a, ndata_a = self._score_rendered_component(
+                component='A',
+                parameter_keys=('TA', 'gA', 'vA'),
+                light_ratios=light_ratios,
+                observed_flux=observed_flux_a,
+            )
+            scores_b, ndata_b = self._score_rendered_component(
+                component='B',
+                parameter_keys=('TB', 'gB', 'vB'),
+                light_ratios=light_ratios,
+                observed_flux=observed_flux_b,
+            )
+            output = scores_a.merge(
+                scores_b,
+                on='lr',
+                how='inner',
+                validate='many_to_many',
+            )
+            output['chi2_tot'] = output['chi2A'] + output['chi2B']
+            output['chi2r_tot'] = output['chi2redA'] + output['chi2redB']
+            output['ndata'] = ndata_a + ndata_b
+            columns = list(self.grid) + [
+                'chi2_tot',
+                'chi2A',
+                'chi2B',
+                'chi2r_tot',
+                'chi2redA',
+                'chi2redB',
+                'ndata',
+            ]
+            return output.loc[:, columns]
+
+        expected_keys = {'T', 'g', 'v'}
+        if set(self.grid) != expected_keys:
+            raise ValueError("rendered single-star grids require T, g, and v")
+        observed_flux, _ = self.get_flux()
+        return self._score_rendered_single_star(observed_flux)
+
+    def _score_rendered_component(
+        self,
+        component,
+        parameter_keys,
+        light_ratios,
+        observed_flux,
+    ):
+        """Score one binary component before the component score tables are joined."""
+
+        if component == 'A':
+            observed_wavelength = np.asarray(self.wavA, dtype=float)
+            line_dictionary = self.user_dicA
+            chi2_column = 'chi2A'
+            reduced_column = 'chi2redA'
+        else:
+            observed_wavelength = np.asarray(self.wavB, dtype=float)
+            line_dictionary = self.user_dicB
+            chi2_column = 'chi2B'
+            reduced_column = 'chi2redB'
+        observed_flux = np.asarray(observed_flux, dtype=float)
+
+        observed_slice_wavelength, observed_slice_flux = self.slicedata(
+            observed_wavelength,
+            observed_flux,
+            line_dictionary,
+        )
+        if component == 'B' and self.crop_nebular:
+            observed_slice_wavelength, observed_slice_flux = self.crop_data(
+                observed_slice_wavelength,
+                observed_slice_flux,
+                [[4100, 4104], [4338, 4346]],
+            )
+
+        ndata = len(observed_slice_flux)
+        degrees_of_freedom = ndata - self.nparams
+        if degrees_of_freedom <= 0:
+            raise ValueError(
+                f"component {component} has {ndata} fitted samples but "
+                f"{self.nparams} free parameters"
+            )
+
+        rows = []
+        model_grid = self.modelsA_grid if component == 'A' else self.modelsB_grid
+        model_nodes = self._matching_rendered_nodes(
+            model_grid,
+            parameter_keys,
+            component,
+        )
+        for values in model_nodes:
+            model = model_grid.get_model(*values)
+            model_flux = self.model_on_observed_grid(
+                observed_wavelength,
+                model.wavelength,
+                model.flux,
+            )
+            model_slice_wavelength, model_slice_flux = self.slicedata(
+                observed_wavelength,
+                model_flux,
+                line_dictionary,
+            )
+            if component == 'B' and self.crop_nebular:
+                model_slice_wavelength, model_slice_flux = self.crop_data(
+                    model_slice_wavelength,
+                    model_slice_flux,
+                    [[4100, 4104], [4338, 4346]],
+                )
+
+            for light_ratio in light_ratios:
+                scaled_model_flux = self.model_flux_to_initial_light_ratio(
+                    model_slice_flux,
+                    component,
+                    light_ratio,
+                )
+                chi2_value = self.chi2(observed_slice_flux, scaled_model_flux)
+                row = dict(zip(parameter_keys, values))
+                row.update(
+                    {
+                        'lr': light_ratio,
+                        chi2_column: chi2_value,
+                        reduced_column: chi2_value / degrees_of_freedom,
+                    }
+                )
+                rows.append(row)
+
+        columns = list(parameter_keys) + ['lr', chi2_column, reduced_column]
+        return pd.DataFrame(rows, columns=columns), ndata
+
+    def _matching_rendered_nodes(self, model_grid, parameter_keys, component):
+        """Return rendered nodes matching the requested, possibly irregular grid."""
+
+        requested = {
+            key: tuple(dict.fromkeys(self.grid[key]))
+            for key in parameter_keys
+        }
+        if not hasattr(model_grid, 'parameter_nodes'):
+            return list(itertools.product(*(requested[key] for key in parameter_keys)))
+
+        def matches(value, choices):
+            return any(
+                np.isclose(value, choice, rtol=0.0, atol=1e-10)
+                for choice in choices
+            )
+
+        nodes = [
+            tuple(node)
+            for node in model_grid.parameter_nodes
+            if all(
+                matches(node[index], requested[key])
+                for index, key in enumerate(parameter_keys)
+            )
+        ]
+        missing = {}
+        for index, key in enumerate(parameter_keys):
+            represented = [node[index] for node in nodes]
+            missing_values = [
+                value
+                for value in requested[key]
+                if not matches(value, represented)
+            ]
+            if missing_values:
+                missing[key] = missing_values
+        if missing:
+            details = '; '.join(
+                f"{key}={values}" for key, values in missing.items()
+            )
+            raise LookupError(
+                f"rendered component {component} has no valid models for {details}"
+            )
+        return [
+            tuple(
+                next(
+                    choice
+                    for choice in requested[key]
+                    if np.isclose(node[index], choice, rtol=0.0, atol=1e-10)
+                )
+                for index, key in enumerate(parameter_keys)
+            )
+            for node in nodes
+        ]
+
+    def _score_rendered_single_star(self, observed_flux):
+        """Score a standard single-star ``T``, ``g``, and ``v`` grid."""
+
+        observed_wavelength = np.asarray(self.wavA, dtype=float)
+        observed_flux = np.asarray(observed_flux, dtype=float)
+        _, observed_slice_flux = self.slicedata(
+            observed_wavelength,
+            observed_flux,
+            self.user_dicA,
+        )
+        ndata = len(observed_slice_flux)
+        degrees_of_freedom = ndata - self.nparams
+        if degrees_of_freedom <= 0:
+            raise ValueError(
+                f"single-star fit has {ndata} fitted samples but "
+                f"{self.nparams} free parameters"
+            )
+
+        rows = []
+        for teff, logg, vsini in itertools.product(
+            self.grid['T'],
+            self.grid['g'],
+            self.grid['v'],
+        ):
+            model = self.modelsA_grid.get_model(teff, logg, vsini)
+            model_flux = self.model_on_observed_grid(
+                observed_wavelength,
+                model.wavelength,
+                model.flux,
+            )
+            _, model_slice_flux = self.slicedata(
+                observed_wavelength,
+                model_flux,
+                self.user_dicA,
+            )
+            chi2_value = self.chi2(observed_slice_flux, model_slice_flux)
+            rows.append(
+                {
+                    'T': teff,
+                    'g': logg,
+                    'v': vsini,
+                    'chi2_tot': chi2_value,
+                    'chi2r_tot': chi2_value / degrees_of_freedom,
+                    'ndata': ndata,
+                }
+            )
+
+        return pd.DataFrame(rows, columns=self.cols)
 
     def rescale_flux(self, lrat, lrat0=0.3):
         """
@@ -386,19 +744,21 @@ class AtmFit:
                  Type: tuple of numpy arrays (floats), str
         """
         if models_path:
-            model = models_path 
-            for key, value in pars.items():
-                model += key + str(int(value))
-            # print('   get_model: getting model: ', model)
-            try:
-                model_found = glob(model+'*')
-                # print('   get_model: model_found: ', model_found)
-                df = pd.read_csv(model_found[0], header=None, sep='\s+')
-                return df[0].to_numpy(), df[1].to_numpy(), model
-            except FileNotFoundError:
-                # print('WARNING: No model named '+model+' was found')
-                self.missing_models = True
-                return None, None, None
+            model_directory = Path(models_path).expanduser()
+            model_stem = _model_stem(pars)
+            exact_model = model_directory / f"{model_stem}.txt"
+            if exact_model.exists():
+                model_found = exact_model
+            else:
+                matches = sorted(model_directory.glob(f"{model_stem}*"))
+                if not matches:
+                    self.missing_models = True
+                    raise FileNotFoundError(
+                        f"no model matching {model_stem!r} in {model_directory}"
+                    )
+                model_found = matches[0]
+            df = pd.read_csv(model_found, header=None, sep=r'\s+', comment='#')
+            return df[0].to_numpy(), df[1].to_numpy(), str(model_found)
         else:
             T, g, rot = pars
             lowT_models_path = '~/Science/github/jvillasr/MINATO/minato/models/ATLAS9/'             # Users will have to add the path to the models
@@ -419,10 +779,10 @@ class AtmFit:
                 try:
                     if T>30:                        
                         model = 'T'+str(int(T*10))+'g'+str(int(g*10))+'v10r'+str(int(rot))+'fw05'
-                        df = pd.read_csv(tlustyO_path+model,header=None, sep='\s+')
+                        df = pd.read_csv(tlustyO_path+model,header=None, sep=r'\s+')
                     else:
                         model = 'T'+str(int(T))+'g'+str(int(g*10))+'v2r'+str(int(rot))+'fw05'
-                        df = pd.read_csv(tlustyB_path+model,header=None, sep='\s+')
+                        df = pd.read_csv(tlustyB_path+model,header=None, sep=r'\s+')
                     # return df[0].array, df[1].array, model
                     return df[0].to_numpy(), df[1].to_numpy(), model
                 except FileNotFoundError:
@@ -432,7 +792,7 @@ class AtmFit:
             elif source=='atlas':
                 model = 'T'+str(int(T))+'g'+str(int(g))+'v2r'+str(int(rot))+'fw05'
                 try:
-                    df = pd.read_csv(lowT_models_path+model,header=None, sep='\s+')
+                    df = pd.read_csv(lowT_models_path+model,header=None, sep=r'\s+')
                     # return df[0].array, df[1].array, model  # pandas array are not accepted by slicedata
                     return df[0].to_numpy(), df[1].to_numpy(), model
                 except FileNotFoundError:
@@ -577,7 +937,11 @@ class AtmFit:
         """
         self.obs = obs
         self.exp = exp
-        return np.sum(((obs-exp)**2)/exp)
+        obs = np.asarray(obs, dtype=float)
+        exp = np.asarray(exp, dtype=float)
+        if obs.shape != exp.shape:
+            raise ValueError("observed and expected flux arrays must have the same shape")
+        return float(np.sum((obs - exp) ** 2))
 
     def crop_data(self, x_data, y_data, wavelength_ranges):
         """
@@ -630,7 +994,7 @@ class AtmFit:
         self.wavelength = wavelength
         models_list = sorted(glob(models_path+'*'+models_extension))
         for model in models_list:
-            mod = pd.read_csv(model, header=None, sep='\s+')
+            mod = pd.read_csv(model, header=None, sep=r'\s+')
             mod_w = mod[0]
             mod_f = mod[1]
             mod_f_interp = np.interp(wavelength, mod_w, mod_f)
@@ -651,8 +1015,12 @@ class AtmFit:
         :return: Dataframe containing spectrum data for star A, Dataframe containing spectrum data for star B.
                 Type: pandas DataFrames
         """
-        dsnt_A = pd.read_csv(self.spectrumA, header=None, sep='\s+')        
-        dsnt_B = pd.read_csv(self.spectrumB, header=None, sep='\s+')
+        dsnt_A = pd.read_csv(self.spectrumA, header=None, sep=r'\s+', comment='#')
+        dsnt_B = (
+            pd.read_csv(self.spectrumB, header=None, sep=r'\s+', comment='#')
+            if self.spectrumB is not None
+            else None
+        )
         return dsnt_A, dsnt_B
 
     def get_wave(self, shift=-0.2):
@@ -674,7 +1042,7 @@ class AtmFit:
         self.shift = shift
         specA, specB = self.read_spec() 
         waveA = specA[0]+shift
-        waveB = specB[0]+shift
+        waveB = specB[0]+shift if specB is not None else None
         return waveA, waveB
 
     def get_flux(self):
@@ -690,5 +1058,5 @@ class AtmFit:
         """
         specA, specB = self.read_spec() 
         fluxA = specA[1]
-        fluxB = specB[1]
+        fluxB = specB[1] if specB is not None else None
         return fluxA, fluxB

@@ -1,5 +1,276 @@
 # MINATO Notes
 
+## 2026-07-15 - Restore SPAN's standard result plots
+
+Implementation:
+- Replaced the tutorial-specific one-dimensional score figure with SPAN's
+  established `read_results.compute_bestfit` visualisation.
+- The standard figure now marks the profile minimum at every parameter-grid
+  value and uses independent panel scales so no profile nodes are hidden by
+  the near-best-model display threshold.
+- Rebuilt the public `read_results.plot_corr` path as a two-dimensional profile
+  corner plot for current SPAN tables. It profiles over the other parameters,
+  marks valid grid nodes and the global joint best model, retains blank regions
+  for unavailable irregular PoWR combinations, and shares a profile
+  `Delta chi-squared` colour scale across panels.
+- Added `read_results.plot_corner`, which reuses the same profile preparation,
+  one- and two-dimensional minimisation, interpolation, confidence levels, and
+  colour scaling. The tutorial now uses this single classical corner layout,
+  with one-dimensional profiles on the diagonal and two-dimensional profiles
+  below it. `compute_bestfit` and `plot_corr` remain available separately.
+- Added TeX-formatted fitted values and asymmetric nominal intervals above all
+  seven diagonal panels, adopted `f_B` for the companion light fraction,
+  substantially increased all corner-plot typography, and moved the top-panel
+  scientific scale multiplier away from the result title.
+- Restored MINATO's Times-first plotting style with STIX as the portable maths
+  fallback. The tutorial's displayed `f_B` range is zoomed to 0.05-0.20 without
+  changing the fitted 0.05-0.50 grid; other axes retain their full input-grid
+  limits.
+- The tutorial objective is an unweighted residual sum of squares because the
+  spectra contain no per-pixel uncertainties. Dividing that score by the
+  degrees of freedom would produce a mean squared residual, not reduced
+  chi-squared. The original diagonal score profiles remain in place.
+  One-dimensional intervals use one-parameter likelihood-ratio thresholds,
+  while joint contours use the corresponding two-parameter thresholds; both
+  remain explicitly nominal.
+- Replaced continuous score heatmaps with nested blue-grey rank regions on
+  white axes, with black boundaries, sampled grid points, red injected-value
+  guides, and red best-grid markers. The tutorial shows the best 10%, 25%, and
+  50% of each 2D profiled grid because its nominal 2D thresholds correspond to
+  fractional score increases of only 0.022%, 0.059%, and 0.113%, below the
+  coarse grid resolution. Shape-preserving PCHIP interpolation avoids
+  artificial cubic zero-score plateaus. The real PoWR run
+  places five of seven injected quantities inside their nominal 68% intervals;
+  the faint secondary's temperature and gravity fall just outside.
+- Made report-file creation explicit through `report_to`; no report is written
+  by default, matching the tutorial's in-memory-only policy.
+- Made the standard plot portable without an external LaTeX installation,
+  fixed its single-panel case, preserved the caller's result table, and used a
+  scaled polynomial basis with a valid degree cap for sparse profile grids.
+- Kept the tutorial explanation explicit that its unweighted score profiles
+  are useful diagnostics but do not provide formal confidence intervals.
+
+Validation:
+- Executed the complete tutorial against the real PoWR grid. All 196,000 model
+  combinations and the combined corner figure, containing seven diagonal
+  profiles and 21 two-dimensional panels, completed without errors or warnings;
+  the best-fit RMS residual remained 0.0205.
+- The committed notebook remains unexecuted with zero stored outputs and no
+  report or result files are created by the standard plotting call.
+- The complete Python 3.13 suite passed 83 tests with one optional RAVEL smoke
+  test skipped.
+
+## 2026-07-15 - Extend the SPAN secondary-temperature profile
+
+Implementation:
+- Positioned SPAN consistently in the main README, tutorial index, module
+  description, and tutorial as a fast, transparent, grid-based
+  stellar-atmosphere fitting tool for disentangled binary-star spectra.
+- Extended the tutorial's secondary-temperature range from 20-26 kK to
+  16-26 kK in 2 kK steps.
+- The PoWR grid has 0.2 dex gravity spacing but a temperature-dependent upper
+  boundary. The tutorial therefore uses `16 kK` only at `log g=3.6` and
+  `18 kK` at `log g=3.6, 3.8, 4.0`; no unavailable atmosphere combinations
+  are interpolated or substituted.
+- Updated the in-memory SPAN path to score the valid parameter nodes present in
+  an irregular `RenderedAtmosphereGrid`. A regression test verifies that a
+  missing Cartesian `(Teff, log g)` combination is not evaluated.
+
+Validation:
+- The complete real-PoWR tutorial used 20 atmosphere nodes per component, 280
+  rendered spectra, and 196,000 valid joint combinations. It completed with a
+  best-fit RMS residual of 0.0205.
+- The best solution remains `(20 kK, log g=4.0, 125 km/s)` for the secondary.
+  The best 18 kK solution, at `log g=3.8` and `125 km/s`, ranks seventh overall
+  with score 4.740; the new lower temperatures do not reveal a better minimum.
+- The complete Python 3.13 suite passed 80 tests with one optional RAVEL smoke
+  test skipped. The committed notebook remains unexecuted with empty outputs.
+
+## 2026-07-14 - Converge the SPAN tutorial disentangling
+
+Diagnosis:
+- The complete real-PoWR tutorial reproduced the reported secondary boundary
+  solution with the original 100-iteration fixtures. The best secondary node
+  was `(20 kK, log g=3.6, 125 km/s)` rather than the injected
+  `(22 kK, log g=4.2, 120 km/s)`.
+- The downloaded PoWR files are numerically identical to the generator inputs
+  over the fitted wavelength range. The light-ratio approximation also does
+  not cause the discrepancy.
+- H-delta and H-gamma account for about 2.14 of the 2.31 score penalty against
+  the injected secondary node. These broad wings had not converged after 100
+  shift-and-add iterations.
+
+Implementation:
+- Regenerated both tutorial fixtures with 500 iterations, matching the
+  contributed upstream implementation's default. A 1,000-iteration control
+  changed the secondary profile difference by less than 0.001.
+- Set 500 as the shared generator and command-line default, recorded it in the
+  fixture provenance, and added a regression test tying the command-line
+  default to that record.
+
+Validation:
+- With the 500-iteration fixtures, the complete 156,800-row PoWR fit prefers
+  `(20 kK, log g=4.0, 125 km/s)` for the secondary, but the injected
+  `(22 kK, log g=4.2)` atmosphere is nearly tied: the one-dimensional
+  temperature profile differs by 0.056 and the relevant joint secondary score
+  differs by 0.080. The best total score is 4.419.
+- The remaining adjacent-node ambiguity is expected for a companion supplying
+  only 10.8% of the light. It is no longer the monotonic temperature/gravity
+  boundary bias produced by the under-converged fixtures.
+- The focused SPAN/synthetic suite passed 38 tests. The complete Python 3.13
+  suite passed 79 tests with one optional RAVEL smoke test skipped.
+
+## 2026-07-14 - Reject calibrated PoWR spectra in normalised SPAN fits
+
+Diagnosis:
+- A completed tutorial run produced profile scores with a baseline near
+  `3.2e5` and temperature/gravity minima at grid boundaries. That scale is
+  consistent with comparing continuum-normalised observations near one against
+  PoWR calibrated logarithmic fluxes near `-6` to `-8`.
+- The PoWR filename recogniser accepted both `_line.txt` and
+  `_line_calib.txt` for the same `(Teff, logg)` node. When both products were
+  below `powr_dir`, nearest-node selection could silently choose whichever path
+  sorted first. The tutorial's `log_flux="never"` then treated logarithmic
+  calibrated values as normalised flux.
+
+Implementation:
+- `TextAtmosphereGrid` now rejects duplicate atmosphere nodes and supports a
+  `file_filter` for directories containing several products per model.
+- `render_atmosphere_grid` validates finite, continuum-like source fluxes by
+  default and reports the offending node, median flux, and source path.
+- The SPAN tutorial asks users to select a directory containing one normalised
+  PoWR line-spectrum grid. Flux validation remains in
+  `render_atmosphere_grid`, which checks every complete source spectrum before
+  SPAN receives it. The tutorial also displays an example source and model
+  median-flux range and rejects a best-fit RMS residual above 0.2.
+- Removed the tutorial work directory and CSV export. The fitting grid,
+  complete score table, best rows, and profiles now remain in memory, and the
+  committed notebook contains no stored execution output.
+
+Validation:
+- A 36-file normalised validation grid completed the full notebook. All 10
+  code cells executed and all 156,800 result rows were produced without
+  errors. A mixed grid is rejected as ambiguous rather than silently selecting
+  one of two products for the same atmosphere node.
+- The in-memory-only notebook completed again after removing the work-directory
+  and CSV-export cells. A source scan found no persistent-output calls, and the
+  committed notebook remains unexecuted with empty cell outputs.
+- A two-node run with the actual PoWR sources recovered light fraction 0.10,
+  primary `v sin i=75 km/s`, secondary `v sin i=100 km/s`, and best-fit RMS
+  residual 0.0272. Supplying only a calibrated source now raises a descriptive
+  error before rendering.
+
+## 2026-07-14 - Refactor SPAN around in-memory synthetic model grids
+
+- Added the generic `RenderedAtmosphereGrid` container and
+  `render_atmosphere_grid` renderer to `minato.synthetic`. The renderer uses
+  the same resampling, rotational-broadening, and instrumental-broadening path
+  as `render_single_star`, validates exact atmosphere nodes, and keeps fitting
+  models noiseless and in memory.
+- Added component-specific `modelsA_grid` and `modelsB_grid` inputs to
+  `AtmFit`, while preserving the existing model-directory API. Different
+  atmosphere grids can therefore still be used for the two binary components.
+- The direct binary path scores each component model once per light ratio and
+  combines the two score tables afterwards. The tutorial's 156,800 joint
+  combinations now require 1,400 primary and 1,120 secondary spectral
+  comparisons instead of 156,800 repeated joint comparisons.
+- Removed the tutorial-specific disk conversion helper, copied model files,
+  and CSV model manifest. The SPAN notebook now passes the rendered synthetic
+  grid directly to `AtmFit`.
+
+Validation:
+- The complete 23-cell notebook executed top to bottom with a temporary
+  36-node analytic atmosphere directory standing in for the user download.
+  It rendered 252 models, produced all 156,800 result rows, and raised no cell
+  errors. This validates the tutorial plumbing but is not a scientific PoWR
+  recovery test.
+- A separate 490-combination fit used the two actual PoWR source spectra from
+  which the tutorial fixtures were generated. It recovered light fraction
+  0.10, primary `v sin i=75 km/s`, and secondary `v sin i=100 km/s`, with
+  125 km/s nearly tied, matching the previous file-based recovery check.
+- The focused synthetic/SPAN suite passed 37 tests. The complete Python 3.13
+  suite passed 78 tests with one optional RAVEL smoke test skipped.
+- Fresh wheel and source archives under
+  `/tmp/minato-dist-powr-fluxfix-20260714` passed the release-content policy.
+  An isolated wheel import confirmed `RenderedAtmosphereGrid`,
+  `render_atmosphere_grid`, its normalised-flux validation, the atmosphere
+  directory file filter, and the `modelsA_grid`/`modelsB_grid` SPAN inputs.
+
+## 2026-07-14 - Add step-by-step guidance to the SPAN tutorial
+
+- Reorganised `span_example.ipynb` into 23 explanation/code cells. Each
+  calculation now states its purpose, inputs, expected output, and the next
+  interpretation step.
+- Clarified that `span_synthetic/provenance.json` was generated by
+  `scripts/generate_span_tutorial_data.py` with the synthetic observations and
+  is not a PoWR download. Its injected atmosphere values are used only for
+  recovery checks, while its light fraction supplies the `lrat0` flux-scale
+  reference required by the fit.
+- Explicitly identifies the plotted spectra as the disentangled primary and
+  secondary observations supplied to SPAN, labels both panels, and explains
+  their continuum scale and different noise quality.
+- Replaced unexplained tuple and integer outputs with labelled path, grid-size,
+  rendered-model-count, wavelength-coverage, and result messages. The fitting
+  section now defines the unweighted score, explains the separable component
+  calculation, and shows injected values on readable one-dimensional profile
+  plots.
+- Notebook JSON, code-cell syntax, clean source outputs, the introductory
+  workflow with a temporary two-model PoWR directory, and the complete
+  calculation with a temporary 36-node analytic validation directory were
+  checked with Python 3.13.
+
+## 2026-07-13 - Rebuild the SPAN tutorial around synthetic O+B spectra
+
+Scope:
+- Added a development-only generator for ten noisy `R=40,000`, `S/N=100`
+  composite spectra from PoWR `GAL-OB-Vd3` models `32-40` and `22-42`, a
+  17-day circular orbit, and injected rotational velocities of 80 and
+  120 km/s. The PoWR masses give RV semi-amplitudes of 70.4754 and
+  176.7919 km/s.
+- The calibrated PoWR spectra imply a secondary blue-optical light fraction of
+  0.1078785. The ten epochs were disentangled for 100 iterations through the
+  development-only `minato.contrib.spdis` adaptation.
+- Added two provenance-tracked synthetic disentangled spectra under
+  `minato/tutorials/span_synthetic/`. The original PoWR files, ten composite
+  epochs, and contributed disentangling code remain outside release packages.
+- Rewrote `span_example.ipynb` to request the official PoWR grid through
+  `MINATO_POWR_GRID`, render an in-memory fitting grid at `R=40,000`, and
+  search component temperatures, gravities, light fractions from 0.05 to 0.50,
+  and equal `v sin i` steps of 25 km/s from 50 to 200 km/s.
+
+Implementation:
+- Added the generic `render_atmosphere_grid` synthetic renderer and direct
+  in-memory SPAN fitting path. SPAN also supports decimal model values,
+  commented spectra, wavelength-grid interpolation, explicit input shifts,
+  and configurable process/chunk counts for the legacy directory path.
+- Replaced the model-flux-divided residual statistic with a non-negative
+  squared-residual score and corrected the H-delta fitting interval to
+  4087-4130 Angstrom.
+- Kept all tutorials, fixtures, development tests, atmosphere grids, and
+  `minato.contrib` outside wheel and source archives. They remain available in
+  the GitHub repository according to branch policy.
+
+Validation:
+- The generated primary fixture has an approximately 0.0050 fit-window RMSE
+  against its injected broadened spectrum; the 10.8%-light secondary has an
+  approximately 0.0412 RMSE and correspondingly weaker rotational constraint.
+- An exact-node 14-model in-memory recovery grid selected light fraction 0.10 and primary
+  `v sin i=75 km/s`; the secondary selected 100 km/s, with 125 km/s nearly
+  tied. This is consistent with the intentionally weak companion and motivates
+  the tutorial's profile plots and refined-grid guidance.
+- The full Python 3.13 suite passed 74 tests with one optional RAVEL test
+  skipped before the in-memory fitting refactor. Fresh wheel and source
+  archives in `/tmp/minato-dist-20260713-v2` passed the release-content
+  checker. The final refactored suite and package artefacts require a fresh
+  validation pass.
+
+Remaining work:
+- Execute the complete 156,800-point notebook grid after the user supplies the
+  full PoWR archive; the exact-node workflow and generated fixtures have been
+  validated end to end.
+- Complete the two remaining legacy spectral-analysis notebooks and the RAVEL
+  tutorial clean-up before marking the combined roadmap item done.
+
 ## 2026-07-13 - Define external-code and data-free release boundaries
 
 Decisions:
@@ -14,9 +285,11 @@ Decisions:
   file was present in the upstream repository during this audit, so the local
   adaptation must not be redistributed under MINATO's MIT licence without an
   explicit permission and licence review.
-- MINATO wheels, source archives, and the final `main` release tree will
-  contain no atmosphere grids, trained models, spectra, fitted results, or
-  tutorial datasets. These files may remain tracked on `develop`.
+- MINATO wheels and source archives will contain no atmosphere grids, trained
+  models, spectra, fitted results, tutorials, development tests, or contributed
+  code. The final `main` tree may retain only explicitly approved synthetic
+  tutorial fixtures with provenance; observed spectra and scientific model
+  grids remain excluded.
 - Tutorials will use small synthetic spectra generated during execution where
   possible. SPAN examples may use public TLUSTY or PoWR grids obtained
   separately by users under the original terms and citation guidance.
@@ -58,8 +331,9 @@ Validation:
   `minato.spdis` are absent.
 
 Remaining work:
-- Rewrite and execute the legacy SPAN, result-inspection, and RAVEL notebooks
-  without bundled files or machine-specific paths.
+- Execute the complete SPAN grid after the external PoWR download, and rewrite
+  the result-inspection and RAVEL notebooks without observed spectra or
+  machine-specific paths.
 - Clean notebook outputs and remove all model/data/output assets from the
   pending `main` merge tree, then validate that exact tree before release.
 - Publish the final candidate to TestPyPI and repeat the installation check

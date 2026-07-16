@@ -7,7 +7,11 @@ from .age_sampling import (
     LoggSkewWeight,
     StellarConstraints,
 )
-from .grids import AtmosphereGridNode, FallbackAtmosphereGrid, TextAtmosphereGrid
+from .grids import (
+    AtmosphereGridNode,
+    FallbackAtmosphereGrid,
+    TextAtmosphereGrid,
+)
 from .isochrones import IsochroneBank
 from .models import (
     AtmosphereGrid,
@@ -15,6 +19,7 @@ from .models import (
     IsochronePoint,
     IsochroneProvider,
     ObservationModel,
+    RenderedAtmosphereGrid,
     Spectrum,
     Star,
 )
@@ -28,7 +33,7 @@ from .physics import (
     resample_spectrum,
     rotational_broadening_kernel,
 )
-from .render import render_binary, render_single_star
+from .render import render_atmosphere_grid, render_binary, render_single_star
 
 __all__ = [
     "AtmosphereGrid",
@@ -43,6 +48,7 @@ __all__ = [
     "IsochroneProvider",
     "LoggSkewWeight",
     "ObservationModel",
+    "RenderedAtmosphereGrid",
     "SPEED_OF_LIGHT_KMS",
     "Spectrum",
     "Star",
@@ -53,6 +59,7 @@ __all__ = [
     "apply_rotational_broadening",
     "doppler_shift",
     "make_log_wavelength_grid",
+    "render_atmosphere_grid",
     "render_binary",
     "render_single_star",
     "resample_spectrum",

@@ -12,11 +12,13 @@ from minato.synthetic import (
     IsochroneBank,
     LoggSkewWeight,
     ObservationModel,
+    RenderedAtmosphereGrid,
     Spectrum,
     Star,
     StellarConstraints,
     TextAtmosphereGrid,
     doppler_shift,
+    render_atmosphere_grid,
     render_binary,
     render_single_star,
 )
@@ -294,6 +296,41 @@ class SyntheticRenderingTests(unittest.TestCase):
         np.testing.assert_allclose(first.error, second.error)
         self.assertFalse(np.allclose(first.flux, different_seed.flux))
 
+    def test_rendered_grid_requires_noiseless_models(self):
+        with self.assertRaisesRegex(ValueError, "must not include noise"):
+            render_atmosphere_grid(
+                self.grid,
+                [(25_000, 4.0)],
+                [50],
+                ObservationModel(snr=100),
+                exact_nodes=False,
+            )
+
+    def test_rendered_grid_rejects_non_normalised_flux_by_default(self):
+        logarithmic_grid = ToyAtmosphereGrid(
+            self.wavelength,
+            {"default": np.full_like(self.wavelength, -6.5)},
+        )
+
+        with self.assertRaisesRegex(ValueError, "does not look continuum-normalised"):
+            render_atmosphere_grid(
+                logarithmic_grid,
+                [(25_000, 4.0)],
+                [0],
+                ObservationModel(velocity_step=None),
+                exact_nodes=False,
+            )
+
+        rendered = render_atmosphere_grid(
+            logarithmic_grid,
+            [(25_000, 4.0)],
+            [0],
+            ObservationModel(velocity_step=None),
+            exact_nodes=False,
+            validate_normalised=False,
+        )
+        self.assertEqual(len(rendered), 1)
+
 
 class TextAtmosphereGridTests(unittest.TestCase):
     def _write_model(self, directory, name, offset=0.0):
@@ -349,6 +386,47 @@ class TextAtmosphereGridTests(unittest.TestCase):
             np.testing.assert_allclose(spectrum.flux, 10.0 ** np.array([-1.0, -0.2, -1.0]))
             self.assertEqual(spectrum.metadata["flux_transform"], "10**flux")
 
+    def test_duplicate_nodes_require_an_explicit_file_filter(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            self._write_flux(
+                directory,
+                "gal-ob-vd3_25-40_line.txt",
+                [1.0, 0.8, 1.0],
+            )
+            self._write_flux(
+                directory,
+                "gal-ob-vd3_25-40_line_calib.txt",
+                [-6.3, -6.5, -6.3],
+            )
+
+            with self.assertRaisesRegex(ValueError, "duplicate atmosphere-grid nodes"):
+                TextAtmosphereGrid.from_directory(directory, format="powr")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "file_filter .* rejected all 2 candidate atmosphere-model files",
+            ):
+                TextAtmosphereGrid.from_directory(
+                    directory,
+                    format="powr",
+                    file_filter=lambda path: False,
+                )
+
+            grid = TextAtmosphereGrid.from_directory(
+                directory,
+                format="powr",
+                log_flux="never",
+                file_filter=lambda path: "calib" not in path.name.lower(),
+            )
+            spectrum = grid.get_spectrum(Star(teff=25_000, logg=4.0))
+
+            self.assertEqual(len(grid.nodes), 1)
+            self.assertEqual(
+                Path(spectrum.metadata["source_path"]).name,
+                "gal-ob-vd3_25-40_line.txt",
+            )
+            np.testing.assert_allclose(spectrum.flux, [1.0, 0.8, 1.0])
+
     def test_filename_pattern_handles_unconventional_names(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:
             self._write_model(directory, "model_T22k_grav375.txt")
@@ -394,6 +472,51 @@ class TextAtmosphereGridTests(unittest.TestCase):
 
             self.assertAlmostEqual(spectrum.metadata["atmosphere_node"]["teff"], 28_000.0)
             self.assertAlmostEqual(spectrum.metadata["atmosphere_node"]["logg"], 4.1)
+
+    def test_render_atmosphere_grid_uses_exact_nodes_and_common_sampling(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            wavelength = np.linspace(4995.0, 5005.0, 1001)
+            for teff, logg, depth in [(25_000, 4.0, 0.25), (30_000, 4.25, 0.4)]:
+                flux = gaussian_absorption(wavelength, 5000.0, depth=depth)
+                np.savetxt(
+                    Path(directory) / f"teff{teff}_logg{logg:.2f}.txt",
+                    np.column_stack([wavelength, flux]),
+                )
+            source = TextAtmosphereGrid.from_directory(directory)
+
+            rendered = render_atmosphere_grid(
+                source,
+                [(25_000, 4.0), (30_000, 4.25)],
+                [50, 75],
+                ObservationModel(
+                    resolving_power=40_000,
+                    wavelength_min=4996.0,
+                    wavelength_max=5004.0,
+                    velocity_step=2.5,
+                ),
+            )
+
+            self.assertIsInstance(rendered, RenderedAtmosphereGrid)
+            self.assertEqual(len(rendered), 4)
+            self.assertEqual(len(rendered.parameter_nodes), 4)
+            np.testing.assert_allclose(
+                rendered.get_model(25_000, 4.0, 50).wavelength,
+                rendered.get_model(30_000, 4.25, 75).wavelength,
+            )
+            self.assertFalse(
+                np.allclose(
+                    rendered.get_model(25_000, 4.0, 50).flux,
+                    rendered.get_model(25_000, 4.0, 75).flux,
+                )
+            )
+
+            with self.assertRaisesRegex(LookupError, "unavailable"):
+                render_atmosphere_grid(
+                    source,
+                    [(26_000, 4.0)],
+                    [50],
+                    ObservationModel(wavelength_min=4996.0, wavelength_max=5004.0),
+                )
 
 
 class FallbackAtmosphereGridTests(unittest.TestCase):

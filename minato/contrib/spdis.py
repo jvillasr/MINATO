@@ -37,24 +37,24 @@ class SpecDisent:
 
 
         lines_dic = {
-                        3798: { 'region':[3785., 3815.], 'title':'H$\theta$'},
-                        3889: { 'region':[3875., 3905.], 'title':'H$\zeta$'},
-                        3970: { 'region':[3960., 3984.], 'title':'H$\epsilon$'},
-                        4009: { 'region':[4003., 4018.], 'title':'He I $\lambda$4009'},
-                        4026: { 'region':[4016., 4036.], 'title':'He I $\lambda$4026'},
-                        4102: { 'region':[4087., 4130.], 'title':'H$\delta$'},
-                        4121: { 'region':[4105., 4136.], 'title':'He I $\lambda$4121, Si II $\lambda$4128/32'},
-                        4144: { 'region':[4133., 4154.], 'title':'He I $\lambda$4144'},
-                        4233: { 'region':[4225, 4241], 'title':'Fe II $\lambda$4233'},
-                        4267: { 'region':[4260, 4275], 'title':'C II $\lambda$4267'},
-                        4340: { 'region':[4320., 4360.], 'title':'H$\gamma$'},
-                        4388: { 'region':[4378., 4398.], 'title':'He I $\lambda$4388'},
-                        4471: { 'region':[4459., 4488.], 'title':'He I $\lambda$4471, Mg II $\lambda$4481'},
+                        3798: { 'region':[3785., 3815.], 'title':r'H$\theta$'},
+                        3889: { 'region':[3875., 3905.], 'title':r'H$\zeta$'},
+                        3970: { 'region':[3960., 3984.], 'title':r'H$\epsilon$'},
+                        4009: { 'region':[4003., 4018.], 'title':r'He I $\lambda$4009'},
+                        4026: { 'region':[4016., 4036.], 'title':r'He I $\lambda$4026'},
+                        4102: { 'region':[4087., 4130.], 'title':r'H$\delta$'},
+                        4121: { 'region':[4105., 4136.], 'title':r'He I $\lambda$4121, Si II $\lambda$4128/32'},
+                        4144: { 'region':[4133., 4154.], 'title':r'He I $\lambda$4144'},
+                        4233: { 'region':[4225, 4241], 'title':r'Fe II $\lambda$4233'},
+                        4267: { 'region':[4260, 4275], 'title':r'C II $\lambda$4267'},
+                        4340: { 'region':[4320., 4360.], 'title':r'H$\gamma$'},
+                        4388: { 'region':[4378., 4398.], 'title':r'He I $\lambda$4388'},
+                        4471: { 'region':[4459., 4488.], 'title':r'He I $\lambda$4471, Mg II $\lambda$4481'},
                         # 4553: { 'region':[4536, 4560], 'title':'Fe II $\lambda$4550/56, Si III $\lambda$4553'} }
-                        4553: { 'region':[4546., 4561.], 'title':'He II $\lambda$4542, Si III $\lambda$4553'}, 
-                        4713: { 'region':[4690., 4725.], 'title':'He I $\lambda$4713'}, 
-                        4861: { 'region':[4840., 4880.], 'title':'H$\beta$'}, 
-                        4922: { 'region':[4910., 4933.], 'title':'He I $\lambda$4922'} 
+                        4553: { 'region':[4546., 4561.], 'title':r'He II $\lambda$4542, Si III $\lambda$4553'},
+                        4713: { 'region':[4690., 4725.], 'title':r'He I $\lambda$4713'},
+                        4861: { 'region':[4840., 4880.], 'title':r'H$\beta$'},
+                        4922: { 'region':[4910., 4933.], 'title':r'He I $\lambda$4922'}
                     }
 
         # Using the lines provided by the user to obtain the wavelength ranges
@@ -708,7 +708,7 @@ class SpecDisent:
                         #     axes[0].axvline(self.rv_shift(4861.297, rv), color='red', linestyle='--')
                         #     axes[0].axvline(4864.9, color='grey', linestyle='--')
                         #     axes[0].axvline(4865.8, color='grey', linestyle='--')
-                        axes[0].set_title(self.specnamesFin[ind].split('/')[-1]+' - line $\lambda$'+self.Rangestr)
+                        axes[0].set_title(self.specnamesFin[ind].split('/')[-1]+r' - line $\lambda$'+self.Rangestr)
                         axes[0].legend(prop={'size': legsize}, loc=locleg, framealpha=alphaleg)
                         axes[0].set_ylabel('Normalised flux')
                         # axes[0].set_xlabel(r'Wavelength $[\AA]$')     
@@ -740,7 +740,7 @@ class SpecDisent:
                         #     axes[1].axvline(4865.9, color='grey', linestyle='--')
                         #     axes[1].axvline(self.rv_shift(4861.297, rv)-0.6, color='yellow', linestyle='--')
                         #     axes[1].axvline(self.rv_shift(4861.297, rv)+1.7, color='yellow', linestyle='--')
-                        axes[1].set_title(self.specnamesFin[ind].split('/')[-1]+' - line $\lambda$'+self.Rangestr) 
+                        axes[1].set_title(self.specnamesFin[ind].split('/')[-1]+r' - line $\lambda$'+self.Rangestr)
                         axes[1].legend(prop={'size': legsize}, loc=locleg, framealpha=alphaleg)
                         axes[1].set_ylabel('Normalised flux')
                         axes[1].set_xlabel(r'Wavelength $[\AA]$')                      
@@ -1065,7 +1065,7 @@ class SpecDisent:
 
     def read_xytable(self, infile):
         # print(("%s: Input file is an xytable file." % infile))    
-        spec = pd.read_csv(infile, sep="\s+", header=None)
+        spec = pd.read_csv(infile, sep=r"\s+", header=None, comment="#")
         wave = spec[0]
-        flux = spec[1]    
+        flux = spec[1]
         return wave, flux

@@ -11,20 +11,58 @@ import sys
 import math
 import itertools
 import traceback
+from pathlib import Path
 import scipy.interpolate as scInterp
 from matplotlib.colors import LogNorm
 from matplotlib.collections import LineCollection
+from matplotlib import font_manager
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from matplotlib import cm, colors
 from scipy.stats.distributions import chi2 as scipy_chi2
 from scipy.interpolate import griddata
-from scipy.ndimage import gaussian_filter
 from lmfit import Model, Parameters, models
 from lmfit.models import SkewedGaussianModel, PolynomialModel
 from datetime import datetime
 # from sklearn.model_selection import train_test_split
 # from sklearn.metrics import mean_squared_error
 
-def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4, 9, 5, 4, 6, 6, 4, 4], save_to=None, chi2col='chi2', dof=None):
+
+def _profile_plot_rc(use_tex):
+    if use_tex:
+        return {
+            'text.usetex': True,
+            'font.family': 'serif',
+            'font.serif': ['Times'],
+        }
+    for font_name in ('Times', 'Times New Roman', 'STIXGeneral'):
+        try:
+            font_manager.findfont(font_name, fallback_to_default=False)
+            break
+        except ValueError:
+            continue
+    else:
+        font_name = 'DejaVu Serif'
+    return {
+        'text.usetex': False,
+        'font.family': font_name,
+        'mathtext.fontset': 'stix',
+    }
+
+
+def compute_bestfit(
+    df,
+    cl=0.68,
+    fit_type='poly',
+    chi2max=10000,
+    polydeg=[4, 9, 5, 4, 6, 6, 4, 4],
+    save_to=None,
+    chi2col='chi2_tot',
+    dof=None,
+    show_histogram=True,
+    report_to=None,
+    use_tex=False,
+):
     """
     Compute best-fit values and perform statistical analysis on chi-squared values.
 
@@ -50,8 +88,21 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
                     Type: list of integers
     :param save_to: Path to save the generated plots. Default is None (plots are not saved).
                     Type: str or None
+    :param chi2col: Name of the score column. Default is ``chi2_tot``.
+                    Type: str
+    :param show_histogram: Display the score-distribution histogram before the
+                           parameter plot. Default is True.
+                           Type: bool
+    :param report_to: Optional path for the polynomial or model-fit report.
+                      No report file is created when this is None.
+                      Type: str or pathlib.Path or None
+    :param use_tex: Use an external LaTeX installation for plot text. The
+                    default uses Matplotlib's built-in maths renderer so the
+                    plot works in a standard MINATO installation.
+                    Type: bool
 
     """
+    df = df.copy()
     print(df.columns)
     if 'TA' in df.columns and df['TA'].max() > 1000:
         df['TA'] = df['TA'] / 1000
@@ -64,11 +115,12 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
 
 
     if dof is None:
-        dof = df.loc[0,'ndata']-len(df.columns)
+        dof = df.iloc[0]['ndata']-len(df.columns)
     # dof = df.loc[0,'ndata']-4
     # read in unscaled chi2
-    unscaled_chi2 = df['chi2_tot']
-    # unscaled_chi2 = df[chi2col]
+    if chi2col not in df.columns:
+        raise KeyError(f"score column is unavailable: {chi2col}")
+    unscaled_chi2 = df[chi2col]
     print('min unscaled chi2 value =', unscaled_chi2.min())
     print('max unscaled chi2 value =', unscaled_chi2.max())
 
@@ -78,32 +130,35 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
     print('min scaled chi2 value =', chi2.min())
     print('max scaled chi2 value =', chi2.max())
 
-    # Plot to examine the chi2 values
-    num_bins = int(np.sqrt(len(chi2)))
-    fig, ax = plt.subplots(figsize=(12,4))
-    ax.hist(chi2, bins=np.logspace(np.log10(chi2.min()),np.log10(chi2.max()), num_bins))
-    # plt.xlim(0.4,100)
-    ax.set_xscale('log')
-    ax.set_yscale('log')
-    # Calculate the minimum and maximum powers of 10 that cover the range of the data
-    min_power_of_10 = np.floor(np.log10(chi2.min()))
-    max_power_of_10 = np.ceil(np.log10(chi2.max()))
-    # Generate the xticks as powers of 10
-    xticks = np.logspace(min_power_of_10, max_power_of_10, num=int(max_power_of_10-min_power_of_10+1))
+    plot_rc = _profile_plot_rc(use_tex)
 
-    # ax.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter())
-    ax.set_xticks(xticks)
-    ax.set_xlim(chi2.min()*0.9, chi2.max()*1.1)
-    ax.set_xlabel('$\chi^2$') 
-    #
-    ax2 = ax.twiny()
-    # ax2.hist(unscaled_chi2, bins=np.logspace(np.log10(unscaled_chi2.min()),np.log10(unscaled_chi2.max()), 1000), alpha=0.3, color='darkorange')
-    ax2.set_xlabel('Unscaled $\chi^2$') 
-    ax2.set_xscale('log')
-    # ax2.xaxis.set_ticks([1, 2, 5, 10, 20], labels=[1, 2, 5, 10, 20])
-    # ax2.set_xlim(1500*unscaled_chi2.min()/dof, 90000*unscaled_chi2.min()/dof)
-    plt.show()
-    plt.close()
+    if show_histogram:
+        with plt.rc_context(plot_rc):
+            num_bins = int(np.sqrt(len(chi2)))
+            histogram, ax = plt.subplots(figsize=(12,4))
+            ax.hist(
+                chi2,
+                bins=np.logspace(
+                    np.log10(chi2.min()), np.log10(chi2.max()), num_bins
+                ),
+            )
+            ax.set_xscale('log')
+            ax.set_yscale('log')
+            min_power_of_10 = np.floor(np.log10(chi2.min()))
+            max_power_of_10 = np.ceil(np.log10(chi2.max()))
+            xticks = np.logspace(
+                min_power_of_10,
+                max_power_of_10,
+                num=int(max_power_of_10-min_power_of_10+1),
+            )
+            ax.set_xticks(xticks)
+            ax.set_xlim(chi2.min()*0.9, chi2.max()*1.1)
+            ax.set_xlabel(r'$\chi^2$')
+            ax2 = ax.twiny()
+            ax2.set_xlabel(r'Unscaled $\chi^2$')
+            ax2.set_xscale('log')
+            plt.show()
+            plt.close(histogram)
 
     # get confidence level
     print('dof =', dof)
@@ -164,9 +219,13 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
     # Performing the fit
     results = []
     fit_pars = []
+    out_file = (
+        Path(report_to).expanduser().open('w')
+        if report_to is not None
+        else None
+    )
     if fit_type == 'parab':
         print('\nFitting parabola to parameter:')
-        out_file = open('parab_fitreport.txt', 'w')
         for par, pmin in zip(pars, pars_min):
             print('   '+par.name)
             try:
@@ -176,8 +235,9 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
                 fit_res = fit_parab(pmin[0], pmin[1], amp, h, k)
                 results.append(fit_res)
                 fit_pars.append(fit_res.best_values)
-                out_file.write('\n'+par.name+'\n')
-                out_file.write(fit_res.fit_report()+'\n')
+                if out_file is not None:
+                    out_file.write('\n'+par.name+'\n')
+                    out_file.write(fit_res.fit_report()+'\n')
             except ValueError:
                 print('   # fit unsuccessful')
                 fit_pars.append(np.nan)
@@ -185,7 +245,6 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
     elif fit_type == 'skewedG':
         print('\nFitting skwed Gaussian to parameter:')
         gammas = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-        out_file = open('skewG_fitreport_noBalmer.txt', 'w')
         for par, pmin, gamm in zip(pars, pars_min, gammas):
             print('   '+par.name)
             try:
@@ -196,8 +255,9 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
                 fit_res = fit_skewG(pmin[0], pmin[1], amp, cen, wid, gamm, ymin)
                 results.append(fit_res)
                 fit_pars.append(fit_res.best_values)
-                out_file.write('\n'+par.name+'\n')
-                out_file.write(fit_res.fit_report()+'\n')
+                if out_file is not None:
+                    out_file.write('\n'+par.name+'\n')
+                    out_file.write(fit_res.fit_report()+'\n')
             except Exception as e:
                 print('   # fit unsuccessful. Error:', e)
                 # print(traceback.format_exc())
@@ -205,7 +265,6 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
                 pass
     if fit_type == 'poly':
         print('\nFitting polynomial to parameter:')
-        out_file = open('polynom_fitreport.txt', 'w')
         for par, pmin in zip(pars, pars_min):
             print('   '+par.name)
             print('      ',pmin[0], pmin[1])
@@ -218,14 +277,18 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
                 results.append(coefs)
                 if coefs is not None:
                     fit_pars.append(coefs)
-                    out_file.write('\n'+par.name+'\n')
-                    out_file.write('Coefficients: ' + ', '.join(map(str, coefs)) + '\n')
+                    if out_file is not None:
+                        out_file.write('\n'+par.name+'\n')
+                        out_file.write(
+                            'Coefficients: ' + ', '.join(map(str, coefs)) + '\n'
+                        )
                 else:
                     print("Failed to fit polynomial for parameter", par.name)
             except ValueError as e:
                 print("   Error:", str(e))
                 fit_pars.append(np.nan)
-    out_file.close()
+    if out_file is not None:
+        out_file.close()
 
     ###################################################################
     # Making the plot
@@ -241,11 +304,11 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
         'TA': r'$T_{\mathrm{eff}, A}$ [kK]',
         'gA': r'$\log g_A$',
         'mA': r'$\xi_A$ [km/s]',
-        'vA': r'$\varv \sin i_A$ [km/s]',
+        'vA': r'$v \sin i_A$ [km/s]',
         'TB': r'$T_{\mathrm{eff}, B}$ [kK]',
         'gB': r'$\log g_B$',
         'mB': r'$\xi_B$ [km/s]',
-        'vB': r'$\varv \sin i_B$ [km/s]',
+        'vB': r'$v \sin i_B$ [km/s]',
     }
 
     # labels= [ r'L_rat', r'He/H', r'$T_{\mathrm{eff}, A}$', r'$\log g_A$', 
@@ -255,7 +318,9 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
     #         r'$\log g_B$', r'$\varv \sin i_A$ [km/s]', r'$\varv \sin i_B$ [km/s]', r'$\xi_A$ [km/s]', r'$\xi_B$ [km/s]' ]
     props = dict(boxstyle='round', facecolor='papayawhip', alpha=0.9)
     panels_id = ['a)', 'b)', 'c)', 'd)', 'e)', 'f)', 'g)', 'h)', 'i)', 'j)']
-    yy = chi2 < chi2max
+    yy = np.ones(len(chi2), dtype=bool) if chi2max is None else chi2 < chi2max
+    if not np.any(yy):
+        raise ValueError("chi2max excludes every result row")
     
     
     def filter_unique_parameters(pars, pars_min, results, fit_pars):#, labels, x_labels):
@@ -274,9 +339,14 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
         nrows = len(unique_pars) // 2 + len(unique_pars) % 2
         ncols = 2 if len(unique_pars) > 1 else 1
         # Create the subplots
-        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(5*ncols, 5*nrows), sharey=True)
-        fig.subplots_adjust(wspace=0., hspace=0.24)
-        ax = axes.flatten()
+        fig, axes = plt.subplots(
+            nrows=nrows,
+            ncols=ncols,
+            figsize=(5*ncols, 5*nrows),
+            sharey=False,
+        )
+        fig.subplots_adjust(wspace=0.25, hspace=0.24)
+        ax = np.atleast_1d(axes).ravel()
         return fig, ax
 
     def plot_data(ax, chi2, yy, conf_level, unique_fit_pars, fit_type, unique_pars, unique_pars_min):#, labels, x_labels):
@@ -284,6 +354,20 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
             ax[i].plot(par[yy].values, chi2[yy].values, ls='None', marker='.', ms=marker_size, c='grey', alpha=0.3, zorder=0)
             ax[i].axhline(conf_level, color='crimson', lw=line_width, alpha=0.7, zorder=1)
             label_base = column_labels.get(par.name, par.name)
+            profile_x = np.asarray(minval[0], dtype=float)
+            profile_y = np.asarray(minval[1], dtype=float)
+            ax[i].plot(
+                profile_x,
+                profile_y,
+                ls='None',
+                marker='o',
+                ms=marker_size * 0.65,
+                color='black',
+                label='Profile minima',
+                zorder=4,
+            )
+            panel_y_values = [chi2[yy].values, profile_y, np.array([conf_level])]
+            y_parab = None
             if minval[1] is not np.nan:
                 x_parab = np.linspace(minval[0][0], minval[0][-1], 1000)
                 if fit_type == 'parab':
@@ -295,9 +379,9 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
                         y_parab = np.polyval(unique_results[i], x_parab)
                     else:
                         print(f"No polynomial fit for {par.name}")
-                        # continue
-                # ax[i].plot(minval[0], minval[1], 'crimson', marker='.', ms=marker_size, ls='none', alpha=1, zorder=2)
-                ax[i].plot(x_parab, y_parab, lw=line_width, c='dodgerblue', zorder=3)
+                if y_parab is not None:
+                    panel_y_values.append(np.asarray(y_parab, dtype=float))
+                    ax[i].plot(x_parab, y_parab, lw=line_width, c='dodgerblue', zorder=3)
                 ax[i].text(0.07, 0.84, panels_id[i], fontsize=26, horizontalalignment='center', transform = ax[i].transAxes)
                 # print(x_parab, y_parab, conf_level)
                 try:
@@ -320,21 +404,36 @@ def compute_bestfit(df, cl=0.68, fit_type = 'poly', chi2max=10000, polydeg = [4,
             ax[i].set_xlim(minval[0][0] - 0.2*xrange, minval[0][-1] + 0.2*xrange)
             ax[i].tick_params(axis='x', labelsize=tick_label_size)
             ax[i].tick_params(axis='y', labelsize=tick_label_size)
-        # Set the y-axis limits
-        y_min = min(chi2[yy].values.min(), y_parab.min())
-        y_max = max(chi2[yy].values.max(), y_parab.max())
-        # plt.ylim(y_parab.min() - 0.1 * y_parab.ptp(), y_parab.max() + 0.1 * y_parab.ptp())
-        plt.ylim(y_min - 0.1 * (y_max - y_min), y_max + 0.1 * (y_max - y_min))
-        # plt.yscale('log')
+            finite_y = np.concatenate(panel_y_values)
+            finite_y = finite_y[np.isfinite(finite_y)]
+            y_min = finite_y.min()
+            y_max = finite_y.max()
+            y_margin = 0.1 * (y_max - y_min) if y_max > y_min else 1.0
+            ax[i].set_ylim(y_min - y_margin, y_max + y_margin)
+
+        for unused_axis in ax[len(unique_pars):]:
+            unused_axis.set_visible(False)
+
         if save_to is not None:
             plt.savefig(save_to, bbox_inches='tight')
         plt.show()
-        plt.close()
+        plt.close(fig)
 
     # unique_pars, unique_pars_min, unique_results, unique_fit_pars, labels, x_labels = filter_unique_parameters(pars, pars_min, results, fit_pars, labels, x_labels)
     unique_pars, unique_pars_min, unique_results, unique_fit_pars = filter_unique_parameters(pars, pars_min, results, fit_pars)
-    fig, ax = create_subplots(unique_pars)
-    plot_data(ax, chi2, yy, conf_level, unique_fit_pars, fit_type, unique_pars, unique_pars_min)#, labels, x_labels)
+    with plt.rc_context(plot_rc):
+        fig, ax = create_subplots(unique_pars)
+        plot_data(
+            ax,
+            chi2,
+            yy,
+            conf_level,
+            unique_fit_pars,
+            fit_type,
+            unique_pars,
+            unique_pars_min,
+        )
+    return fig
 
 
 def interp_models(parameter, chi2_array):
@@ -668,6 +767,9 @@ def polynfit(x, a, b, c, d, e, f, g, h, i):
 #     return result
 
 def fit_poly(x, y, max_degree=7, plots=False):
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
     # Handle cases with a small number of data points
     if len(x) < 4:
         print("Insufficient data points for fitting.")
@@ -675,11 +777,15 @@ def fit_poly(x, y, max_degree=7, plots=False):
     elif len(x) <= 5:
         max_degree = min(3, len(x)-1)
 
-    # Ensure max_degree does not exceed 7
-    max_degree = min(max_degree, 7)
+    # A degree-N polynomial requires at least N+1 profile points.
+    max_degree = min(max_degree, 7, len(x) - 1)
 
-    # Fit polynomials of degrees 1 to max_degree
-    coefs = [np.polyfit(x, y, deg=i) for i in range(1, max_degree+1)]
+    # Polynomial.fit scales x before fitting, avoiding numerical problems for
+    # quantities such as effective temperature. Convert back for np.polyval.
+    coefs = [
+        np.polynomial.Polynomial.fit(x, y, deg=degree).convert().coef[::-1]
+        for degree in range(1, max_degree + 1)
+    ]
 
     if plots==True:
         # Create subplots
@@ -865,7 +971,7 @@ def combin(n, r):
     return int(ncomb)
 
 
-def plot_corr(df, pars_dic, vmax=None, save=None, rot_labels=None, cmap='magma_r', interp='hanning', clabels='numeric'):
+def _plot_corr_legacy(df, pars_dic, vmax=None, save=None, rot_labels=None, cmap='magma_r', interp='hanning', clabels='numeric'):
     '''
     Produce a corner plot of correlations between parameters.
 
@@ -1084,3 +1190,981 @@ def plot_corr(df, pars_dic, vmax=None, save=None, rot_labels=None, cmap='magma_r
         plt.savefig(save, bbox_inches="tight", dpi=300)
     plt.show()
     plt.close()
+
+
+_SPAN_PROFILE_LABELS = {
+    'lr': r'$f_B$',
+    'lrat': r'$f_B$',
+    'He2H': 'He/H',
+    'TA': r'$T_{\mathrm{eff},A}$ [kK]',
+    'teffA': r'$T_{\mathrm{eff},A}$ [kK]',
+    'gA': r'$\log g_A$',
+    'loggA': r'$\log g_A$',
+    'vA': r'$v \sin i_A$ [$\mathrm{km\,s^{-1}}$]',
+    'rotA': r'$v \sin i_A$ [$\mathrm{km\,s^{-1}}$]',
+    'TB': r'$T_{\mathrm{eff},B}$ [kK]',
+    'teffB': r'$T_{\mathrm{eff},B}$ [kK]',
+    'gB': r'$\log g_B$',
+    'loggB': r'$\log g_B$',
+    'vB': r'$v \sin i_B$ [$\mathrm{km\,s^{-1}}$]',
+    'rotB': r'$v \sin i_B$ [$\mathrm{km\,s^{-1}}$]',
+    'mA': r'$\xi_A$ [$\mathrm{km\,s^{-1}}$]',
+    'vmicA': r'$\xi_A$ [$\mathrm{km\,s^{-1}}$]',
+    'mB': r'$\xi_B$ [$\mathrm{km\,s^{-1}}$]',
+    'vmicB': r'$\xi_B$ [$\mathrm{km\,s^{-1}}$]',
+}
+
+_SPAN_PROFILE_TITLE_SYMBOLS = {
+    'lr': r'f_B',
+    'lrat': r'f_B',
+    'He2H': r'\mathrm{He/H}',
+    'TA': r'T_{\mathrm{eff},A}',
+    'teffA': r'T_{\mathrm{eff},A}',
+    'gA': r'\log g_A',
+    'loggA': r'\log g_A',
+    'vA': r'v \sin i_A',
+    'rotA': r'v \sin i_A',
+    'TB': r'T_{\mathrm{eff},B}',
+    'teffB': r'T_{\mathrm{eff},B}',
+    'gB': r'\log g_B',
+    'loggB': r'\log g_B',
+    'vB': r'v \sin i_B',
+    'rotB': r'v \sin i_B',
+}
+
+_SPAN_PROFILE_UNITS = {
+    'TA': r'\mathrm{kK}',
+    'teffA': r'\mathrm{kK}',
+    'TB': r'\mathrm{kK}',
+    'teffB': r'\mathrm{kK}',
+    'vA': r'\mathrm{km\,s^{-1}}',
+    'rotA': r'\mathrm{km\,s^{-1}}',
+    'vB': r'\mathrm{km\,s^{-1}}',
+    'rotB': r'\mathrm{km\,s^{-1}}',
+}
+
+
+def _prepare_profile_table(df, pars_dic, chi2col=None, dof=None):
+    if not isinstance(pars_dic, dict):
+        raise TypeError("pars_dic must be an ordered mapping of parameter grids")
+
+    work = df.copy()
+    if chi2col is None:
+        chi2col = next(
+            (name for name in ('chi2_tot', 'chi2') if name in work.columns),
+            None,
+        )
+    if chi2col is None or chi2col not in work.columns:
+        raise KeyError("no SPAN score column is available")
+
+    score = pd.to_numeric(work[chi2col], errors='coerce')
+    finite_score = np.isfinite(score)
+    if not finite_score.any():
+        raise ValueError(f"score column contains no finite values: {chi2col}")
+    score_min = score[finite_score].min()
+    if score_min <= 0:
+        raise ValueError("profile-score plotting requires a positive minimum score")
+
+    if dof is None:
+        if 'ndata' not in work.columns:
+            raise KeyError("dof is required when the result table has no ndata column")
+        dof = int(work.iloc[0]['ndata'] - len(work.columns))
+    if dof <= 0:
+        raise ValueError("dof must be positive")
+
+    work['_span_delta_score'] = score / score_min * dof - dof
+    parameter_values = {}
+    for name, values in pars_dic.items():
+        if name not in work.columns:
+            raise KeyError(f"parameter column is unavailable: {name}")
+        values = np.asarray(values, dtype=float)
+        if name in {'TA', 'TB', 'teffA', 'teffB'} and np.nanmax(values) > 1000:
+            work[name] = pd.to_numeric(work[name], errors='coerce') / 1000
+            values = values / 1000
+        values = np.unique(values[np.isfinite(values)])
+        if len(values) > 1:
+            parameter_values[name] = values
+
+    parameter_names = list(parameter_values)
+    if len(parameter_names) < 2:
+        raise ValueError("at least two varying parameters are required")
+    return work, score, dof, parameter_values, parameter_names
+
+
+def _profile_confidence_levels(dimensions):
+    """Return nominal likelihood-ratio thresholds for a parameter region."""
+    if dimensions <= 0:
+        raise ValueError("dimensions must be positive")
+    probabilities = np.array([0.682689, 0.9545, 0.9973])
+    return scipy_chi2.ppf(probabilities, df=dimensions)
+
+
+def _profile_1d(work, parameter, values):
+    return (
+        work.groupby(parameter, sort=True)['_span_delta_score']
+        .min()
+        .reindex(values)
+        .to_numpy(dtype=float)
+    )
+
+
+def _profile_2d(work, x_name, y_name, x_values, y_values):
+    return (
+        work.groupby([y_name, x_name], sort=True)['_span_delta_score']
+        .min()
+        .unstack(x_name)
+        .reindex(index=y_values, columns=x_values)
+        .to_numpy(dtype=float)
+    )
+
+
+def _pchip_profile_surface(
+    x_values,
+    y_values,
+    profile,
+    fine_x,
+    fine_y,
+):
+    """Interpolate a regular profile grid without overshooting its nodes."""
+    row_stage = np.full((len(y_values), len(fine_x)), np.nan)
+    for row_index, row in enumerate(profile):
+        valid = np.isfinite(row)
+        if valid.sum() >= 2:
+            row_stage[row_index] = scInterp.PchipInterpolator(
+                x_values[valid],
+                row[valid],
+                extrapolate=False,
+            )(fine_x)
+
+    x_then_y = np.full((len(fine_y), len(fine_x)), np.nan)
+    for column_index in range(len(fine_x)):
+        valid = np.isfinite(row_stage[:, column_index])
+        if valid.sum() >= 2:
+            x_then_y[:, column_index] = scInterp.PchipInterpolator(
+                y_values[valid],
+                row_stage[valid, column_index],
+                extrapolate=False,
+            )(fine_y)
+
+    column_stage = np.full((len(fine_y), len(x_values)), np.nan)
+    for column_index, column in enumerate(profile.T):
+        valid = np.isfinite(column)
+        if valid.sum() >= 2:
+            column_stage[:, column_index] = scInterp.PchipInterpolator(
+                y_values[valid],
+                column[valid],
+                extrapolate=False,
+            )(fine_y)
+
+    y_then_x = np.full((len(fine_y), len(fine_x)), np.nan)
+    for row_index in range(len(fine_y)):
+        valid = np.isfinite(column_stage[row_index])
+        if valid.sum() >= 2:
+            y_then_x[row_index] = scInterp.PchipInterpolator(
+                x_values[valid],
+                column_stage[row_index, valid],
+                extrapolate=False,
+            )(fine_x)
+
+    count = np.isfinite(x_then_y).astype(int) + np.isfinite(y_then_x).astype(int)
+    combined = np.nansum(np.stack([x_then_y, y_then_x]), axis=0)
+    return np.divide(
+        combined,
+        count,
+        out=np.full_like(combined, np.nan),
+        where=count > 0,
+    )
+
+
+def _interpolate_profile_grid(x_values, y_values, profile, grid_size, interp):
+    x_grid, y_grid = np.meshgrid(x_values, y_values)
+    valid = np.isfinite(profile)
+    points = np.column_stack([x_grid[valid], y_grid[valid]])
+    values = profile[valid]
+    fine_x = np.unique(np.concatenate([
+        np.linspace(x_values.min(), x_values.max(), grid_size),
+        x_values,
+    ]))
+    fine_y = np.unique(np.concatenate([
+        np.linspace(y_values.min(), y_values.max(), grid_size),
+        y_values,
+    ]))
+    fine_x_grid, fine_y_grid = np.meshgrid(fine_x, fine_y)
+    method = interp if interp in {'linear', 'nearest', 'cubic', 'pchip'} else 'linear'
+    if len(points) < 4:
+        method = 'nearest'
+    if method == 'pchip':
+        fine_profile = _pchip_profile_surface(
+            x_values,
+            y_values,
+            profile,
+            fine_x,
+            fine_y,
+        )
+        support = griddata(
+            points,
+            np.ones(len(points)),
+            (fine_x_grid, fine_y_grid),
+            method='linear',
+        )
+        fine_profile = np.where(np.isfinite(support), fine_profile, np.nan)
+    else:
+        try:
+            fine_profile = griddata(
+                points,
+                values,
+                (fine_x_grid, fine_y_grid),
+                method=method,
+            )
+        except Exception:
+            fine_profile = None
+    if fine_profile is None or not np.isfinite(fine_profile).any():
+        fine_profile = griddata(
+            points,
+            values,
+            (fine_x_grid, fine_y_grid),
+            method='nearest',
+        )
+    # Retain the physical lower bound against numerical round-off or an
+    # explicitly requested cubic interpolation's overshoot.
+    fine_profile = np.where(
+        np.isfinite(fine_profile),
+        np.maximum(fine_profile, 0.0),
+        np.nan,
+    )
+    return x_grid, y_grid, valid, fine_x_grid, fine_y_grid, fine_profile
+
+
+def _profile_colormap(cmap):
+    """Avoid the near-white and near-black extremes of a colour map."""
+    base = plt.get_cmap(cmap)
+    samples = base(np.linspace(0.10, 0.88, 256))
+    return colors.LinearSegmentedColormap.from_list(
+        f'{base.name}_profile',
+        samples,
+    )
+
+
+def _profile_colour_max(panel_values, confidence_levels, vmax=None):
+    """Choose a robust upper score limit while retaining all contours."""
+    if vmax is None:
+        panel_scales = [np.percentile(values, 75) for values in panel_values]
+        vmax = float(np.median(panel_scales))
+    return max(float(vmax), float(confidence_levels[-1]))
+
+
+def _profile_interval(x_values, profile, threshold):
+    minimum_index = int(np.nanargmin(profile))
+    best_value = float(x_values[minimum_index])
+    difference = profile - threshold
+    crossings = []
+    for index in range(len(x_values) - 1):
+        x_left, x_right = x_values[index:index + 2]
+        y_left, y_right = difference[index:index + 2]
+        if not np.isfinite([y_left, y_right]).all():
+            continue
+        if y_left == 0:
+            crossings.append(float(x_left))
+        if y_left * y_right < 0:
+            fraction = -y_left / (y_right - y_left)
+            crossings.append(float(x_left + fraction * (x_right - x_left)))
+    if difference[-1] == 0:
+        crossings.append(float(x_values[-1]))
+
+    lower = [value for value in crossings if value <= best_value]
+    upper = [value for value in crossings if value >= best_value]
+    lower_error = best_value - max(lower) if lower else np.nan
+    upper_error = min(upper) - best_value if upper else np.nan
+    return best_value, lower_error, upper_error
+
+
+def _format_profile_title(name, value, lower_error, upper_error):
+    if name in {'lr', 'lrat', 'He2H'}:
+        precision = 3
+    elif name in {'gA', 'gB', 'loggA', 'loggB'}:
+        precision = 2
+    elif name in {'vA', 'vB', 'rotA', 'rotB'}:
+        precision = 1
+    else:
+        precision = 2
+
+    symbol = _SPAN_PROFILE_TITLE_SYMBOLS.get(name, rf'\mathrm{{{name}}}')
+    unit = _SPAN_PROFILE_UNITS.get(name)
+    value_text = f"{value:.{precision}f}"
+    if np.isfinite(lower_error) and np.isfinite(upper_error):
+        value_text += (
+            rf"^{{+{upper_error:.{precision}f}}}"
+            rf"_{{-{lower_error:.{precision}f}}}"
+        )
+    elif np.isfinite(lower_error):
+        value_text += rf"_{{-{lower_error:.{precision}f}}}"
+    elif np.isfinite(upper_error):
+        value_text += rf"^{{+{upper_error:.{precision}f}}}"
+    if unit is not None:
+        value_text += rf"\, {unit}"
+    return rf"${symbol} = {value_text}$"
+
+
+def plot_corr(
+    df,
+    pars_dic,
+    vmax=None,
+    save=None,
+    rot_labels=None,
+    cmap='magma_r',
+    interp='linear',
+    clabels='numeric',
+    chi2col=None,
+    dof=None,
+    use_tex=False,
+    grid_size=100,
+):
+    """Plot two-dimensional profile scores for every parameter pair.
+
+    Each panel shows the minimum score at each pair of parameter-grid values
+    after profiling over all remaining parameters. The colour scale is the
+    scaled score above the global best fit. Contours use nominal joint
+    likelihood-ratio thresholds for two fitted parameters.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        SPAN result table.
+    pars_dic : mapping
+        Ordered mapping from result-column names to their grid values.
+    vmax : float, optional
+        Upper limit of the shared delta-score colour scale. The outer nominal
+        contour sets the default so the constrained region remains legible.
+    save : path-like, optional
+        Save the figure only when a path is supplied.
+    rot_labels : list or ``"All"``, optional
+        Flat panel indexes whose x tick labels should be rotated.
+    cmap : str
+        Matplotlib colour map.
+    interp : {``"linear"``, ``"nearest"``, ``"cubic"``, ``"pchip"``}
+        Interpolation used only to draw the smooth contours.
+    clabels : {``"numeric"``, ``"sigma"``, None}
+        Confidence-contour label style.
+    chi2col : str, optional
+        Score column. Inferred from ``chi2_tot`` or ``chi2`` when omitted.
+    dof : int, optional
+        Degrees of freedom used for SPAN's legacy score rescaling.
+    use_tex : bool
+        Use an external LaTeX installation for plot text.
+    grid_size : int
+        Number of interpolation samples along each panel axis.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated corner figure.
+    """
+    if grid_size < 10:
+        raise ValueError("grid_size must be at least 10")
+    work, score, dof, parameter_values, parameter_names = _prepare_profile_table(
+        df,
+        pars_dic,
+        chi2col=chi2col,
+        dof=dof,
+    )
+    labels = _SPAN_PROFILE_LABELS
+
+    panels = []
+    panel_values = []
+    for row in range(1, len(parameter_names)):
+        y_name = parameter_names[row]
+        for column in range(row):
+            x_name = parameter_names[column]
+            x_values = parameter_values[x_name]
+            y_values = parameter_values[y_name]
+            profile = _profile_2d(
+                work,
+                x_name,
+                y_name,
+                x_values,
+                y_values,
+            )
+            panels.append((row - 1, column, x_name, y_name, x_values, y_values, profile))
+            finite = profile[np.isfinite(profile)]
+            if finite.size:
+                panel_values.append(finite)
+
+    if not panel_values:
+        raise ValueError("no finite two-dimensional profile scores are available")
+    confidence_levels = _profile_confidence_levels(2)
+    vmax = _profile_colour_max(panel_values, confidence_levels, vmax=vmax)
+
+    interpolation = (
+        interp
+        if interp in {'linear', 'nearest', 'cubic', 'pchip'}
+        else 'linear'
+    )
+    n_axes = len(parameter_names) - 1
+    plot_rc = _profile_plot_rc(use_tex)
+
+    with plt.rc_context(plot_rc):
+        fig, axes = plt.subplots(
+            n_axes,
+            n_axes,
+            figsize=(2.8 * n_axes, 2.8 * n_axes),
+            squeeze=False,
+        )
+        fig.subplots_adjust(wspace=0.08, hspace=0.08, right=0.90)
+        norm = colors.SymLogNorm(
+            linthresh=confidence_levels[0],
+            linscale=1.0,
+            vmin=0,
+            vmax=vmax,
+        )
+        profile_cmap = _profile_colormap(cmap)
+        best_index = score.idxmin()
+        visible_axes = []
+        contour_set = None
+
+        for row, column, x_name, y_name, x_values, y_values, profile in panels:
+            axis = axes[row, column]
+            visible_axes.append(axis)
+            (
+                x_grid,
+                y_grid,
+                valid,
+                fine_x_grid,
+                fine_y_grid,
+                fine_profile,
+            ) = _interpolate_profile_grid(
+                x_values,
+                y_values,
+                profile,
+                grid_size,
+                interpolation,
+            )
+
+            contour_set = axis.pcolormesh(
+                fine_x_grid,
+                fine_y_grid,
+                fine_profile,
+                cmap=profile_cmap,
+                norm=norm,
+                shading='auto',
+                rasterized=True,
+            )
+            available_levels = confidence_levels[
+                (confidence_levels > np.nanmin(fine_profile))
+                & (confidence_levels < np.nanmax(fine_profile))
+            ]
+            if available_levels.size:
+                contours = axis.contour(
+                    fine_x_grid,
+                    fine_y_grid,
+                    fine_profile,
+                    levels=available_levels,
+                    colors='black',
+                    linewidths=1,
+                )
+                if clabels is not None:
+                    level_labels = {
+                        confidence_levels[0]: r'$1\sigma$' if clabels == 'sigma' else '68%',
+                        confidence_levels[1]: r'$2\sigma$' if clabels == 'sigma' else '95%',
+                        confidence_levels[2]: r'$3\sigma$' if clabels == 'sigma' else '99.7%',
+                    }
+                    axis.clabel(
+                        contours,
+                        fmt={level: level_labels[level] for level in available_levels},
+                        fontsize=7,
+                        inline=True,
+                    )
+
+            axis.scatter(
+                x_grid[valid],
+                y_grid[valid],
+                s=7,
+                color='black',
+                alpha=0.25,
+                zorder=3,
+            )
+            axis.scatter(
+                work.loc[best_index, x_name],
+                work.loc[best_index, y_name],
+                marker='*',
+                s=70,
+                facecolor='white',
+                edgecolor='black',
+                linewidth=0.8,
+                zorder=4,
+            )
+            axis.set_xlim(x_values.min(), x_values.max())
+            axis.set_ylim(y_values.min(), y_values.max())
+            axis.tick_params(direction='out', top=False, right=False, labelsize=8)
+
+            panel_index = row * n_axes + column
+            rotate = rot_labels == 'All' or (
+                isinstance(rot_labels, list) and panel_index in rot_labels
+            )
+            if row == n_axes - 1:
+                axis.set_xlabel(labels.get(x_name, x_name), fontsize=10)
+                if rotate:
+                    axis.tick_params(axis='x', labelrotation=45)
+            else:
+                axis.tick_params(axis='x', labelbottom=False)
+            if column == 0:
+                axis.set_ylabel(labels.get(y_name, y_name), fontsize=10)
+            else:
+                axis.tick_params(axis='y', labelleft=False)
+
+        occupied = {(row, column) for row, column, *_ in panels}
+        for row in range(n_axes):
+            for column in range(n_axes):
+                if (row, column) not in occupied:
+                    axes[row, column].set_visible(False)
+
+        colorbar = fig.colorbar(
+            contour_set,
+            ax=visible_axes,
+            fraction=0.025,
+            pad=0.02,
+            extend='max',
+        )
+        colorbar.set_label('Scaled score above best fit', fontsize=11)
+        colorbar.ax.tick_params(labelsize=8)
+        if save is not None:
+            fig.savefig(save, bbox_inches='tight', dpi=300)
+        plt.show()
+        plt.close(fig)
+    return fig
+
+
+def plot_corner(
+    df,
+    pars_dic,
+    vmax=None,
+    save=None,
+    rot_labels=None,
+    cmap='Blues',
+    interp='linear',
+    clabels=None,
+    chi2col=None,
+    dof=None,
+    use_tex=False,
+    grid_size=100,
+    parameter_limits=None,
+    reference_values=None,
+    contour_mode='nominal',
+    region_fractions=(0.10, 0.25, 0.50),
+):
+    """Plot one- and two-dimensional SPAN profiles as a corner figure.
+
+    One-dimensional score profiles and their polynomial fits occupy the
+    diagonal. The lower triangle contains nested regions from the
+    two-dimensional profiles; the upper triangle remains empty. This is a
+    profile-score diagnostic rather than a posterior-sample corner plot.
+    When the supplied
+    score is an unweighted residual sum of squares, the displayed rescaling and
+    intervals are nominal and must not be interpreted as reduced chi-squared
+    or formal confidence intervals. Diagonal intervals use one-parameter
+    likelihood-ratio thresholds. Lower-triangle contours use either nominal
+    two-parameter thresholds or explicitly non-statistical grid ranks.
+
+    Parameters are the same as :func:`plot_corr`. ``parameter_limits`` may map
+    parameter names to display-only ``(minimum, maximum)`` limits.
+    ``reference_values`` may map parameters to injected or independently known
+    values, drawn as red dotted guides. ``cmap`` supplies the nested-region
+    colours. ``vmax`` is retained for API compatibility but is unused because
+    this figure has no continuous score scale. ``contour_mode='nominal'`` uses
+    the two-parameter likelihood-ratio thresholds; ``contour_mode='rank'``
+    instead encloses the best grid fractions given by ``region_fractions``.
+    No file is created unless ``save`` is supplied.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The generated profile-score corner figure.
+    """
+    if grid_size < 10:
+        raise ValueError("grid_size must be at least 10")
+    if contour_mode not in {'nominal', 'rank'}:
+        raise ValueError("contour_mode must be 'nominal' or 'rank'")
+    region_fractions = np.asarray(region_fractions, dtype=float)
+    if (
+        region_fractions.shape != (3,)
+        or np.any(region_fractions <= 0)
+        or np.any(region_fractions >= 1)
+        or np.any(np.diff(region_fractions) <= 0)
+    ):
+        raise ValueError(
+            "region_fractions must contain three increasing values in (0, 1)"
+        )
+    parameter_limits = {} if parameter_limits is None else dict(parameter_limits)
+    for name, limits in parameter_limits.items():
+        if len(limits) != 2 or limits[0] >= limits[1]:
+            raise ValueError(f"invalid display limits for {name}: {limits}")
+    work, score, dof, parameter_values, parameter_names = _prepare_profile_table(
+        df,
+        pars_dic,
+        chi2col=chi2col,
+        dof=dof,
+    )
+    reference_values = {} if reference_values is None else dict(reference_values)
+    for name, value in list(reference_values.items()):
+        if name in {'TA', 'TB', 'teffA', 'teffB'} and value > 1000:
+            reference_values[name] = value / 1000
+    interval_levels = _profile_confidence_levels(1)
+    contour_levels = _profile_confidence_levels(2)
+    labels = _SPAN_PROFILE_LABELS
+    interpolation = (
+        interp
+        if interp in {'linear', 'nearest', 'cubic', 'pchip'}
+        else 'linear'
+    )
+    best_index = score.idxmin()
+
+    panels = []
+    panel_values = []
+    for row in range(1, len(parameter_names)):
+        y_name = parameter_names[row]
+        for column in range(row):
+            x_name = parameter_names[column]
+            x_values = parameter_values[x_name]
+            y_values = parameter_values[y_name]
+            profile = _profile_2d(
+                work,
+                x_name,
+                y_name,
+                x_values,
+                y_values,
+            )
+            panels.append((row, column, x_name, y_name, x_values, y_values, profile))
+            finite = profile[np.isfinite(profile)]
+            if finite.size:
+                panel_values.append(finite)
+    if not panel_values:
+        raise ValueError("no finite two-dimensional profile scores are available")
+    n_parameters = len(parameter_names)
+    plot_rc = _profile_plot_rc(use_tex)
+
+    with plt.rc_context(plot_rc):
+        fig, axes = plt.subplots(
+            n_parameters,
+            n_parameters,
+            figsize=(3.2 * n_parameters, 3.2 * n_parameters),
+            squeeze=False,
+        )
+        fig.subplots_adjust(wspace=0.08, hspace=0.08, right=0.98)
+        base_cmap = plt.get_cmap(cmap)
+        region_colours = [
+            base_cmap(0.58),
+            base_cmap(0.36),
+            base_cmap(0.18),
+        ]
+        reference_colour = '#d84a3a'
+
+        for index, name in enumerate(parameter_names):
+            axis = axes[index, index]
+            x_values = parameter_values[name]
+            profile = _profile_1d(work, name, x_values)
+            valid = np.isfinite(profile)
+            x_profile = x_values[valid]
+            y_profile = profile[valid]
+            fine_x = np.linspace(x_profile.min(), x_profile.max(), grid_size * 5)
+            if len(x_profile) >= 4:
+                coefficients = fit_poly(x_profile, y_profile)
+                fine_profile = np.polyval(coefficients, fine_x)
+            else:
+                fine_profile = np.interp(fine_x, x_profile, y_profile)
+
+            axis.plot(
+                x_profile,
+                y_profile,
+                ls='None',
+                marker='o',
+                ms=5,
+                color='black',
+                label='Profile minima',
+                zorder=4,
+            )
+            axis.plot(fine_x, fine_profile, color='dodgerblue', lw=1.8, zorder=3)
+            axis.axhline(
+                interval_levels[0],
+                color='crimson',
+                ls='--',
+                lw=1.2,
+                zorder=1,
+            )
+            best_x = float(work.loc[best_index, name])
+            best_y = float(
+                work.loc[work[name] == best_x, '_span_delta_score'].min()
+            )
+            axis.scatter(
+                best_x,
+                best_y,
+                marker='*',
+                s=55,
+                facecolor='white',
+                edgecolor='black',
+                linewidth=0.8,
+                zorder=5,
+            )
+            profile_value, lower_error, upper_error = _profile_interval(
+                fine_x,
+                fine_profile,
+                interval_levels[0],
+            )
+            axis.set_title(
+                _format_profile_title(
+                    name,
+                    profile_value,
+                    lower_error,
+                    upper_error,
+                ),
+                fontsize=22,
+                pad=12,
+            )
+            x_limits = parameter_limits.get(
+                name,
+                (x_profile.min(), x_profile.max()),
+            )
+            visible_profile = (
+                (x_profile >= x_limits[0]) & (x_profile <= x_limits[1])
+            )
+            visible_fine = (fine_x >= x_limits[0]) & (fine_x <= x_limits[1])
+            displayed_scores = np.concatenate([
+                y_profile[visible_profile],
+                fine_profile[visible_fine],
+                np.array([interval_levels[0]]),
+            ])
+            displayed_scores = displayed_scores[np.isfinite(displayed_scores)]
+            y_min = displayed_scores.min()
+            y_max = displayed_scores.max()
+            y_margin = 0.08 * (y_max - y_min) if y_max > y_min else 1.0
+            axis.set_xlim(x_limits)
+            if name in parameter_limits:
+                visible_ticks = x_profile[
+                    (x_profile >= x_limits[0]) & (x_profile <= x_limits[1])
+                ]
+                if len(visible_ticks) <= 8:
+                    axis.set_xticks(visible_ticks)
+            axis.set_ylim(y_min - y_margin, y_max + y_margin)
+            axis.tick_params(
+                direction='in',
+                top=True,
+                right=True,
+                labelsize=20,
+                length=6,
+                width=1.2,
+            )
+            if index != n_parameters - 1:
+                axis.tick_params(axis='x', labelbottom=False)
+            if index != 0:
+                axis.tick_params(axis='y', labelleft=False)
+
+        for row, column, x_name, y_name, x_values, y_values, profile in panels:
+            axis = axes[row, column]
+            (
+                x_grid,
+                y_grid,
+                valid,
+                fine_x_grid,
+                fine_y_grid,
+                fine_profile,
+            ) = _interpolate_profile_grid(
+                x_values,
+                y_values,
+                profile,
+                grid_size,
+                interpolation,
+            )
+            if contour_mode == 'rank':
+                candidate_levels = np.quantile(
+                    profile[np.isfinite(profile)],
+                    region_fractions,
+                )
+            else:
+                candidate_levels = contour_levels
+            level_mask = (
+                (candidate_levels > np.nanmin(fine_profile))
+                & (candidate_levels < np.nanmax(fine_profile))
+            )
+            available_levels = np.unique(candidate_levels[level_mask])
+            if available_levels.size:
+                filled_levels = np.concatenate(([0.0], available_levels))
+                axis.contourf(
+                    fine_x_grid,
+                    fine_y_grid,
+                    fine_profile,
+                    levels=filled_levels,
+                    colors=region_colours[:len(filled_levels) - 1],
+                    antialiased=True,
+                    zorder=1,
+                )
+                contours = axis.contour(
+                    fine_x_grid,
+                    fine_y_grid,
+                    fine_profile,
+                    levels=available_levels,
+                    colors='black',
+                    linewidths=1.3,
+                    linestyles='solid',
+                    zorder=2,
+                )
+                if clabels is not None:
+                    if contour_mode == 'rank':
+                        level_labels = {
+                            level: f'{fraction:.0%}'
+                            for level, fraction in zip(
+                                candidate_levels,
+                                region_fractions,
+                            )
+                        }
+                    else:
+                        level_labels = {
+                            contour_levels[0]: r'$1\sigma$' if clabels == 'sigma' else '68%',
+                            contour_levels[1]: r'$2\sigma$' if clabels == 'sigma' else '95%',
+                            contour_levels[2]: r'$3\sigma$' if clabels == 'sigma' else '99.7%',
+                        }
+                    axis.clabel(
+                        contours,
+                        fmt={level: level_labels[level] for level in available_levels},
+                        fontsize=10,
+                        inline=True,
+                    )
+            axis.scatter(
+                x_grid[valid],
+                y_grid[valid],
+                s=5,
+                color='black',
+                alpha=0.24,
+                zorder=3,
+            )
+            if x_name in reference_values:
+                axis.axvline(
+                    reference_values[x_name],
+                    color=reference_colour,
+                    ls=':',
+                    lw=1.8,
+                    zorder=3,
+                )
+            if y_name in reference_values:
+                axis.axhline(
+                    reference_values[y_name],
+                    color=reference_colour,
+                    ls=':',
+                    lw=1.8,
+                    zorder=3,
+                )
+            axis.scatter(
+                work.loc[best_index, x_name],
+                work.loc[best_index, y_name],
+                marker='+',
+                s=85,
+                color=reference_colour,
+                linewidth=2.0,
+                zorder=4,
+            )
+            axis.set_xlim(
+                parameter_limits.get(x_name, (x_values.min(), x_values.max()))
+            )
+            axis.set_ylim(
+                parameter_limits.get(y_name, (y_values.min(), y_values.max()))
+            )
+            if x_name in parameter_limits:
+                x_limits = parameter_limits[x_name]
+                visible_ticks = x_values[
+                    (x_values >= x_limits[0]) & (x_values <= x_limits[1])
+                ]
+                if len(visible_ticks) <= 8:
+                    axis.set_xticks(visible_ticks)
+            if y_name in parameter_limits:
+                y_limits = parameter_limits[y_name]
+                visible_ticks = y_values[
+                    (y_values >= y_limits[0]) & (y_values <= y_limits[1])
+                ]
+                if len(visible_ticks) <= 8:
+                    axis.set_yticks(visible_ticks)
+            axis.tick_params(
+                direction='in',
+                top=True,
+                right=True,
+                labelsize=20,
+                length=6,
+                width=1.2,
+            )
+            if row != n_parameters - 1:
+                axis.tick_params(axis='x', labelbottom=False)
+            if column != 0:
+                axis.tick_params(axis='y', labelleft=False)
+
+        for row in range(n_parameters):
+            for column in range(n_parameters):
+                axis = axes[row, column]
+                if column > row:
+                    axis.set_visible(False)
+                if row == n_parameters - 1 and column <= row:
+                    name = parameter_names[column]
+                    axis.set_xlabel(labels.get(name, name), fontsize=24)
+                    panel_index = row * n_parameters + column
+                    rotate = rot_labels == 'All' or (
+                        isinstance(rot_labels, list) and panel_index in rot_labels
+                    )
+                    if rotate:
+                        axis.tick_params(axis='x', labelrotation=45)
+                if column == 0 and row > 0:
+                    name = parameter_names[row]
+                    axis.set_ylabel(labels.get(name, name), fontsize=24)
+
+        axes[0, 0].set_ylabel('Scaled score above best fit', fontsize=24)
+        score_offset = axes[0, 0].yaxis.get_offset_text()
+        score_offset.set_fontsize(20)
+        score_offset.set_position((-0.02, 1.14))
+        score_offset.set_ha('left')
+        score_offset.set_va('bottom')
+
+        if contour_mode == 'rank':
+            region_labels = [
+                f'Best {fraction:.0%} of grid'
+                for fraction in region_fractions
+            ]
+        else:
+            region_labels = [
+                'Nominal 68% region',
+                'Nominal 95% region',
+                'Nominal 99.7% region',
+            ]
+        legend_handles = [
+            Patch(
+                facecolor=colour,
+                edgecolor='black',
+                label=label,
+            )
+            for colour, label in zip(region_colours, region_labels)
+        ] + [
+            Line2D(
+                [],
+                [],
+                marker='+',
+                ls='None',
+                color=reference_colour,
+                label='Best grid model',
+            ),
+        ]
+        if reference_values:
+            legend_handles.append(
+                Line2D(
+                    [],
+                    [],
+                    color=reference_colour,
+                    ls=':',
+                    lw=2,
+                    label='Injected value',
+                )
+            )
+        fig.legend(
+            handles=legend_handles,
+            loc='upper right',
+            bbox_to_anchor=(0.96, 0.92),
+            frameon=False,
+            fontsize=19,
+        )
+        if save is not None:
+            fig.savefig(save, bbox_inches='tight', dpi=300)
+        plt.show()
+        plt.close(fig)
+    return fig

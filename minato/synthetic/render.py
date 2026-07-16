@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import numpy as np
 
-from .models import AtmosphereGrid, BinarySystem, ObservationModel, Spectrum, Star
+from .models import (
+    AtmosphereGrid,
+    BinarySystem,
+    ObservationModel,
+    RenderedAtmosphereGrid,
+    Spectrum,
+    Star,
+)
 from .physics import (
     add_noise,
     apply_instrumental_broadening,
@@ -121,6 +128,139 @@ def render_single_star(
         "snr": observation.snr,
     }
     return Spectrum(wavelength, flux, error=error, metadata=metadata)
+
+
+def render_atmosphere_grid(
+    atmosphere_grid: AtmosphereGrid
+    | Callable[[Star], Spectrum | tuple[np.ndarray, np.ndarray]],
+    atmosphere_nodes: Iterable[tuple[float, float]],
+    vsini_values: Iterable[float],
+    observation: ObservationModel | None = None,
+    *,
+    exact_nodes: bool = True,
+    validate_normalised: bool = True,
+) -> RenderedAtmosphereGrid:
+    """
+    Render an exact atmosphere grid over temperature, gravity, and rotation.
+
+    Every output model shares one wavelength grid and is rendered through the
+    same resampling and broadening path as :func:`render_single_star`. The
+    returned grid remains in memory and contains no noise or radial-velocity
+    shift, making it suitable for model fitting.
+
+    Parameters
+    ----------
+    atmosphere_grid
+        Backend defining ``get_spectrum(star)`` or a callable returning a
+        :class:`Spectrum`.
+    atmosphere_nodes
+        Requested ``(teff_K, logg)`` nodes.
+    vsini_values
+        Projected rotational velocities in km/s.
+    observation
+        Wavelength sampling, instrumental resolution, and limb darkening.
+        ``snr`` must be ``None`` because fitting models must remain noiseless.
+    exact_nodes
+        Require backend metadata to confirm that every requested atmosphere
+        node exists exactly rather than accepting a nearest neighbour.
+    validate_normalised
+        Require finite source fluxes with a median between 0.5 and 1.5. This
+        catches calibrated or logarithmic spectra supplied accidentally to a
+        continuum-normalised fitting workflow. Disable only when another flux
+        convention is intentional.
+
+    Returns
+    -------
+    RenderedAtmosphereGrid
+        In-memory spectra keyed by ``(teff, logg, vsini)``.
+    """
+
+    observation = observation or ObservationModel()
+    if observation.snr is not None:
+        raise ValueError("rendered atmosphere grids must not include noise")
+
+    nodes = sorted({(float(teff), float(logg)) for teff, logg in atmosphere_nodes})
+    rotations = sorted({float(vsini) for vsini in vsini_values})
+    if not nodes:
+        raise ValueError("atmosphere_nodes must contain at least one node")
+    if not rotations:
+        raise ValueError("vsini_values must contain at least one value")
+    if any(not np.isfinite(value) or value < 0 for value in rotations):
+        raise ValueError("vsini_values must be finite and non-negative")
+
+    source_spectra: dict[tuple[float, float], Spectrum] = {}
+    for teff, logg in nodes:
+        spectrum = _fetch_atmosphere(atmosphere_grid, Star(teff=teff, logg=logg))
+        if validate_normalised:
+            if not np.all(np.isfinite(spectrum.flux)):
+                raise ValueError(
+                    f"atmosphere node Teff={teff:g} K, logg={logg:g} "
+                    "contains non-finite fluxes"
+                )
+            median_flux = float(np.median(spectrum.flux))
+            if not 0.5 <= median_flux <= 1.5:
+                source_path = spectrum.metadata.get("source_path", "unknown source")
+                raise ValueError(
+                    "Atmosphere spectrum does not look continuum-normalised.\n"
+                    f"Node: Teff={teff:g} K, logg={logg:g}; "
+                    f"median flux={median_flux:g} (expected near 1).\n"
+                    f"Source: {source_path}\n"
+                    "Use normalised spectra, or set validate_normalised=False "
+                    "if this flux scale is intentional."
+                )
+        if exact_nodes:
+            selected = spectrum.metadata.get("atmosphere_node", {})
+            selected_teff = selected.get("teff")
+            selected_logg = selected.get("logg")
+            if selected_teff is None or selected_logg is None:
+                raise ValueError(
+                    "exact node validation requires atmosphere_node metadata"
+                )
+            if not np.isclose(float(selected_teff), teff) or not np.isclose(
+                float(selected_logg), logg
+            ):
+                raise LookupError(
+                    f"requested atmosphere node Teff={teff:g} K, logg={logg:g} "
+                    f"is unavailable; nearest node is Teff={float(selected_teff):g} K, "
+                    f"logg={float(selected_logg):g}"
+                )
+        source_spectra[(teff, logg)] = spectrum
+
+    wavelength = _output_grid(list(source_spectra.values()), observation)
+    rendered: dict[tuple[float, float, float], Spectrum] = {}
+    for (teff, logg), source in source_spectra.items():
+        for vsini in rotations:
+            star = Star(teff=teff, logg=logg, vsini=vsini)
+            flux = _render_component(star, source, observation, wavelength)
+            metadata = dict(source.metadata)
+            metadata.update(
+                {
+                    "kind": "rendered_atmosphere_model",
+                    "teff": teff,
+                    "logg": logg,
+                    "vsini": vsini,
+                    "resolving_power": observation.resolving_power,
+                    "velocity_step": observation.velocity_step,
+                }
+            )
+            rendered[(teff, logg, vsini)] = Spectrum(
+                wavelength,
+                flux,
+                metadata=metadata,
+            )
+
+    return RenderedAtmosphereGrid(
+        rendered,
+        metadata={
+            "resolving_power": observation.resolving_power,
+            "velocity_step": observation.velocity_step,
+            "wavelength_min": float(wavelength[0]),
+            "wavelength_max": float(wavelength[-1]),
+            "limb_darkening": observation.limb_darkening,
+            "exact_nodes": bool(exact_nodes),
+            "validated_normalised": bool(validate_normalised),
+        },
+    )
 
 
 def render_binary(

@@ -58,8 +58,12 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 - Benchmark and optimise the P117-style SB1 batch workflow for large campaigns: 4 fit families per star, no plots, tuned warmup/sample depth, epoch-count batching, and validated `n_workers` × `n_cpus_per_worker` packing before multi-node scale-out [STARTED][2026-04-17]
 - Refresh the SB2 tutorial to match current code and include new functionality (two-stage sampling, diagnostics, stitching) [STARTED][2026-07-12]
 - Make MINATO installable via `pip`, validate wheel/sdist contents, and publish the approved distribution through TestPyPI and PyPI [STARTED][2026-07-12]
-- Enforce data-free wheel and source archives, and remove models, spectra, fitted results, and generated tutorial assets from the pending `main` release tree [STARTED][2026-07-13]
-- Rewrite the SPAN and RAVEL tutorials to use user-supplied public TLUSTY/PoWR grids or spectra generated synthetically during execution [STARTED][2026-07-13]
+- Enforce data-free wheel and source archives, and remove atmosphere models,
+  observed spectra, fitted results, and unapproved generated assets from the
+  pending `main` release tree [STARTED][2026-07-13]
+- Rewrite the SPAN tutorial around user-downloaded PoWR models and two
+  provenance-tracked synthetic disentangled fixtures; rewrite RAVEL inputs
+  around spectra generated synthetically during execution [STARTED][2026-07-13]
 - Classify the shift-and-add adaptation as development-only external code, add upstream attribution, and exclude it from MINATO packages and releases [Done][2026-07-13]
 - Recover useful `Observing/` sources on `develop`, then redesign them as a tested `minato.observing` package before any release [Done][2026-07-12]
 - Create a small Sphinx/MyST-NB documentation site and evaluate Read the Docs builds after the release tutorial set is clean [STARTED][2026-07-12]

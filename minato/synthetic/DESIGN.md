@@ -1,9 +1,9 @@
 # Synthetic Spectra Design Note
 
 `minato.synthetic` provides generic, in-memory primitives for constructing
-synthetic spectra before passing them to tools such as RAVEL. The core renderer
-does not encode AP18/PoWR routing, MIST age priors, SDSS paths, BOSS noise
-models, or paper-specific catalogue layouts.
+synthetic spectra before passing them to tools such as RAVEL or SPAN. The core
+renderer does not encode AP18/PoWR routing, MIST age priors, SDSS paths, BOSS
+noise models, or paper-specific catalogue layouts.
 
 ## Generic Core
 
@@ -46,6 +46,8 @@ If auto-detection fails, users can:
 - pass `filename_pattern=...` with named groups such as `teff`, `teff_kk`,
   `logg`, `logg10`, or `logg100`;
 - pass a parser function that returns `{"teff": ..., "logg": ...}`;
+- pass `file_filter=...` when one directory contains several products, such as
+  normalised and calibrated spectra;
 - run `TextAtmosphereGrid.write_index_template(...)`, fill in the CSV, and
   load it with `TextAtmosphereGrid.from_index(...)`;
 - symlink or rename files to the MINATO convention, for example
@@ -53,7 +55,8 @@ If auto-detection fails, users can:
 
 This adapter recognises model-grid files and loads wavelength/flux columns. It
 does not decide whether PoWR, TLUSTY, FASTWIND, or any other grid is physically
-appropriate for a given star.
+appropriate for a given star. It rejects duplicate `(teff, logg)` entries
+because selecting one of several files silently would make the grid ambiguous.
 
 For overlapping or partial grid coverage, compose several user-supplied grids
 with explicit priority:
@@ -80,6 +83,57 @@ MINATO tries each backend in order and falls through only when a backend raises
 `LookupError`, for example because no node is close enough in `(teff, logg)`.
 The user sets the order and tolerance values, and the returned spectrum records
 the selected grid in metadata.
+
+## Rendered Fitting Grids
+
+`render_atmosphere_grid` renders an exact set of temperature, gravity, and
+rotation nodes onto one common wavelength grid. It uses the same physical
+operations as `render_single_star`, rejects noise, and validates a
+continuum-normalised flux scale by default before returning a
+`RenderedAtmosphereGrid` in memory:
+
+```python
+from minato.synthetic import ObservationModel, render_atmosphere_grid
+
+rendered = render_atmosphere_grid(
+    grid,
+    atmosphere_nodes=[(32_000, 4.0), (22_000, 4.2)],
+    vsini_values=[50, 75, 100, 125],
+    observation=ObservationModel(
+        resolving_power=40_000,
+        wavelength_min=3950,
+        wavelength_max=4600,
+        velocity_step=2.5,
+    ),
+)
+```
+
+SPAN can consume these models directly, without copied atmosphere files or a
+second broadening implementation:
+
+```python
+from minato.span import AtmFit
+
+fit = AtmFit(
+    "primary.txt",
+    "secondary.txt",
+    grid=fit_grid,
+    lrat0=0.10,
+    binary=True,
+    wavelength_shift=0.0,
+    modelsA_grid=rendered,
+    modelsB_grid=rendered,
+)
+results = fit.compute_chi2([4102, 4340, 4471], [4102, 4340, 4471])
+```
+
+Pass different rendered grids as `modelsA_grid` and `modelsB_grid` when the
+components require different atmosphere families or compositions. The legacy
+`modelsA_path` and `modelsB_path` interface remains available for existing
+precomputed SPAN grids. Rendered SPAN grids may contain irregular
+`(Teff, log g)` nodes, allowing physical boundaries such as PoWR's
+temperature-dependent maximum gravity without inventing unavailable Cartesian
+combinations.
 
 ## Isochrone Age Sampling
 
