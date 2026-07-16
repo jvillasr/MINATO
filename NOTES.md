@@ -16,9 +16,10 @@ Implementation:
   Weighted one-dimensional profiles use `Delta chi2 = 1, 4, 9`; every weighted
   two-dimensional panel uses the same `2.30, 6.18, 11.83` levels. Reduced
   chi-square does not set confidence contours.
-- Unweighted plots now omit sigma thresholds and uncertainty text, default to
-  explicitly panel-specific rank regions, and reject requests for confidence
-  contours. Their score axis is labelled `Delta RSS`. PCHIP is the default
+- Unweighted plots now omit sigma thresholds and uncertainty text and reject
+  requests for confidence contours. Their descriptive regions use the pooled
+  10%, 25%, and 50% quantiles of all 2D profile nodes as three shared
+  `Delta RSS` thresholds, replacing panel-specific ranks. PCHIP is the default
   one-dimensional interpolation and cannot overshoot its sampled profile
   values.
 - Kept the shipped SPAN tutorial unweighted because the disentangling process
@@ -29,12 +30,14 @@ Implementation:
 Validation:
 - `python -m compileall -q minato tests scripts` passed.
 - `jq empty minato/tutorials/span_example.ipynb` and `git diff --check` passed.
-- `.venv/bin/python -m unittest tests.test_span` passed all 26 focused tests in
+- `.venv/bin/python -m unittest tests.test_span` passed all 27 focused tests in
   the shared MINATO Python 3.13 environment.
 - The complete real-PoWR tutorial evaluated 196,000 combinations in 0.41 s
   after rendering the model grid. Its best residual sum of squares is 4.418768
   and its best-fit RMS residual is 0.0205. The compact `Delta RSS` label removes
   the overlap found during visual inspection of the first regenerated figure.
+  A second visual pass confirmed that pooled score levels give the same
+  narrow light-ratio extent in every lower panel.
 
 ## 2026-07-15 - Restore SPAN's standard result plots
 

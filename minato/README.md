@@ -33,8 +33,9 @@ remains in memory, and a combined profile-score corner plot presents the
 one-dimensional profiles and two-dimensional correlations without creating an
 output file. Because the tutorial inputs have no per-pixel uncertainties, the
 figure deliberately reports no formal intervals. Its diagonal panels retain
-the score profiles, while nested lower-panel rank regions show the relatively
-best parts of the coarse grid without presenting them as confidence regions.
+the score profiles, while nested lower-panel regions apply one shared set of
+pooled score thresholds throughout the figure. They show the relatively best
+parts of the coarse grid without presenting them as confidence regions.
 
 For science spectra with independent pixel errors, `AtmFit` accepts positive
 one-sigma errors through `flux_errorA`/`flux_errorB`, or non-negative inverse

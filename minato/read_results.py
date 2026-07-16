@@ -1394,6 +1394,19 @@ def _profile_confidence_levels(dimensions):
     return scipy_chi2.ppf(probabilities, df=dimensions)
 
 
+def _pooled_profile_levels(panel_values, fractions):
+    """Return score thresholds shared by every descriptive profile panel."""
+
+    finite_values = [
+        np.asarray(values, dtype=float)[np.isfinite(values)]
+        for values in panel_values
+    ]
+    finite_values = [values for values in finite_values if values.size]
+    if not finite_values:
+        raise ValueError("no finite profile scores are available")
+    return np.quantile(np.concatenate(finite_values), fractions)
+
+
 def _profile_1d(work, parameter, values):
     return (
         work.groupby(parameter, sort=True)['_span_delta_score']
@@ -1715,6 +1728,7 @@ def plot_corr(
     if not panel_values:
         raise ValueError("no finite two-dimensional profile scores are available")
     confidence_levels = _profile_confidence_levels(2)
+    rank_levels = _pooled_profile_levels(panel_values, region_fractions)
     vmax = _profile_colour_max(panel_values, confidence_levels, vmax=vmax)
 
     interpolation = (
@@ -1774,7 +1788,7 @@ def plot_corr(
             candidate_levels = (
                 confidence_levels
                 if contour_mode == 'confidence'
-                else np.quantile(profile[np.isfinite(profile)], region_fractions)
+                else rank_levels
             )
             available_levels = np.unique(candidate_levels[
                 (candidate_levels > np.nanmin(fine_profile))
@@ -1798,7 +1812,7 @@ def plot_corr(
                         }
                     else:
                         level_labels = {
-                            level: f'best {fraction:.0%}'
+                            level: f'pooled {fraction:.0%}'
                             for level, fraction in zip(
                                 candidate_levels,
                                 region_fractions,
@@ -1913,8 +1927,9 @@ def plot_corner(
     this figure has no continuous score scale. ``contour_mode='auto'`` selects
     confidence regions only for weighted chi-square results.
     ``contour_mode='confidence'`` requests the two-parameter likelihood-ratio
-    thresholds, while ``contour_mode='rank'`` encloses the best panel-grid
-    fractions given by ``region_fractions``. ``score_kind`` is inferred from
+    thresholds, while ``contour_mode='rank'`` uses pooled profile-grid
+    quantiles as shared score thresholds in every panel. The quantiles are
+    given by ``region_fractions``. ``score_kind`` is inferred from
     ``df.attrs`` but may be supplied after loading a format that discarded
     those attributes.
     No file is created unless ``save`` is supplied.
@@ -1990,6 +2005,7 @@ def plot_corner(
                 panel_values.append(finite)
     if not panel_values:
         raise ValueError("no finite two-dimensional profile scores are available")
+    rank_levels = _pooled_profile_levels(panel_values, region_fractions)
     n_parameters = len(parameter_names)
     plot_rc = _profile_plot_rc(use_tex)
 
@@ -2137,10 +2153,7 @@ def plot_corner(
                 interpolation,
             )
             if contour_mode == 'rank':
-                candidate_levels = np.quantile(
-                    profile[np.isfinite(profile)],
-                    region_fractions,
-                )
+                candidate_levels = rank_levels
             else:
                 candidate_levels = contour_levels
             level_mask = (
@@ -2288,7 +2301,7 @@ def plot_corner(
 
         if contour_mode == 'rank':
             region_labels = [
-                f'Best {fraction:.0%} of panel grid'
+                f'Pooled {fraction:.0%} score region'
                 for fraction in region_fractions
             ]
         else:

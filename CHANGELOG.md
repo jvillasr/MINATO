@@ -88,7 +88,9 @@
   global chi-square minimum, shared one- and two-parameter likelihood-ratio
   thresholds, shape-preserving profile interpolation, and reduced chi-square
   only as a separate goodness-of-fit statistic. Unweighted results no longer
-  display nominal sigma intervals and cannot request confidence contours.
+  display nominal sigma intervals and cannot request confidence contours;
+  their descriptive regions use pooled score quantiles as shared thresholds
+  across every panel.
 * [2026-07-15] Enlarged the SPAN corner-plot typography, added fitted values
   with TeX-formatted asymmetric nominal intervals above every diagonal panel,
   adopted `f_B` for the companion light fraction, separated the scientific

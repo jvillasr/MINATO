@@ -677,7 +677,7 @@ class SpanResultPlotTests(unittest.TestCase):
         self.assertEqual(len(profile_lines), 3)
         self.assertGreater(len(reference_lines), 3)
         self.assertIn(
-            "Best 10% of panel grid",
+            "Pooled 10% score region",
             [text.get_text() for text in figure.legends[0].get_texts()],
         )
         self.assertTrue(all("^{+" not in axis.get_title() for axis in diagonal_axes))
@@ -765,6 +765,20 @@ class SpanResultPlotTests(unittest.TestCase):
         np.testing.assert_allclose(
             np.nanmin(lr_temperature, axis=0),
             np.nanmin(lr_gravity, axis=0),
+        )
+
+    def test_unweighted_regions_use_one_pooled_set_of_score_levels(self):
+        panels = [
+            np.array([0.0, 1.0, 2.0, np.nan]),
+            np.array([3.0, 4.0, 20.0]),
+        ]
+        fractions = np.array([0.10, 0.25, 0.50])
+
+        levels = read_results._pooled_profile_levels(panels, fractions)
+
+        np.testing.assert_allclose(
+            levels,
+            np.quantile(np.array([0.0, 1.0, 2.0, 3.0, 4.0, 20.0]), fractions),
         )
 
     def test_weighted_corner_uses_joint_confidence_regions(self):
