@@ -52,8 +52,8 @@ def _profile_plot_rc(use_tex):
 
 def compute_bestfit(
     df,
-    cl=0.68,
-    fit_type='poly',
+    cl=0.682689,
+    fit_type='pchip',
     chi2max=10000,
     polydeg=[4, 9, 5, 4, 6, 6, 4, 4],
     save_to=None,
@@ -62,6 +62,7 @@ def compute_bestfit(
     show_histogram=True,
     report_to=None,
     use_tex=False,
+    score_kind=None,
 ):
     """
     Compute best-fit values and perform statistical analysis on chi-squared values.
@@ -74,12 +75,12 @@ def compute_bestfit(
     :param df: DataFrame containing computed results including light ratio, temperatures, log surface gravities,
                rotational velocities, He/H ratios, chi-squared values, and related statistics.
                Type: pandas DataFrame
-    :param cl: Confidence level for statistical analysis. Default is 0.68 (equivalent to 68% confidence interval).
+    :param cl: Confidence level for statistical analysis. Default is 0.682689
+               (the central one-sigma probability for one parameter).
                Type: float
-    :param fit_type: Type of fit to be performed. Options are 'parab' for parabolic fit,
-                     'skewedG' for skewed Gaussian fit, and 'poly' for polynomial fit.
-                     Default is 'poly'.
-                     Type: str ('parab', 'skewedG', or 'poly')
+    :param fit_type: Profile interpolation or fit. ``"pchip"`` is the
+                     shape-preserving default. Legacy options are ``"parab"``,
+                     ``"skewedG"``, and ``"poly"``.
     :param chi2max: Maximum value of chi-square (χ²) to be displayed on the y-axis of the fit plots.
                     If None, the maximum χ² value from the dataset will be used.
                     Default is 10000.
@@ -100,8 +101,18 @@ def compute_bestfit(
                     default uses Matplotlib's built-in maths renderer so the
                     plot works in a standard MINATO installation.
                     Type: bool
+    :param score_kind: ``"chi2"`` for a weighted chi-square table or ``"rss"``
+                    for an unweighted squared-residual table. Inferred from
+                    ``df.attrs`` when omitted.
 
     """
+    resolved_score_kind = _resolve_score_kind(df, score_kind)
+    if not 0 < cl < 1:
+        raise ValueError("cl must be between zero and one")
+    if fit_type not in {'pchip', 'parab', 'skewedG', 'poly'}:
+        raise ValueError(
+            "fit_type must be 'pchip', 'parab', 'skewedG', or 'poly'"
+        )
     df = df.copy()
     print(df.columns)
     if 'TA' in df.columns and df['TA'].max() > 1000:
@@ -115,7 +126,19 @@ def compute_bestfit(
 
 
     if dof is None:
-        dof = df.iloc[0]['ndata']-len(df.columns)
+        dof = df.attrs.get('degrees_of_freedom')
+    if dof is None and 'ndata' in df.columns:
+        n_parameters = df.attrs.get('n_parameters')
+        if n_parameters is None:
+            excluded = {
+                'modelA', 'modelB', 'chisqr', 'ndata', 'chi2_tot', 'chi2A',
+                'chi2B', 'chi2r_tot', 'chi2redA', 'chi2redB',
+            }
+            n_parameters = sum(
+                column not in excluded and df[column].nunique(dropna=True) > 1
+                for column in df.columns
+            )
+        dof = int(df.iloc[0]['ndata'] - n_parameters)
     # dof = df.loc[0,'ndata']-4
     # read in unscaled chi2
     if chi2col not in df.columns:
@@ -124,11 +147,9 @@ def compute_bestfit(
     print('min unscaled chi2 value =', unscaled_chi2.min())
     print('max unscaled chi2 value =', unscaled_chi2.max())
 
-    # renormalize the chi2 such that the best fit corresponds to a chi2 = dof
-    # which is similar to setting the reduced chi2 =1
-    chi2 = unscaled_chi2 / unscaled_chi2.min() * dof
-    print('min scaled chi2 value =', chi2.min())
-    print('max scaled chi2 value =', chi2.max())
+    chi2 = unscaled_chi2 - unscaled_chi2.min()
+    print('min score above best fit =', chi2.min())
+    print('max score above best fit =', chi2.max())
 
     plot_rc = _profile_plot_rc(use_tex)
 
@@ -136,36 +157,25 @@ def compute_bestfit(
         with plt.rc_context(plot_rc):
             num_bins = int(np.sqrt(len(chi2)))
             histogram, ax = plt.subplots(figsize=(12,4))
-            ax.hist(
-                chi2,
-                bins=np.logspace(
-                    np.log10(chi2.min()), np.log10(chi2.max()), num_bins
-                ),
-            )
-            ax.set_xscale('log')
+            ax.hist(unscaled_chi2, bins=num_bins)
             ax.set_yscale('log')
-            min_power_of_10 = np.floor(np.log10(chi2.min()))
-            max_power_of_10 = np.ceil(np.log10(chi2.max()))
-            xticks = np.logspace(
-                min_power_of_10,
-                max_power_of_10,
-                num=int(max_power_of_10-min_power_of_10+1),
+            ax.set_xlabel(
+                r'$\chi^2$'
+                if resolved_score_kind == 'chi2'
+                else 'Squared-residual score'
             )
-            ax.set_xticks(xticks)
-            ax.set_xlim(chi2.min()*0.9, chi2.max()*1.1)
-            ax.set_xlabel(r'$\chi^2$')
-            ax2 = ax.twiny()
-            ax2.set_xlabel(r'Unscaled $\chi^2$')
-            ax2.set_xscale('log')
             plt.show()
             plt.close(histogram)
 
-    # get confidence level
-    print('dof =', dof)
-    conf_level = scipy_chi2.ppf(cl, dof)
-    sigma2 = scipy_chi2.ppf(0.95, dof)
-    sigma3 = scipy_chi2.ppf(0.997, dof)
-    print(str(cl*100)+'% confidence level =', conf_level)
+    if dof is not None:
+        print('dof =', dof)
+    conf_level = (
+        scipy_chi2.ppf(cl, 1)
+        if resolved_score_kind == 'chi2'
+        else None
+    )
+    if conf_level is not None:
+        print(str(cl*100)+'% profile threshold =', conf_level)
 
     # teffA, loggA, micA, rotA = df['teffA'], df['loggA']/10, df['vmicA'], df['rotA']
     # teffB, loggB, micB, rotB = df['teffB'], df['loggB']/10, df['vmicB'], df['rotB']
@@ -287,6 +297,9 @@ def compute_bestfit(
             except ValueError as e:
                 print("   Error:", str(e))
                 fit_pars.append(np.nan)
+    elif fit_type == 'pchip':
+        results = [None] * len(pars_min)
+        fit_pars = [None] * len(pars_min)
     if out_file is not None:
         out_file.close()
 
@@ -352,7 +365,14 @@ def compute_bestfit(
     def plot_data(ax, chi2, yy, conf_level, unique_fit_pars, fit_type, unique_pars, unique_pars_min):#, labels, x_labels):
         for i, par, minval in zip(range(len(unique_pars)), unique_pars, unique_pars_min):
             ax[i].plot(par[yy].values, chi2[yy].values, ls='None', marker='.', ms=marker_size, c='grey', alpha=0.3, zorder=0)
-            ax[i].axhline(conf_level, color='crimson', lw=line_width, alpha=0.7, zorder=1)
+            if conf_level is not None:
+                ax[i].axhline(
+                    conf_level,
+                    color='crimson',
+                    lw=line_width,
+                    alpha=0.7,
+                    zorder=1,
+                )
             label_base = column_labels.get(par.name, par.name)
             profile_x = np.asarray(minval[0], dtype=float)
             profile_y = np.asarray(minval[1], dtype=float)
@@ -366,7 +386,9 @@ def compute_bestfit(
                 label='Profile minima',
                 zorder=4,
             )
-            panel_y_values = [chi2[yy].values, profile_y, np.array([conf_level])]
+            panel_y_values = [chi2[yy].values, profile_y]
+            if conf_level is not None:
+                panel_y_values.append(np.array([conf_level]))
             y_parab = None
             if minval[1] is not np.nan:
                 x_parab = np.linspace(minval[0][0], minval[0][-1], 1000)
@@ -379,26 +401,43 @@ def compute_bestfit(
                         y_parab = np.polyval(unique_results[i], x_parab)
                     else:
                         print(f"No polynomial fit for {par.name}")
+                elif fit_type == 'pchip':
+                    y_parab = scInterp.PchipInterpolator(
+                        profile_x,
+                        profile_y,
+                        extrapolate=False,
+                    )(x_parab)
+                    y_parab = np.maximum(y_parab, 0.0)
                 if y_parab is not None:
                     panel_y_values.append(np.asarray(y_parab, dtype=float))
                     ax[i].plot(x_parab, y_parab, lw=line_width, c='dodgerblue', zorder=3)
                 ax[i].text(0.07, 0.84, panels_id[i], fontsize=26, horizontalalignment='center', transform = ax[i].transAxes)
                 # print(x_parab, y_parab, conf_level)
-                try:
-                    par_val, par_ler, par_uer = get_interc(x_parab, y_parab, conf_level)
-                    if i == 1:
-                        label = label_base+' = '+f'{par_val:.3f}'+r'$^{+'+f'{par_uer:.3f}'+'}'+r'_{-'+f'{par_ler:.3f}'+'}$'
-                    else:
-                        label = label_base+' = '+f'{par_val:.2f}'+r'$^{+'+f'{par_uer:.2f}'+'}'+r'_{-'+f'{par_ler:.2f}'+'}$'
-                    ax[i].text(0.5, 0.8, label, fontsize=tick_label_size, horizontalalignment='center', transform = ax[i].transAxes, bbox=props)
-                except Exception as e:
-                    print(par.name, 'computing interceptions failed')
-                    print("Error:", str(e))
+                if conf_level is not None:
+                    try:
+                        par_val, par_ler, par_uer = get_interc(
+                            x_parab,
+                            y_parab,
+                            conf_level,
+                        )
+                        if i == 1:
+                            label = label_base+' = '+f'{par_val:.3f}'+r'$^{+'+f'{par_uer:.3f}'+'}'+r'_{-'+f'{par_ler:.3f}'+'}$'
+                        else:
+                            label = label_base+' = '+f'{par_val:.2f}'+r'$^{+'+f'{par_uer:.2f}'+'}'+r'_{-'+f'{par_ler:.2f}'+'}$'
+                        ax[i].text(0.5, 0.8, label, fontsize=tick_label_size, horizontalalignment='center', transform = ax[i].transAxes, bbox=props)
+                    except Exception as e:
+                        print(par.name, 'computing interceptions failed')
+                        print("Error:", str(e))
                 # ax[i].plot(minval[0], minval[1], 'orange', lw=2, alpha=.75, zorder=3)
                 # pass
             ax[i].set_xlabel(label_base, fontsize=label_size)
             if i in [0, 2, 4, 6]:
-                ax[i].set_ylabel(r'$\chi^2$', fontsize=label_size)
+                ylabel = (
+                    r'$\Delta\chi^2$'
+                    if resolved_score_kind == 'chi2'
+                    else 'Squared-residual score above best fit'
+                )
+                ax[i].set_ylabel(ylabel, fontsize=label_size)
             xrange = minval[0][-1] - minval[0][0]
             # xrange = minval_scaled[-1] - minval_scaled[0]
             ax[i].set_xlim(minval[0][0] - 0.2*xrange, minval[0][-1] + 0.2*xrange)
@@ -1244,7 +1283,49 @@ _SPAN_PROFILE_UNITS = {
 }
 
 
-def _prepare_profile_table(df, pars_dic, chi2col=None, dof=None):
+def _resolve_score_kind(df, score_kind=None):
+    """Resolve whether a result table contains chi-square or an RSS score."""
+
+    if score_kind is None:
+        score_kind = df.attrs.get('score_kind', 'rss')
+    aliases = {
+        'chi2': 'chi2',
+        'weighted_chi2': 'chi2',
+        'rss': 'rss',
+        'unweighted': 'rss',
+    }
+    try:
+        return aliases[str(score_kind).lower()]
+    except KeyError as error:
+        raise ValueError("score_kind must be 'chi2' or 'rss'") from error
+
+
+def _resolve_contour_mode(contour_mode, score_kind):
+    """Select confidence contours only for a genuine chi-square table."""
+
+    if contour_mode == 'nominal':
+        contour_mode = 'confidence'
+    if contour_mode == 'auto':
+        contour_mode = 'confidence' if score_kind == 'chi2' else 'rank'
+    if contour_mode not in {'confidence', 'rank'}:
+        raise ValueError(
+            "contour_mode must be 'auto', 'confidence', or 'rank'"
+        )
+    if contour_mode == 'confidence' and score_kind != 'chi2':
+        raise ValueError(
+            "confidence contours require a weighted chi-square result table; "
+            "use contour_mode='rank' for an unweighted score"
+        )
+    return contour_mode
+
+
+def _prepare_profile_table(
+    df,
+    pars_dic,
+    chi2col=None,
+    dof=None,
+    score_kind=None,
+):
     if not isinstance(pars_dic, dict):
         raise TypeError("pars_dic must be an ordered mapping of parameter grids")
 
@@ -1262,17 +1343,8 @@ def _prepare_profile_table(df, pars_dic, chi2col=None, dof=None):
     if not finite_score.any():
         raise ValueError(f"score column contains no finite values: {chi2col}")
     score_min = score[finite_score].min()
-    if score_min <= 0:
-        raise ValueError("profile-score plotting requires a positive minimum score")
-
-    if dof is None:
-        if 'ndata' not in work.columns:
-            raise KeyError("dof is required when the result table has no ndata column")
-        dof = int(work.iloc[0]['ndata'] - len(work.columns))
-    if dof <= 0:
-        raise ValueError("dof must be positive")
-
-    work['_span_delta_score'] = score / score_min * dof - dof
+    resolved_score_kind = _resolve_score_kind(df, score_kind)
+    work['_span_delta_score'] = score - score_min
     parameter_values = {}
     for name, values in pars_dic.items():
         if name not in work.columns:
@@ -1288,7 +1360,30 @@ def _prepare_profile_table(df, pars_dic, chi2col=None, dof=None):
     parameter_names = list(parameter_values)
     if len(parameter_names) < 2:
         raise ValueError("at least two varying parameters are required")
-    return work, score, dof, parameter_values, parameter_names
+
+    if dof is None:
+        dof = df.attrs.get('degrees_of_freedom')
+    if dof is None and 'ndata' in work.columns:
+        n_parameters = df.attrs.get('n_parameters')
+        if n_parameters is None:
+            n_parameters = sum(
+                len(np.unique(np.asarray(values))) > 1
+                for values in pars_dic.values()
+            )
+        dof = int(work.iloc[0]['ndata'] - n_parameters)
+    if dof is not None:
+        dof = int(dof)
+        if dof <= 0:
+            raise ValueError("dof must be positive")
+
+    return (
+        work,
+        score,
+        dof,
+        parameter_values,
+        parameter_names,
+        resolved_score_kind,
+    )
 
 
 def _profile_confidence_levels(dimensions):
@@ -1516,15 +1611,19 @@ def plot_corr(
     clabels='numeric',
     chi2col=None,
     dof=None,
+    score_kind=None,
     use_tex=False,
     grid_size=100,
+    contour_mode='auto',
+    region_fractions=(0.10, 0.25, 0.50),
 ):
     """Plot two-dimensional profile scores for every parameter pair.
 
     Each panel shows the minimum score at each pair of parameter-grid values
     after profiling over all remaining parameters. The colour scale is the
-    scaled score above the global best fit. Contours use nominal joint
-    likelihood-ratio thresholds for two fitted parameters.
+    score above the global best fit. Weighted chi-square tables use common
+    joint likelihood-ratio thresholds for two fitted parameters. Unweighted
+    tables use explicitly descriptive panel ranks.
 
     Parameters
     ----------
@@ -1548,7 +1647,12 @@ def plot_corr(
     chi2col : str, optional
         Score column. Inferred from ``chi2_tot`` or ``chi2`` when omitted.
     dof : int, optional
-        Degrees of freedom used for SPAN's legacy score rescaling.
+        Degrees of freedom retained for result-table reporting. It does not
+        alter the profile thresholds.
+    score_kind : {``"chi2"``, ``"rss"``}, optional
+        Score definition. Inferred from ``df.attrs`` when omitted. Set this
+        explicitly after loading a result table from a format that discards
+        DataFrame attributes.
     use_tex : bool
         Use an external LaTeX installation for plot text.
     grid_size : int
@@ -1561,12 +1665,31 @@ def plot_corr(
     """
     if grid_size < 10:
         raise ValueError("grid_size must be at least 10")
-    work, score, dof, parameter_values, parameter_names = _prepare_profile_table(
+    region_fractions = np.asarray(region_fractions, dtype=float)
+    if (
+        region_fractions.shape != (3,)
+        or np.any(region_fractions <= 0)
+        or np.any(region_fractions >= 1)
+        or np.any(np.diff(region_fractions) <= 0)
+    ):
+        raise ValueError(
+            "region_fractions must contain three increasing values in (0, 1)"
+        )
+    (
+        work,
+        score,
+        dof,
+        parameter_values,
+        parameter_names,
+        resolved_score_kind,
+    ) = _prepare_profile_table(
         df,
         pars_dic,
         chi2col=chi2col,
         dof=dof,
+        score_kind=score_kind,
     )
+    contour_mode = _resolve_contour_mode(contour_mode, resolved_score_kind)
     labels = _SPAN_PROFILE_LABELS
 
     panels = []
@@ -1648,10 +1771,15 @@ def plot_corr(
                 shading='auto',
                 rasterized=True,
             )
-            available_levels = confidence_levels[
-                (confidence_levels > np.nanmin(fine_profile))
-                & (confidence_levels < np.nanmax(fine_profile))
-            ]
+            candidate_levels = (
+                confidence_levels
+                if contour_mode == 'confidence'
+                else np.quantile(profile[np.isfinite(profile)], region_fractions)
+            )
+            available_levels = np.unique(candidate_levels[
+                (candidate_levels > np.nanmin(fine_profile))
+                & (candidate_levels < np.nanmax(fine_profile))
+            ])
             if available_levels.size:
                 contours = axis.contour(
                     fine_x_grid,
@@ -1662,11 +1790,20 @@ def plot_corr(
                     linewidths=1,
                 )
                 if clabels is not None:
-                    level_labels = {
-                        confidence_levels[0]: r'$1\sigma$' if clabels == 'sigma' else '68%',
-                        confidence_levels[1]: r'$2\sigma$' if clabels == 'sigma' else '95%',
-                        confidence_levels[2]: r'$3\sigma$' if clabels == 'sigma' else '99.7%',
-                    }
+                    if contour_mode == 'confidence':
+                        level_labels = {
+                            confidence_levels[0]: r'$1\sigma$' if clabels == 'sigma' else '68%',
+                            confidence_levels[1]: r'$2\sigma$' if clabels == 'sigma' else '95%',
+                            confidence_levels[2]: r'$3\sigma$' if clabels == 'sigma' else '99.7%',
+                        }
+                    else:
+                        level_labels = {
+                            level: f'best {fraction:.0%}'
+                            for level, fraction in zip(
+                                candidate_levels,
+                                region_fractions,
+                            )
+                        }
                     axis.clabel(
                         contours,
                         fmt={level: level_labels[level] for level in available_levels},
@@ -1724,7 +1861,12 @@ def plot_corr(
             pad=0.02,
             extend='max',
         )
-        colorbar.set_label('Scaled score above best fit', fontsize=11)
+        colour_label = (
+            r'$\Delta\chi^2$'
+            if resolved_score_kind == 'chi2'
+            else 'Squared-residual score above best fit'
+        )
+        colorbar.set_label(colour_label, fontsize=11)
         colorbar.ax.tick_params(labelsize=8)
         if save is not None:
             fig.savefig(save, bbox_inches='tight', dpi=300)
@@ -1744,34 +1886,37 @@ def plot_corner(
     clabels=None,
     chi2col=None,
     dof=None,
+    score_kind=None,
     use_tex=False,
     grid_size=100,
     parameter_limits=None,
     reference_values=None,
-    contour_mode='nominal',
+    contour_mode='auto',
     region_fractions=(0.10, 0.25, 0.50),
 ):
     """Plot one- and two-dimensional SPAN profiles as a corner figure.
 
-    One-dimensional score profiles and their polynomial fits occupy the
+    One-dimensional score profiles and their shape-preserving interpolations occupy the
     diagonal. The lower triangle contains nested regions from the
     two-dimensional profiles; the upper triangle remains empty. This is a
-    profile-score diagnostic rather than a posterior-sample corner plot.
-    When the supplied
-    score is an unweighted residual sum of squares, the displayed rescaling and
-    intervals are nominal and must not be interpreted as reduced chi-squared
-    or formal confidence intervals. Diagonal intervals use one-parameter
-    likelihood-ratio thresholds. Lower-triangle contours use either nominal
-    two-parameter thresholds or explicitly non-statistical grid ranks.
+    profile-likelihood diagnostic rather than a posterior-sample corner plot.
+    Weighted chi-square tables use one-parameter likelihood-ratio thresholds
+    on the diagonal and common two-parameter thresholds in every lower panel.
+    Unweighted residual-sum-of-squares tables show no formal intervals and use
+    explicitly non-statistical grid ranks in the lower triangle.
 
     Parameters are the same as :func:`plot_corr`. ``parameter_limits`` may map
     parameter names to display-only ``(minimum, maximum)`` limits.
     ``reference_values`` may map parameters to injected or independently known
     values, drawn as red dotted guides. ``cmap`` supplies the nested-region
     colours. ``vmax`` is retained for API compatibility but is unused because
-    this figure has no continuous score scale. ``contour_mode='nominal'`` uses
-    the two-parameter likelihood-ratio thresholds; ``contour_mode='rank'``
-    instead encloses the best grid fractions given by ``region_fractions``.
+    this figure has no continuous score scale. ``contour_mode='auto'`` selects
+    confidence regions only for weighted chi-square results.
+    ``contour_mode='confidence'`` requests the two-parameter likelihood-ratio
+    thresholds, while ``contour_mode='rank'`` encloses the best panel-grid
+    fractions given by ``region_fractions``. ``score_kind`` is inferred from
+    ``df.attrs`` but may be supplied after loading a format that discarded
+    those attributes.
     No file is created unless ``save`` is supplied.
 
     Returns
@@ -1781,8 +1926,6 @@ def plot_corner(
     """
     if grid_size < 10:
         raise ValueError("grid_size must be at least 10")
-    if contour_mode not in {'nominal', 'rank'}:
-        raise ValueError("contour_mode must be 'nominal' or 'rank'")
     region_fractions = np.asarray(region_fractions, dtype=float)
     if (
         region_fractions.shape != (3,)
@@ -1797,12 +1940,21 @@ def plot_corner(
     for name, limits in parameter_limits.items():
         if len(limits) != 2 or limits[0] >= limits[1]:
             raise ValueError(f"invalid display limits for {name}: {limits}")
-    work, score, dof, parameter_values, parameter_names = _prepare_profile_table(
+    (
+        work,
+        score,
+        dof,
+        parameter_values,
+        parameter_names,
+        resolved_score_kind,
+    ) = _prepare_profile_table(
         df,
         pars_dic,
         chi2col=chi2col,
         dof=dof,
+        score_kind=score_kind,
     )
+    contour_mode = _resolve_contour_mode(contour_mode, resolved_score_kind)
     reference_values = {} if reference_values is None else dict(reference_values)
     for name, value in list(reference_values.items()):
         if name in {'TA', 'TB', 'teffA', 'teffB'} and value > 1000:
@@ -1865,11 +2017,15 @@ def plot_corner(
             x_profile = x_values[valid]
             y_profile = profile[valid]
             fine_x = np.linspace(x_profile.min(), x_profile.max(), grid_size * 5)
-            if len(x_profile) >= 4:
-                coefficients = fit_poly(x_profile, y_profile)
-                fine_profile = np.polyval(coefficients, fine_x)
+            if len(x_profile) >= 2:
+                fine_profile = scInterp.PchipInterpolator(
+                    x_profile,
+                    y_profile,
+                    extrapolate=False,
+                )(fine_x)
             else:
-                fine_profile = np.interp(fine_x, x_profile, y_profile)
+                fine_profile = np.full_like(fine_x, y_profile[0])
+            fine_profile = np.maximum(fine_profile, 0.0)
 
             axis.plot(
                 x_profile,
@@ -1882,13 +2038,14 @@ def plot_corner(
                 zorder=4,
             )
             axis.plot(fine_x, fine_profile, color='dodgerblue', lw=1.8, zorder=3)
-            axis.axhline(
-                interval_levels[0],
-                color='crimson',
-                ls='--',
-                lw=1.2,
-                zorder=1,
-            )
+            if resolved_score_kind == 'chi2':
+                axis.axhline(
+                    interval_levels[0],
+                    color='crimson',
+                    ls='--',
+                    lw=1.2,
+                    zorder=1,
+                )
             best_x = float(work.loc[best_index, name])
             best_y = float(
                 work.loc[work[name] == best_x, '_span_delta_score'].min()
@@ -1903,11 +2060,16 @@ def plot_corner(
                 linewidth=0.8,
                 zorder=5,
             )
-            profile_value, lower_error, upper_error = _profile_interval(
-                fine_x,
-                fine_profile,
-                interval_levels[0],
-            )
+            if resolved_score_kind == 'chi2':
+                profile_value, lower_error, upper_error = _profile_interval(
+                    fine_x,
+                    fine_profile,
+                    interval_levels[0],
+                )
+            else:
+                profile_value = float(fine_x[np.nanargmin(fine_profile)])
+                lower_error = np.nan
+                upper_error = np.nan
             axis.set_title(
                 _format_profile_title(
                     name,
@@ -1926,11 +2088,13 @@ def plot_corner(
                 (x_profile >= x_limits[0]) & (x_profile <= x_limits[1])
             )
             visible_fine = (fine_x >= x_limits[0]) & (fine_x <= x_limits[1])
-            displayed_scores = np.concatenate([
+            displayed_parts = [
                 y_profile[visible_profile],
                 fine_profile[visible_fine],
-                np.array([interval_levels[0]]),
-            ])
+            ]
+            if resolved_score_kind == 'chi2':
+                displayed_parts.append(np.array([interval_levels[0]]))
+            displayed_scores = np.concatenate(displayed_parts)
             displayed_scores = displayed_scores[np.isfinite(displayed_scores)]
             y_min = displayed_scores.min()
             y_max = displayed_scores.max()
@@ -2110,7 +2274,12 @@ def plot_corner(
                     name = parameter_names[row]
                     axis.set_ylabel(labels.get(name, name), fontsize=24)
 
-        axes[0, 0].set_ylabel('Scaled score above best fit', fontsize=24)
+        score_label = (
+            r'$\Delta\chi^2$'
+            if resolved_score_kind == 'chi2'
+            else 'Squared-residual score above best fit'
+        )
+        axes[0, 0].set_ylabel(score_label, fontsize=24)
         score_offset = axes[0, 0].yaxis.get_offset_text()
         score_offset.set_fontsize(20)
         score_offset.set_position((-0.02, 1.14))
@@ -2119,14 +2288,14 @@ def plot_corner(
 
         if contour_mode == 'rank':
             region_labels = [
-                f'Best {fraction:.0%} of grid'
+                f'Best {fraction:.0%} of panel grid'
                 for fraction in region_fractions
             ]
         else:
             region_labels = [
-                'Nominal 68% region',
-                'Nominal 95% region',
-                'Nominal 99.7% region',
+                '68.3% joint region',
+                '95.4% joint region',
+                '99.7% joint region',
             ]
         legend_handles = [
             Patch(

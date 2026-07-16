@@ -56,7 +56,10 @@ examples likewise accept explicit user-supplied paths.
 SPAN is designed for fast and transparent searches over explicit atmosphere,
 rotation, and light-ratio grids. Its component scores are evaluated separately
 and then combined, making broad binary-star grid searches inexpensive while
-keeping every tested model visible to the user.
+keeping every tested model visible to the user. Per-pixel flux errors or
+inverse variances enable weighted chi-square fitting and statistically defined
+profile-likelihood intervals; fits without uncertainties remain descriptive
+model-ranking calculations.
 
 ## Development-only contributed code
 

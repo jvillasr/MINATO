@@ -1,5 +1,39 @@
 # MINATO Notes
 
+## 2026-07-16 - Add statistical SPAN profile inference
+
+Implementation:
+- Added scalar or per-pixel `flux_errorA`/`flux_errorB` and
+  `inverse_varianceA`/`inverse_varianceB` inputs. Binary fits require a complete
+  noise model for both components; zero inverse variance masks a pixel.
+- Weighted fits now calculate `sum((data-model)^2 * inverse_variance)` and
+  record `score_kind`, the number of varied parameters, degrees of freedom,
+  and the independent-Gaussian assumption in `DataFrame.attrs`. Unweighted
+  fits retain the existing residual-sum-of-squares ranking path.
+- Corrected total reduced chi-square to `chi2_tot / (ndata - n_varied)` and
+  stopped counting fixed grid dimensions as fitted parameters.
+- Replaced score rescaling with the direct difference from the global minimum.
+  Weighted one-dimensional profiles use `Delta chi2 = 1, 4, 9`; every weighted
+  two-dimensional panel uses the same `2.30, 6.18, 11.83` levels. Reduced
+  chi-square does not set confidence contours.
+- Unweighted plots now omit sigma thresholds and uncertainty text, default to
+  explicitly panel-specific rank regions, and reject requests for confidence
+  contours. PCHIP is the default one-dimensional interpolation and cannot
+  overshoot its sampled profile values.
+- Kept the shipped SPAN tutorial unweighted because the disentangling process
+  did not propagate per-pixel covariance. The notebook explains how to enable
+  weighted fitting and why repeated noise/disentangling realisations are still
+  needed to validate coverage for correlated disentangled spectra.
+
+Validation:
+- `python -m compileall -q minato tests scripts` passed.
+- `jq empty minato/tutorials/span_example.ipynb` and `git diff --check` passed.
+- Numerical and figure tests were added in `tests/test_span.py`.
+  `python -m unittest tests.test_span` could not import `pandas` because this
+  node exposes only system Python 3.9 rather than a MINATO environment. The
+  suite and real-PoWR tutorial still require execution in the Python 3.12/3.13
+  mamba, uv, or Pixi environment.
+
 ## 2026-07-15 - Restore SPAN's standard result plots
 
 Implementation:

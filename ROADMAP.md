@@ -64,6 +64,8 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 - Rewrite the SPAN tutorial around user-downloaded PoWR models and two
   provenance-tracked synthetic disentangled fixtures; rewrite RAVEL inputs
   around spectra generated synthetically during execution [STARTED][2026-07-13]
+- Add weighted chi-square scoring and statistically valid profile-likelihood
+  intervals to SPAN while preserving explicit unweighted model ranking [STARTED][]
 - Classify the shift-and-add adaptation as development-only external code, add upstream attribution, and exclude it from MINATO packages and releases [Done][2026-07-13]
 - Recover useful `Observing/` sources on `develop`, then redesign them as a tested `minato.observing` package before any release [Done][2026-07-12]
 - Create a small Sphinx/MyST-NB documentation site and evaluate Read the Docs builds after the release tutorial set is clean [STARTED][2026-07-12]

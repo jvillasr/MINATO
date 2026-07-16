@@ -1,5 +1,10 @@
 ## [Unreleased]
 ### Added
+* [2026-07-16] SPAN accepts per-pixel one-sigma flux errors or inverse
+  variances for both single-star and binary fits, calculates weighted
+  chi-square under independent Gaussian errors, supports zero-weight pixel
+  masks, and records the score definition and fitted degrees of freedom in
+  result-table metadata.
 * [2026-07-13] Added a reproducible SPAN tutorial with two provenance-tracked
   synthetic disentangled spectra, official PoWR download instructions, a
   coarse O+B fitting grid, and in-memory result inspection.
@@ -79,6 +84,11 @@
 * Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
 
 ### Changed
+* [2026-07-16] SPAN profile plots now use the unscaled difference from the
+  global chi-square minimum, shared one- and two-parameter likelihood-ratio
+  thresholds, shape-preserving profile interpolation, and reduced chi-square
+  only as a separate goodness-of-fit statistic. Unweighted results no longer
+  display nominal sigma intervals and cannot request confidence contours.
 * [2026-07-15] Enlarged the SPAN corner-plot typography, added fitted values
   with TeX-formatted asymmetric nominal intervals above every diagonal panel,
   adopted `f_B` for the companion light fraction, separated the scientific

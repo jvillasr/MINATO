@@ -53,6 +53,10 @@ class AtmFit:
         wavelength_shift=-0.2,
         max_workers=None,
         chunksize=1,
+        flux_errorA=None,
+        flux_errorB=None,
+        inverse_varianceA=None,
+        inverse_varianceB=None,
     ):
         """
         Initialize the atmosphere fitting class.
@@ -102,6 +106,17 @@ class AtmFit:
         :param chunksize: Number of parameter combinations submitted in each
                         multiprocessing chunk.
                         Type: int
+        :param flux_errorA: One-sigma flux uncertainty for spectrum A. A
+                        positive scalar applies to every pixel; otherwise pass
+                        an array matching the complete input spectrum.
+                        Mutually exclusive with ``inverse_varianceA``.
+        :param flux_errorB: One-sigma flux uncertainty for spectrum B. Binary
+                        fits must provide uncertainties for both components or
+                        for neither component.
+        :param inverse_varianceA: Inverse flux variance for spectrum A. A
+                        scalar applies to every pixel and zero-valued pixels
+                        are excluded from the fit.
+        :param inverse_varianceB: Inverse flux variance for spectrum B.
         """
         self.grid = grid
         
@@ -137,8 +152,143 @@ class AtmFit:
             raise ValueError("chunksize must be positive")
         self.max_workers = None if max_workers is None else int(max_workers)
         self.chunksize = int(chunksize)
+        self.flux_errorA = flux_errorA
+        self.flux_errorB = flux_errorB
+        self.inverse_varianceA = inverse_varianceA
+        self.inverse_varianceB = inverse_varianceB
+        self._validate_uncertainty_configuration()
+        self.ivarA = None
+        self.ivarB = None
         self.missing_models = False
         self.warning_printed = False
+
+    def _validate_uncertainty_configuration(self):
+        """Validate whether the fit has a complete statistical noise model."""
+
+        for component in ('A', 'B'):
+            flux_error = getattr(self, f'flux_error{component}')
+            inverse_variance = getattr(self, f'inverse_variance{component}')
+            if flux_error is not None and inverse_variance is not None:
+                raise ValueError(
+                    f"use either flux_error{component} or "
+                    f"inverse_variance{component}, not both"
+                )
+
+        weighted_a = (
+            self.flux_errorA is not None or self.inverse_varianceA is not None
+        )
+        weighted_b = (
+            self.flux_errorB is not None or self.inverse_varianceB is not None
+        )
+        if self.binary and weighted_a != weighted_b:
+            raise ValueError(
+                "binary weighted fitting requires uncertainties for both "
+                "spectrum A and spectrum B"
+            )
+        if not self.binary and weighted_b:
+            raise ValueError(
+                "spectrum B uncertainties are only valid for binary fitting"
+            )
+        self.score_kind = 'chi2' if weighted_a else 'rss'
+
+    @staticmethod
+    def _as_pixel_array(values, size, name):
+        """Broadcast a scalar or validate a complete per-pixel array."""
+
+        array = np.asarray(values, dtype=float)
+        if array.ndim == 0:
+            return np.full(size, float(array), dtype=float)
+        if array.ndim != 1 or len(array) != size:
+            raise ValueError(
+                f"{name} must be a scalar or a one-dimensional array with "
+                f"{size} values"
+            )
+        return array.copy()
+
+    def _component_inverse_variance(self, component, size):
+        """Return validated inverse variance for a complete input spectrum."""
+
+        flux_error = getattr(self, f'flux_error{component}')
+        inverse_variance = getattr(self, f'inverse_variance{component}')
+        if flux_error is None and inverse_variance is None:
+            return None
+        if flux_error is not None:
+            errors = self._as_pixel_array(
+                flux_error,
+                size,
+                f'flux_error{component}',
+            )
+            if not np.all(np.isfinite(errors)) or np.any(errors <= 0):
+                raise ValueError(
+                    f"flux_error{component} must contain finite positive values"
+                )
+            return 1.0 / errors**2
+
+        weights = self._as_pixel_array(
+            inverse_variance,
+            size,
+            f'inverse_variance{component}',
+        )
+        if not np.all(np.isfinite(weights)) or np.any(weights < 0):
+            raise ValueError(
+                f"inverse_variance{component} must contain finite non-negative "
+                "values"
+            )
+        if not np.any(weights > 0):
+            raise ValueError(
+                f"inverse_variance{component} must contain at least one "
+                "positive value"
+            )
+        return weights
+
+    def _prepare_fit_weights(self):
+        """Prepare per-pixel weights after the spectrum lengths are known."""
+
+        self.ivarA = self._component_inverse_variance('A', len(self.wavA))
+        self.ivarB = (
+            self._component_inverse_variance('B', len(self.wavB))
+            if self.binary
+            else None
+        )
+
+    def _component_parameter_count(self, component):
+        """Count parameters entering one component score."""
+
+        suffix = component.upper()
+        component_parameters = sum(
+            key.endswith(suffix) and self._grid_parameter_varies(key)
+            for key in self.grid
+        )
+        if self.binary and any(
+            key in self.grid and self._grid_parameter_varies(key)
+            for key in ('lr', 'lrat')
+        ):
+            component_parameters += 1
+        return component_parameters
+
+    def _grid_parameter_varies(self, name):
+        """Return whether a grid parameter contains multiple distinct values."""
+
+        return len(np.unique(np.asarray(self.grid[name]))) > 1
+
+    def _attach_result_metadata(self, output, ndata):
+        """Record the score definition without adding repeated table columns."""
+
+        degrees_of_freedom = int(ndata - self.nparams)
+        output.attrs.update(
+            {
+                'score_kind': self.score_kind,
+                'score_column': 'chi2_tot',
+                'n_parameters': int(self.nparams),
+                'degrees_of_freedom': degrees_of_freedom,
+                'uncertainty_model': (
+                    'independent Gaussian per-pixel uncertainties'
+                    if self.score_kind == 'chi2'
+                    else 'none; unweighted residual sum of squares'
+                ),
+            }
+        )
+        return output
         
     lines_dic = {
                     3995: { 'region':[3990, 4000],  'HeH_region':[], 'title':r'N II $\lambda$3995'},
@@ -174,7 +324,7 @@ class AtmFit:
 
     def compute_single_set(self, params):
         """
-        Compute chi-squared values for a single set of parameters.
+        Compute fit scores for a single set of parameters.
 
         This method takes a set of parameters, from which it retrieves the model(s), and computes 
         the chi-squared values for the fit between the model and the data. It handles both binary 
@@ -232,6 +382,16 @@ class AtmFit:
             # slice data to regions for chi^2 computation
             dst_A_w_slc, dst_A_f_slc = self.slicedata(self.wavA, fluA, self.user_dicA)
             dst_B_w_slc, dst_B_f_slc = self.slicedata(self.wavB, fluB, self.user_dicB) if self.binary else (None, None)
+            ivar_A_slc = (
+                self.slicedata(self.wavA, self.ivarA, self.user_dicA)[1]
+                if self.ivarA is not None
+                else None
+            )
+            ivar_B_slc = (
+                self.slicedata(self.wavB, self.ivarB, self.user_dicB)[1]
+                if self.binary and self.ivarB is not None
+                else None
+            )
             mod_A_w_slc, mod_A_f_slc = self.slicedata(modA_w, modA_f, self.user_dicA)
             mod_B_w_slc, mod_B_f_slc = self.slicedata(modB_w, modB_f, self.user_dicB) if self.binary else (None, None)
 
@@ -246,26 +406,48 @@ class AtmFit:
 
             # crop nebular emission from disentangled spectrum and model of star B
             if self.crop_nebular:
+                if ivar_B_slc is not None:
+                    _, ivar_B_slc = self.crop_data(
+                        dst_B_w_slc,
+                        ivar_B_slc,
+                        [[4100, 4104], [4338, 4346]],
+                    )
                 dst_B_w_slc, dst_B_f_slc = self.crop_data(dst_B_w_slc, dst_B_f_slc, [[4100, 4104], [4338, 4346]])
                 mod_B_w_slc, mod_B_f_slc = self.crop_data(mod_B_w_slc, mod_B_f_slc, [[4100, 4104], [4338, 4346]])
 
             # compute the chi2 values
-            # if modA_f.size and modB_f.size:
-            ndataA = len(mod_A_f_slc)
-            chi2A = self.chi2(dst_A_f_slc, mod_A_f_slc)
-            chi2redA = chi2A/(ndataA-self.nparams)
+            ndataA = self._fitted_sample_count(dst_A_f_slc, ivar_A_slc)
+            chi2A = self.chi2(
+                dst_A_f_slc,
+                mod_A_f_slc,
+                inverse_variance=ivar_A_slc,
+            )
+            dofA = ndataA - self._component_parameter_count('A')
+            if dofA <= 0:
+                raise ValueError("spectrum A has insufficient fitted samples")
+            chi2redA = chi2A / dofA
 
             if self.binary:
-                ndataB = len(mod_B_f_slc)    
-                chi2B = self.chi2(dst_B_f_slc, mod_B_f_slc)
+                ndataB = self._fitted_sample_count(dst_B_f_slc, ivar_B_slc)
+                chi2B = self.chi2(
+                    dst_B_f_slc,
+                    mod_B_f_slc,
+                    inverse_variance=ivar_B_slc,
+                )
                 chi2_tot = chi2A + chi2B
                 ndata = ndataA + ndataB
-                chi2redB = chi2B/(ndataB-self.nparams)
-                chi2r_tot = chi2redA + chi2redB
+                dofB = ndataB - self._component_parameter_count('B')
+                if dofB <= 0:
+                    raise ValueError("spectrum B has insufficient fitted samples")
+                chi2redB = chi2B / dofB
+                total_dof = ndata - self.nparams
+                if total_dof <= 0:
+                    raise ValueError("fit has insufficient fitted samples")
+                chi2r_tot = chi2_tot / total_dof
             else:
                 chi2_tot = chi2A
                 ndata = ndataA
-                chi2r_tot = chi2redA
+                chi2r_tot = chi2A / (ndataA - self.nparams)
 
             if chi2_tot < 0:
                 raise ValueError("\nWarning: chi2 < O")
@@ -292,11 +474,12 @@ class AtmFit:
 
     def compute_chi2(self, dic_lines_A, dic_lines_B):
         """
-        Perform parameter grid search and compute chi-squared values for different model combinations.
+        Perform a parameter-grid search and compute model-comparison scores.
 
-        This function iterates over a grid of parameter values to compare synthetic spectra models to
-        observations and compute the chi-squared values for the fits. The chi-squared values are calculated
-        for both star A and star B using the provided dictionaries of spectral lines.
+        With flux errors or inverse variances supplied at construction, the
+        scores are weighted chi-square values. Otherwise they are unweighted
+        residual sums of squares. The score definition is recorded in the
+        returned DataFrame attributes.
 
         :param dic_lines_A: Dictionary defining the spectral lines for star A with 'region' and 'HeH_region' information.
                             Type: dict
@@ -312,13 +495,16 @@ class AtmFit:
         
         self.dic_lines_A = dic_lines_A
         self.dic_lines_B = dic_lines_B
-        nparams = len(self.grid)
+        nparams = sum(
+            self._grid_parameter_varies(name) for name in self.grid
+        )
         self.nparams = nparams
 
         # retrieve wavelength from the disentangled spectra
         wavA, wavB = self.get_wave(shift=self.wavelength_shift)
         self.wavA = wavA
         self.wavB = wavB
+        self._prepare_fit_weights()
         # setting the dictionaries with the spectral lines selected for the fit
         usr_dicA = self.user_dic(dic_lines_A)
         usr_dicB = self.user_dic(dic_lines_B) if self.binary else {}
@@ -370,6 +556,8 @@ class AtmFit:
         tf = time.time()
         print('Computation completed in: ' + str(timedelta(seconds=tf-t0)) + ' [s] \n')
         output = pd.DataFrame.from_dict(result_dic)
+        if not output.empty:
+            output = self._attach_result_metadata(output, output.iloc[0]['ndata'])
         # print('total number of points used in the fit:', ndata)
         return output
 
@@ -417,8 +605,11 @@ class AtmFit:
                 validate='many_to_many',
             )
             output['chi2_tot'] = output['chi2A'] + output['chi2B']
-            output['chi2r_tot'] = output['chi2redA'] + output['chi2redB']
             output['ndata'] = ndata_a + ndata_b
+            total_dof = ndata_a + ndata_b - self.nparams
+            if total_dof <= 0:
+                raise ValueError("fit has insufficient fitted samples")
+            output['chi2r_tot'] = output['chi2_tot'] / total_dof
             columns = list(self.grid) + [
                 'chi2_tot',
                 'chi2A',
@@ -428,13 +619,15 @@ class AtmFit:
                 'chi2redB',
                 'ndata',
             ]
-            return output.loc[:, columns]
+            output = output.loc[:, columns]
+            return self._attach_result_metadata(output, ndata_a + ndata_b)
 
         expected_keys = {'T', 'g', 'v'}
         if set(self.grid) != expected_keys:
             raise ValueError("rendered single-star grids require T, g, and v")
         observed_flux, _ = self.get_flux()
-        return self._score_rendered_single_star(observed_flux)
+        output = self._score_rendered_single_star(observed_flux)
+        return self._attach_result_metadata(output, output.iloc[0]['ndata'])
 
     def _score_rendered_component(
         self,
@@ -455,6 +648,7 @@ class AtmFit:
             line_dictionary = self.user_dicB
             chi2_column = 'chi2B'
             reduced_column = 'chi2redB'
+        inverse_variance = self.ivarA if component == 'A' else self.ivarB
         observed_flux = np.asarray(observed_flux, dtype=float)
 
         observed_slice_wavelength, observed_slice_flux = self.slicedata(
@@ -462,15 +656,35 @@ class AtmFit:
             observed_flux,
             line_dictionary,
         )
+        observed_slice_ivar = (
+            self.slicedata(
+                observed_wavelength,
+                inverse_variance,
+                line_dictionary,
+            )[1]
+            if inverse_variance is not None
+            else None
+        )
         if component == 'B' and self.crop_nebular:
+            if observed_slice_ivar is not None:
+                _, observed_slice_ivar = self.crop_data(
+                    observed_slice_wavelength,
+                    observed_slice_ivar,
+                    [[4100, 4104], [4338, 4346]],
+                )
             observed_slice_wavelength, observed_slice_flux = self.crop_data(
                 observed_slice_wavelength,
                 observed_slice_flux,
                 [[4100, 4104], [4338, 4346]],
             )
 
-        ndata = len(observed_slice_flux)
-        degrees_of_freedom = ndata - self.nparams
+        ndata = self._fitted_sample_count(
+            observed_slice_flux,
+            observed_slice_ivar,
+        )
+        degrees_of_freedom = (
+            ndata - self._component_parameter_count(component)
+        )
         if degrees_of_freedom <= 0:
             raise ValueError(
                 f"component {component} has {ndata} fitted samples but "
@@ -509,7 +723,11 @@ class AtmFit:
                     component,
                     light_ratio,
                 )
-                chi2_value = self.chi2(observed_slice_flux, scaled_model_flux)
+                chi2_value = self.chi2(
+                    observed_slice_flux,
+                    scaled_model_flux,
+                    inverse_variance=observed_slice_ivar,
+                )
                 row = dict(zip(parameter_keys, values))
                 row.update(
                     {
@@ -586,7 +804,19 @@ class AtmFit:
             observed_flux,
             self.user_dicA,
         )
-        ndata = len(observed_slice_flux)
+        observed_slice_ivar = (
+            self.slicedata(
+                observed_wavelength,
+                self.ivarA,
+                self.user_dicA,
+            )[1]
+            if self.ivarA is not None
+            else None
+        )
+        ndata = self._fitted_sample_count(
+            observed_slice_flux,
+            observed_slice_ivar,
+        )
         degrees_of_freedom = ndata - self.nparams
         if degrees_of_freedom <= 0:
             raise ValueError(
@@ -611,7 +841,11 @@ class AtmFit:
                 model_flux,
                 self.user_dicA,
             )
-            chi2_value = self.chi2(observed_slice_flux, model_slice_flux)
+            chi2_value = self.chi2(
+                observed_slice_flux,
+                model_slice_flux,
+                inverse_variance=observed_slice_ivar,
+            )
             rows.append(
                 {
                     'T': teff,
@@ -920,17 +1154,38 @@ class AtmFit:
             # print('join==False. Length of new spectrum:', len(new_spectrum))
             return new_spectrum
 
-    def chi2(self, obs, exp):
-        """
-        Compute the chi-squared (χ²) statistic for comparing observed and expected data.
+    @staticmethod
+    def _fitted_sample_count(observed, inverse_variance=None):
+        """Count samples contributing to one score."""
 
-        This function calculates the chi-squared statistic for assessing the goodness-of-fit between
-        observed and expected data, based on their differences.
+        observed = np.asarray(observed, dtype=float)
+        if inverse_variance is None:
+            return int(observed.size)
+        inverse_variance = np.asarray(inverse_variance, dtype=float)
+        if inverse_variance.shape != observed.shape:
+            raise ValueError(
+                "inverse variance and observed flux arrays must have the same shape"
+            )
+        return int(np.count_nonzero(inverse_variance > 0))
+
+    def chi2(self, obs, exp, flux_error=None, inverse_variance=None):
+        """
+        Compute a weighted chi-square or legacy squared-residual score.
+
+        Supplying one-sigma errors or inverse variances produces a statistical
+        chi-square under independent Gaussian pixel errors. Without either,
+        the return value is an unweighted residual sum of squares and must not
+        be interpreted as chi-square.
 
         :param obs: Observed data array.
                     Type: numpy array or list of floats
         :param exp: Expected data array.
                     Type: numpy array or list of floats
+        :param flux_error: Positive one-sigma errors, either a scalar or an
+                    array matching ``obs``.
+        :param inverse_variance: Non-negative inverse variances, either a
+                    scalar or an array matching ``obs``. Zero-valued pixels
+                    are excluded.
 
         :return: Calculated chi-squared statistic.
                 Type: float
@@ -941,7 +1196,48 @@ class AtmFit:
         exp = np.asarray(exp, dtype=float)
         if obs.shape != exp.shape:
             raise ValueError("observed and expected flux arrays must have the same shape")
-        return float(np.sum((obs - exp) ** 2))
+        if flux_error is not None and inverse_variance is not None:
+            raise ValueError(
+                "use either flux_error or inverse_variance, not both"
+            )
+        if flux_error is not None:
+            errors = self._as_pixel_array(flux_error, obs.size, 'flux_error')
+            errors = errors.reshape(obs.shape)
+            if not np.all(np.isfinite(errors)) or np.any(errors <= 0):
+                raise ValueError("flux_error must contain finite positive values")
+            inverse_variance = 1.0 / errors**2
+        elif inverse_variance is not None:
+            inverse_variance = self._as_pixel_array(
+                inverse_variance,
+                obs.size,
+                'inverse_variance',
+            ).reshape(obs.shape)
+            if (
+                not np.all(np.isfinite(inverse_variance))
+                or np.any(inverse_variance < 0)
+            ):
+                raise ValueError(
+                    "inverse_variance must contain finite non-negative values"
+                )
+            if not np.any(inverse_variance > 0):
+                raise ValueError(
+                    "inverse_variance must contain at least one positive value"
+                )
+
+        if inverse_variance is None:
+            if not np.all(np.isfinite(obs)) or not np.all(np.isfinite(exp)):
+                raise ValueError("observed and expected flux must be finite")
+            return float(np.sum((obs - exp) ** 2))
+
+        fitted = inverse_variance > 0
+        if not np.all(np.isfinite(obs[fitted])) or not np.all(
+            np.isfinite(exp[fitted])
+        ):
+            raise ValueError(
+                "observed and expected flux must be finite where weight is positive"
+            )
+        residual = obs[fitted] - exp[fitted]
+        return float(np.sum(residual**2 * inverse_variance[fitted]))
 
     def crop_data(self, x_data, y_data, wavelength_ranges):
         """

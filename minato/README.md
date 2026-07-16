@@ -32,10 +32,18 @@ keeps large binary-star grid searches fast and transparent. Its fit table
 remains in memory, and a combined profile-score corner plot presents the
 one-dimensional profiles and two-dimensional correlations without creating an
 output file. Because the tutorial inputs have no per-pixel uncertainties, the
-figure reports nominal profiled intervals rather than reduced chi-squared or
-formal uncertainties. Its diagonal panels retain the score profiles, while
-nested lower-panel rank regions show the relatively best parts of the coarse
-grid without presenting them as formal confidence regions. The
+figure deliberately reports no formal intervals. Its diagonal panels retain
+the score profiles, while nested lower-panel rank regions show the relatively
+best parts of the coarse grid without presenting them as confidence regions.
+
+For science spectra with independent pixel errors, `AtmFit` accepts positive
+one-sigma errors through `flux_errorA`/`flux_errorB`, or non-negative inverse
+variances through `inverse_varianceA`/`inverse_varianceB`. Weighted fits
+calculate a genuine chi-square and record that definition in the result-table metadata. The corner
+plot then uses unscaled delta chi-square, one-parameter intervals, and the same
+two-parameter 68.3%, 95.4%, and 99.7% thresholds in every correlation panel.
+Unweighted fits remain available for ranking models but cannot request formal
+confidence contours. The
 standalone result plots
 remain available through `compute_bestfit` and `plot_corr`. The two remaining
 legacy spectral-analysis

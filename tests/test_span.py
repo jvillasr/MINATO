@@ -84,6 +84,50 @@ class SpanLightRatioLikelihoodTests(unittest.TestCase):
         self.assertGreaterEqual(score, 0.0)
         self.assertAlmostEqual(score, 1.3**2)
 
+    def test_chi2_uses_flux_errors_when_supplied(self):
+        fit = AtmFit(None, None)
+        observed = np.array([1.0, 0.8, 0.9])
+        expected = np.array([1.0, 0.7, 1.0])
+
+        score = fit.chi2(
+            observed,
+            expected,
+            flux_error=np.array([0.1, 0.05, 0.2]),
+        )
+
+        self.assertAlmostEqual(score, 4.25)
+
+    def test_zero_inverse_variance_masks_a_pixel(self):
+        fit = AtmFit(None, None)
+        observed = np.array([1.0, np.nan, 0.9])
+        expected = np.array([1.0, np.nan, 1.0])
+
+        score = fit.chi2(
+            observed,
+            expected,
+            inverse_variance=np.array([100.0, 0.0, 25.0]),
+        )
+
+        self.assertAlmostEqual(score, 0.25)
+
+    def test_binary_weighting_requires_both_components(self):
+        with self.assertRaisesRegex(ValueError, "both spectrum A and spectrum B"):
+            AtmFit(
+                None,
+                None,
+                binary=True,
+                flux_errorA=0.01,
+            )
+
+    def test_flux_errors_and_inverse_variances_are_mutually_exclusive(self):
+        with self.assertRaisesRegex(ValueError, "either flux_errorA"):
+            AtmFit(
+                None,
+                None,
+                flux_errorA=0.01,
+                inverse_varianceA=10_000,
+            )
+
     def test_compute_single_set_scores_light_ratios_in_common_noise_scale(self):
         wavelength = np.linspace(4999.0, 5001.0, 401)
         lrat0 = 0.30
@@ -353,6 +397,51 @@ class SpanRenderedGridTests(unittest.TestCase):
             self.assertEqual(len(results), 2)
             self.assertAlmostEqual(best["T"], 32_000)
             self.assertAlmostEqual(best["chi2_tot"], 0.0, places=12)
+            self.assertEqual(results.attrs["score_kind"], "rss")
+
+    def test_weighted_fit_records_statistical_metadata(self):
+        wavelength = np.linspace(4318.0, 4364.0, 1001)
+        rendered_grid = RenderedAtmosphereGrid(
+            {
+                (30_000, 4.0, 50): Spectrum(
+                    wavelength,
+                    self._absorption(wavelength, 0.20),
+                ),
+                (32_000, 4.0, 50): Spectrum(
+                    wavelength,
+                    self._absorption(wavelength, 0.35),
+                ),
+            }
+        )
+
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            spectrum = Path(directory) / "star.txt"
+            observed = rendered_grid.get_model(32_000, 4.0, 50).flux.copy()
+            observed[500] += 0.02
+            np.savetxt(spectrum, np.column_stack([wavelength, observed]))
+            fit = AtmFit(
+                spectrum,
+                None,
+                grid={"T": [30_000, 32_000], "g": [4.0], "v": [50]},
+                wavelength_shift=0.0,
+                modelsA_grid=rendered_grid,
+                flux_errorA=0.01,
+            )
+
+            results = fit.compute_chi2([4340], None)
+            best = results.loc[results["chi2_tot"].idxmin()]
+
+            self.assertEqual(results.attrs["score_kind"], "chi2")
+            self.assertEqual(results.attrs["n_parameters"], 1)
+            self.assertEqual(
+                results.attrs["degrees_of_freedom"],
+                int(best["ndata"] - 1),
+            )
+            self.assertAlmostEqual(best["chi2_tot"], 4.0)
+            self.assertAlmostEqual(
+                best["chi2r_tot"],
+                best["chi2_tot"] / results.attrs["degrees_of_freedom"],
+            )
 
     def test_rendered_grid_and_model_directories_are_mutually_exclusive(self):
         wavelength = np.array([4339.0, 4340.0, 4341.0])
@@ -588,13 +677,10 @@ class SpanResultPlotTests(unittest.TestCase):
         self.assertEqual(len(profile_lines), 3)
         self.assertGreater(len(reference_lines), 3)
         self.assertIn(
-            "Best 10% of grid",
+            "Best 10% of panel grid",
             [text.get_text() for text in figure.legends[0].get_texts()],
         )
-        self.assertTrue(
-            all("^{+" in axis.get_title() and "}_{-" in axis.get_title()
-                for axis in diagonal_axes)
-        )
+        self.assertTrue(all("^{+" not in axis.get_title() for axis in diagonal_axes))
         self.assertTrue(diagonal_axes[0].get_title().startswith("$f_B ="))
         self.assertTrue(
             all(axis.title.get_fontsize() >= 22 for axis in diagonal_axes)
@@ -608,7 +694,7 @@ class SpanResultPlotTests(unittest.TestCase):
         self.assertEqual(figure.axes[6].get_xlabel(), r"$f_B$")
         self.assertEqual(
             diagonal_axes[0].get_ylabel(),
-            "Scaled score above best fit",
+            "Squared-residual score above best fit",
         )
         np.testing.assert_allclose(
             read_results._profile_confidence_levels(1),
@@ -622,6 +708,105 @@ class SpanResultPlotTests(unittest.TestCase):
         )
         self.assertEqual(output_files, [])
         pd.testing.assert_frame_equal(results, original)
+
+    def test_confidence_contours_require_weighted_chi2(self):
+        results = self._correlation_results()
+
+        with self.assertRaisesRegex(ValueError, "weighted chi-square"):
+            read_results.plot_corner(
+                results,
+                {
+                    "lr": [0.1, 0.2, 0.3],
+                    "TA": [30_000, 32_000, 34_000],
+                    "gA": [3.8, 4.0, 4.2],
+                },
+                contour_mode="confidence",
+            )
+
+    def test_weighted_profiles_use_unscaled_delta_chi2(self):
+        results = self._correlation_results()
+        results["chi2_tot"] += 125.0
+        results.attrs.update(
+            {
+                "score_kind": "chi2",
+                "n_parameters": 3,
+                "degrees_of_freedom": 97,
+            }
+        )
+        parameters = {
+            "lr": [0.1, 0.2, 0.3],
+            "TA": [30_000, 32_000, 34_000],
+            "gA": [3.8, 4.0, 4.2],
+        }
+
+        work, score, _, values, _, score_kind = (
+            read_results._prepare_profile_table(results, parameters)
+        )
+
+        self.assertEqual(score_kind, "chi2")
+        np.testing.assert_allclose(
+            work["_span_delta_score"],
+            score - score.min(),
+        )
+        lr_temperature = read_results._profile_2d(
+            work,
+            "lr",
+            "TA",
+            values["lr"],
+            values["TA"],
+        )
+        lr_gravity = read_results._profile_2d(
+            work,
+            "lr",
+            "gA",
+            values["lr"],
+            values["gA"],
+        )
+        np.testing.assert_allclose(
+            np.nanmin(lr_temperature, axis=0),
+            np.nanmin(lr_gravity, axis=0),
+        )
+
+    def test_weighted_corner_uses_joint_confidence_regions(self):
+        results = self._correlation_results()
+        raw_score = results["chi2_tot"].copy()
+        results["chi2_tot"] = 100.0 + 20.0 * (raw_score - raw_score.min())
+        results.attrs.update(
+            {
+                "score_kind": "chi2",
+                "n_parameters": 3,
+                "degrees_of_freedom": 97,
+            }
+        )
+        parameters = {
+            "lr": [0.1, 0.2, 0.3],
+            "TA": [30_000, 32_000, 34_000],
+            "gA": [3.8, 4.0, 4.2],
+        }
+
+        with patch("matplotlib.pyplot.show"):
+            figure = read_results.plot_corner(
+                results,
+                parameters,
+                interp="pchip",
+                grid_size=30,
+            )
+            figure.canvas.draw()
+
+        diagonal_axes = [figure.axes[index * 3 + index] for index in range(3)]
+        legend_labels = [text.get_text() for text in figure.legends[0].get_texts()]
+        self.assertEqual(diagonal_axes[0].get_ylabel(), r"$\Delta\chi^2$")
+        self.assertIn("68.3% joint region", legend_labels)
+        self.assertTrue(
+            all(
+                any(
+                    np.isclose(line.get_ydata(), 1.0).all()
+                    for line in axis.lines
+                    if len(np.atleast_1d(line.get_ydata())) > 0
+                )
+                for axis in diagonal_axes
+            )
+        )
 
 
 if __name__ == "__main__":
