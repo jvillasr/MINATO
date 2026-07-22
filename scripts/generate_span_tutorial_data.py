@@ -29,6 +29,8 @@ from minato.synthetic.physics import (
 
 DEFAULT_LINES = (4009, 4026, 4102, 4121, 4144, 4233, 4267, 4340, 4388, 4471, 4553)
 DEFAULT_DISENTANGLING_ITERATIONS = 500
+DEFAULT_UNCERTAINTY_SAMPLES = 100
+DEFAULT_UNCERTAINTY_SEED = 20260722
 LIGHT_RATIO_WINDOWS = (
     (3990.0, 4000.0),
     (4005.0, 4033.0),
@@ -232,15 +234,15 @@ def generate_inputs(
         shifted_a = doppler_shift(wavelength, broad_a, rv_a)
         shifted_b = doppler_shift(wavelength, broad_b, rv_b)
         composite = (1.0 - light_fraction_b) * shifted_a + light_fraction_b * shifted_b
-        noisy_flux, _ = add_noise(composite, snr, seed=seed + index)
+        noisy_flux, flux_error = add_noise(composite, snr, seed=seed + index)
         name = f"epoch_{index:02d}"
         epoch_names.append(name)
         np.savetxt(
             spectra_directory / f"{name}.txt",
-            np.column_stack([wavelength, noisy_flux]),
-            fmt="%.6f %.8f",
+            np.column_stack([wavelength, noisy_flux, flux_error]),
+            fmt="%.6f %.8f %.8f",
             header=(
-                "wavelength_A normalised_flux\n"
+                "wavelength_A normalised_flux flux_error_1sigma\n"
                 f"phase={phase:.6f} mjd={epoch:.6f} "
                 f"rv_primary_kms={rv_a:.6f} rv_secondary_kms={rv_b:.6f} "
                 f"snr={snr:g} seed={seed + index}"
@@ -323,8 +325,10 @@ def disentangle_inputs(
     tutorial_output_directory,
     *,
     iterations=DEFAULT_DISENTANGLING_ITERATIONS,
+    uncertainty_samples=DEFAULT_UNCERTAINTY_SAMPLES,
+    uncertainty_seed=DEFAULT_UNCERTAINTY_SEED,
 ):
-    """Run the development-only shift-and-add adaptation and copy its outputs."""
+    """Disentangle the tutorial epochs and propagate their Gaussian errors."""
     os.environ.setdefault("MPLBACKEND", "Agg")
     from minato.contrib.spdis import SpecDisent
 
@@ -353,6 +357,20 @@ def disentangle_inputs(
         str(spectra_directory) + os.sep,
         extension=".txt",
     )
+    epoch_errors = []
+    for epoch_path in map(Path, disentangler.specnames):
+        epoch_data = np.loadtxt(epoch_path, comments="#", ndmin=2)
+        if epoch_data.shape[1] < 3:
+            raise ValueError(
+                f"epoch spectrum has no flux-error column: {epoch_path}"
+            )
+        epoch_errors.append(np.asarray(epoch_data[:, 2], dtype=float))
+    expected_epochs = int(provenance["observation"]["number_of_epochs"])
+    if len(epoch_errors) != expected_epochs:
+        raise ValueError(
+            f"expected {expected_epochs} epoch spectra, found {len(epoch_errors)}"
+        )
+    epoch_errors = np.stack(epoch_errors)
     primary_fraction = 1.0 - float(provenance["secondary"]["light_fraction"])
     disentangler.get_disspec(
         lguess1=primary_fraction,
@@ -363,23 +381,27 @@ def disentangle_inputs(
         PLOTEXTREMES=False,
         NebOff=True,
         NumItrFinal=int(iterations),
+        flux_errors=epoch_errors,
+        uncertainty_samples=int(uncertainty_samples),
+        uncertainty_seed=int(uncertainty_seed),
     )
 
-    generated = Path(disentangler.working_path)
-    primary_source = next(generated.glob("ADIS_*.txt"))
-    secondary_source = next(generated.glob("BDIS_*.txt"))
+    primary_source = Path(disentangler.output_pathA)
+    secondary_source = Path(disentangler.output_pathB)
     tutorial_output.mkdir(parents=True, exist_ok=True)
     header = (
         "Synthetic disentangled spectrum for the MINATO SPAN tutorial.\n"
         "Generated from PoWR GAL-OB-Vd3 models 32-40 and 22-42; see provenance.json.\n"
-        "wavelength_A normalised_flux"
+        "wavelength_A normalised_flux marginal_flux_error_1sigma"
     )
     for source, target in (
         (primary_source, primary_target),
         (secondary_source, secondary_target),
     ):
         data = np.loadtxt(source)
-        np.savetxt(target, data[:, :2], fmt="%.6f %.8f", header=header)
+        if data.shape[1] < 3:
+            raise RuntimeError(f"spdis did not produce flux errors: {source}")
+        np.savetxt(target, data[:, :3], fmt="%.6f %.8f %.8f", header=header)
     release_provenance = json.loads(json.dumps(provenance))
     for source in release_provenance["inputs"].values():
         source["path"] = Path(source["path"]).name
@@ -388,6 +410,20 @@ def disentangle_inputs(
         "upstream": "https://github.com/TomerShenar/Disentangling_Shift_And_Add",
         "iterations": int(iterations),
         "lines_A": list(DEFAULT_LINES),
+        "uncertainty": {
+            "method": "parametric Monte Carlo through minato.contrib.spdis",
+            "samples": int(uncertainty_samples),
+            "seed": int(uncertainty_seed),
+            "input_noise": "independent Gaussian per-pixel errors",
+            "conditioning": (
+                "fixed orbit, epoch weights, preprocessing, and reference "
+                "light fraction"
+            ),
+            "output": (
+                "third spectrum column is the marginal one-sigma flux error; "
+                "wavelength and component cross-covariance are not stored"
+            ),
+        },
         "method_citations": [
             "Gonzalez & Levato (2006), A&A, 448, 283",
             "Shenar et al. (2020), A&A, 639, A6",
@@ -420,6 +456,21 @@ def build_parser():
         action="store_true",
         help="Generate the ten epochs without running minato.contrib.spdis.",
     )
+    parser.add_argument(
+        "--uncertainty-samples",
+        type=int,
+        default=DEFAULT_UNCERTAINTY_SAMPLES,
+        help=(
+            "Number of fixed-orbit noise realisations used for marginal "
+            f"flux errors (default: {DEFAULT_UNCERTAINTY_SAMPLES})."
+        ),
+    )
+    parser.add_argument(
+        "--uncertainty-seed",
+        type=int,
+        default=DEFAULT_UNCERTAINTY_SEED,
+        help=f"Random seed for flux-error propagation (default: {DEFAULT_UNCERTAINTY_SEED}).",
+    )
     return parser
 
 
@@ -441,6 +492,8 @@ def main():
             args.work_directory,
             args.tutorial_output_directory,
             iterations=args.iterations,
+            uncertainty_samples=args.uncertainty_samples,
+            uncertainty_seed=args.uncertainty_seed,
         )
 
 

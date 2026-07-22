@@ -1,5 +1,60 @@
 # MINATO Notes
 
+## 2026-07-22 - Propagate shift-and-add flux errors into SPAN
+
+Implementation:
+- Added fixed-orbit parametric Monte Carlo propagation to
+  `minato.contrib.spdis.SpecDisent.get_disspec`. A scalar, common pixel array,
+  or epoch-by-pixel array of independent Gaussian one-sigma errors can now be
+  propagated while keeping the orbit, epoch weights, preprocessing, and
+  reference light ratio fixed.
+- The nominal spectra remain unchanged. Monte Carlo standard deviations are
+  saved as a third component-spectrum column on the same reference light-ratio
+  scale. Optional retained A/B realisations preserve the information needed
+  to calculate wavelength and cross-component covariance.
+- The SPAN tutorial generator now keeps the error returned by `add_noise`,
+  propagates it through `spdis` with 100 realisations and seed `20260722`, and
+  records the conditioning assumptions in `provenance.json`. The notebook
+  converts the marginal errors to inverse variance, masks zero-spread pixels,
+  and runs SPAN once; the reference ratio is not refitted by `spdis` and no
+  post-SPAN disentangling is required.
+
+Scientific scope:
+- The generated error columns are conditional on the fixed orbital solution
+  and reference scaling. They describe observational-noise propagation, not
+  uncertainty in the physical light ratio later fitted by SPAN.
+- Marginal errors enable diagonal weighted SPAN profiles, but disentangling
+  also introduces wavelength covariance and A/B cross-covariance. Exact
+  coverage therefore requires a future joint-covariance likelihood or
+  validation from retained realisations.
+- Regenerated the checked-in tutorial fixtures from the corrected local PoWR
+  products. The normalised spectra came from
+  `/nexus/posix0/MIA-astro-env/hxr/jvillasr/models/PoWR/griddl-gal-ob-vd3-line`;
+  the calibrated spectra came from the December-2025 corrected grid under
+  `/nexus/posix0/MIA-astro-env/hxr/jvillasr/SDSS/synth_spec_sim/models/powr_models/griddl-gal-ob-vd3-line_calib_dec2025`.
+  No product from the known `bug_version` directory was used. The corrected
+  inputs reproduce the recorded secondary light fraction
+  `0.107878499688725` exactly over the tutorial wavelength range.
+- The checked-in fixtures now contain wavelength, nominal flux, and marginal
+  one-sigma flux error. The notebook retains an explicit unweighted fallback
+  for external legacy two-column inputs.
+
+Validation:
+- `.venv/bin/python -m unittest discover -s tests` passed 97 tests with one
+  existing optional skip. The run emitted the existing single-device JAX and
+  `fork()` warnings.
+- A focused four-epoch integration test generated three-column component
+  spectra, recorded Monte Carlo provenance, converted zero-safe marginal
+  errors to inverse variance, and verified that SPAN selected weighted
+  chi-square scoring.
+- The full ten-epoch tutorial calculation completed with 500 shift-and-add
+  iterations and 100 noise realisations. Both regenerated spectra contain
+  16,839 finite three-column rows and positive errors at every pixel. Their
+  nominal wavelength and flux columns are exactly unchanged. Median marginal
+  errors are `0.0032634` for the primary and `0.02728225` for the secondary.
+- Python compilation, notebook JSON parsing, and repository whitespace checks
+  passed.
+
 ## 2026-07-16 - Add statistical SPAN profile inference
 
 Implementation:

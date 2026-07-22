@@ -39,19 +39,19 @@
   "inputs": {
     "primary_normalised": {
       "path": "gal-ob-vd3_32-40_line.txt",
-      "sha256": "fab0f8e0b723d44af16a31d231522905af2519106e074c5f94aab6a6a587b369"
+      "sha256": "3766bc861b502e7a3c3c902e9c057afa87643da14c3910727a818c203cb69ed0"
     },
     "secondary_normalised": {
       "path": "gal-ob-vd3_22-42_line.txt",
-      "sha256": "0ef51b65d26a093cc0d98a838c249d3640ef0df11580fe8613af64b753dfc79e"
+      "sha256": "e7da68989814f2d01b3bce95c9541a1fb0b2f5ff153600cb0dcc762ff3b46df0"
     },
     "primary_calibrated": {
       "path": "gal-ob-vd3_32-40_line_calib.txt",
-      "sha256": "2fd978df4f72df7d179818b9866318272845c92828acba1a006a2e1d23ff1963"
+      "sha256": "04bb7a78d6531a5e314efd664e70f859bd2f94ddd41266fcb42acf246983b8e5"
     },
     "secondary_calibrated": {
       "path": "gal-ob-vd3_22-42_line_calib.txt",
-      "sha256": "f1c4d80ea70afc776f66c77b96f2fad8f4b26ddec25ca3e8838b63aab20cd3e2"
+      "sha256": "ffc91e5b12df7e3d4b61b4cef4056ed64a6f2227e2f1e08a030ec7f43124a65d"
     }
   },
   "disentangling": {
@@ -71,6 +71,14 @@
       4471,
       4553
     ],
+    "uncertainty": {
+      "method": "parametric Monte Carlo through minato.contrib.spdis",
+      "samples": 100,
+      "seed": 20260722,
+      "input_noise": "independent Gaussian per-pixel errors",
+      "conditioning": "fixed orbit, epoch weights, preprocessing, and reference light fraction",
+      "output": "third spectrum column is the marginal one-sigma flux error; wavelength and component cross-covariance are not stored"
+    },
     "method_citations": [
       "Gonzalez & Levato (2006), A&A, 448, 283",
       "Shenar et al. (2020), A&A, 639, A6",

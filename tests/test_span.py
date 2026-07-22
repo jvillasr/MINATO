@@ -14,7 +14,10 @@ from minato.contrib.spdis import SpecDisent
 from minato.synthetic import RenderedAtmosphereGrid, Spectrum
 from scripts.generate_span_tutorial_data import (
     DEFAULT_DISENTANGLING_ITERATIONS,
+    DEFAULT_UNCERTAINTY_SAMPLES,
+    DEFAULT_UNCERTAINTY_SEED,
     build_parser,
+    disentangle_inputs,
     generate_inputs,
     orbital_semi_amplitudes,
 )
@@ -494,6 +497,74 @@ class SpanTutorialGenerationTests(unittest.TestCase):
             DEFAULT_DISENTANGLING_ITERATIONS,
         )
 
+    def test_uncertainty_generation_defaults_are_reproducible(self):
+        parser = build_parser()
+
+        self.assertEqual(
+            parser.get_default("uncertainty_samples"),
+            DEFAULT_UNCERTAINTY_SAMPLES,
+        )
+        self.assertEqual(
+            parser.get_default("uncertainty_seed"),
+            DEFAULT_UNCERTAINTY_SEED,
+        )
+
+    def test_spdis_flux_error_sampling_uses_fixed_reference_scale(self):
+        spectrum = SpecDisent.__new__(SpecDisent)
+        wavelength = np.array([4000.0, 4001.0, 4002.0])
+        spectrum.ObsSpecs = np.array(
+            [
+                np.column_stack([wavelength, np.ones(3)]),
+                np.column_stack([wavelength, np.ones(3)]),
+            ]
+        )
+        spectrum.Triple = False
+        nominal_observations = spectrum.ObsSpecs.copy()
+
+        def fake_disentangle(*args, **kwargs):
+            mean_flux = np.mean(spectrum.ObsSpecs[:, :, 1], axis=0)
+            perturbation = mean_flux - 1.0
+            return 1.0 + perturbation, 1.0 + 2.0 * perturbation, np.ones(3), np.nan
+
+        spectrum.disentangle = fake_disentangle
+        error_a, error_b, error_c = spectrum._estimate_flux_uncertainties(
+            0.1,
+            5,
+            123,
+            np.zeros(2),
+            np.zeros(2),
+            wavelength,
+            0.8,
+            0.2,
+            keep_samples=True,
+        )
+
+        rng = np.random.default_rng(123)
+        mean_perturbations = np.array(
+            [rng.normal(0.0, 0.1, size=(2, 3)).mean(axis=0) for _ in range(5)]
+        )
+        np.testing.assert_allclose(
+            error_a,
+            np.std(mean_perturbations / 0.8, axis=0, ddof=1),
+        )
+        np.testing.assert_allclose(
+            error_b,
+            np.std(2.0 * mean_perturbations / 0.2, axis=0, ddof=1),
+        )
+        np.testing.assert_allclose(error_c, 0.0)
+        np.testing.assert_allclose(spectrum.ObsSpecs, nominal_observations)
+        self.assertEqual(spectrum.flux_samplesA.shape, (5, 3))
+
+    def test_spdis_flux_error_shapes_are_validated(self):
+        shared = SpecDisent._validated_flux_errors(np.arange(1.0, 4.0), (2, 3))
+
+        self.assertEqual(shared.shape, (2, 3))
+        np.testing.assert_allclose(shared[0], shared[1])
+        with self.assertRaisesRegex(ValueError, "finite positive"):
+            SpecDisent._validated_flux_errors([0.1, 0.0, 0.1], (2, 3))
+        with self.assertRaisesRegex(ValueError, "must be a scalar"):
+            SpecDisent._validated_flux_errors(np.ones((3, 2)), (2, 3))
+
     def test_spdis_text_reader_accepts_commented_metadata(self):
         with tempfile.TemporaryDirectory(dir=".") as directory:
             path = Path(directory) / "spectrum.txt"
@@ -535,8 +606,79 @@ class SpanTutorialGenerationTests(unittest.TestCase):
             self.assertTrue((output / "provenance.json").exists())
 
             first = np.loadtxt(spectra[0])
-            self.assertEqual(first.shape[1], 2)
+            self.assertEqual(first.shape[1], 3)
             self.assertTrue(np.all(np.isfinite(first)))
+            self.assertTrue(np.all(first[:, 2] > 0))
+            self.assertEqual(np.unique(first[:, 2]).size, 1)
+
+    def test_tutorial_disentangling_writes_flux_errors_for_span(self):
+        with tempfile.TemporaryDirectory(dir=".") as directory:
+            primary_normalised, primary_calibrated = self._write_model_pair(
+                directory, "primary", depth=0.4, calibrated_scale=4.0
+            )
+            secondary_normalised, secondary_calibrated = self._write_model_pair(
+                directory, "secondary", depth=0.2, calibrated_scale=1.0
+            )
+            work = Path(directory) / "generation"
+            output = Path(directory) / "tutorial"
+            generate_inputs(
+                primary_normalised,
+                secondary_normalised,
+                primary_calibrated,
+                secondary_calibrated,
+                work,
+                number_of_epochs=4,
+                velocity_step=50.0,
+            )
+
+            primary, secondary = disentangle_inputs(
+                work,
+                output,
+                iterations=2,
+                uncertainty_samples=3,
+                uncertainty_seed=7,
+            )
+
+            primary_data = np.loadtxt(primary)
+            secondary_data = np.loadtxt(secondary)
+            saved_provenance = json.loads((output / "provenance.json").read_text())
+            self.assertEqual(primary_data.shape[1], 3)
+            self.assertEqual(secondary_data.shape[1], 3)
+            self.assertTrue(np.all(primary_data[:, 2] >= 0))
+            self.assertTrue(np.all(secondary_data[:, 2] >= 0))
+            self.assertTrue(np.any(primary_data[:, 2] > 0))
+            self.assertTrue(np.any(secondary_data[:, 2] > 0))
+            primary_ivar = np.zeros_like(primary_data[:, 2])
+            secondary_ivar = np.zeros_like(secondary_data[:, 2])
+            np.divide(
+                1.0,
+                primary_data[:, 2] ** 2,
+                out=primary_ivar,
+                where=primary_data[:, 2] > 0,
+            )
+            np.divide(
+                1.0,
+                secondary_data[:, 2] ** 2,
+                out=secondary_ivar,
+                where=secondary_data[:, 2] > 0,
+            )
+            fit = AtmFit(
+                primary,
+                secondary,
+                binary=True,
+                wavelength_shift=0.0,
+                inverse_varianceA=primary_ivar,
+                inverse_varianceB=secondary_ivar,
+            )
+            fit.wavA, fit.wavB = fit.get_wave(shift=fit.wavelength_shift)
+            fit._prepare_fit_weights()
+            self.assertEqual(fit.score_kind, "chi2")
+            np.testing.assert_allclose(fit.ivarA, primary_ivar)
+            np.testing.assert_allclose(fit.ivarB, secondary_ivar)
+            self.assertEqual(
+                saved_provenance["disentangling"]["uncertainty"]["samples"],
+                3,
+            )
 
 
 class SpanResultPlotTests(unittest.TestCase):

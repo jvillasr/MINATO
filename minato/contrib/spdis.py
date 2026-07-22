@@ -112,7 +112,9 @@ class SpecDisent:
     def get_disspec(self, lguess1=0.7, S2Nblue=4200, S2Nred=4215, GridDis=True, oneD=False, Triple=False, CleanCos=False, 
                     PLOTCONV=False, itrnumlim=30, NumItrFinal=500, PLOTITR=False, N_Itr_Plot=5, PLOTFITS=False, PLOTEXTREMES=True, 
                     NebOff=False, rmNebChi2=False, StrictNegA=True, StrictNegB=True, ContSig=3, Renormalise=False, NormPoints=None, 
-                    N_K1=15, N_K2=15, minK1=0.6, maxK1=1.4, minK2=0.01, maxK2=1.99):
+                    N_K1=15, N_K2=15, minK1=0.6, maxK1=1.4, minK2=0.01, maxK2=1.99,
+                    flux_errors=None, uncertainty_samples=0, uncertainty_seed=None,
+                    keep_uncertainty_samples=False):
         '''
         lguess1     : Primary's light contribution = f1/(f1 + f2) [Only important for scaling of final spectra].
         S2Nblue     : Initial value of wavelength range to compute S/N (for defining continuum and weighting of spectra when co-adding).
@@ -142,7 +144,34 @@ class SpecDisent:
         minK2       : Fraction of K2 used as initial point in the K2 grid. Default minK2 = 0.05*K2
         maxK2       : Fraction of K2 used as final point in the K2 grid. Default maxK2 = 1.95*K2
                     In general, use is as follows: Karr = np.arange(minK*K, maxK*K, N_K)
+        flux_errors : Independent one-sigma flux errors for the processed input
+                    spectra. Pass a scalar, one array shared by all epochs, or
+                    an array with shape (number of epochs, number of pixels).
+        uncertainty_samples : Number of parametric Monte Carlo realisations
+                    used to estimate marginal output flux errors. Zero disables
+                    uncertainty propagation; otherwise at least two samples
+                    and ``flux_errors`` are required. The orbit, epoch weights,
+                    preprocessing, and reference light ratio remain fixed.
+        uncertainty_seed : Seed for the uncertainty Monte Carlo generator.
+        keep_uncertainty_samples : Retain the component-spectrum realisations
+                    on ``self`` so callers can estimate covariance. This can
+                    require substantial memory.
         '''
+
+        lguess1 = float(lguess1)
+        if not 0.0 < lguess1 < 1.0:
+            raise ValueError("lguess1 must be strictly between zero and one")
+        uncertainty_samples = int(uncertainty_samples)
+        if uncertainty_samples < 0 or uncertainty_samples == 1:
+            raise ValueError("uncertainty_samples must be zero or at least two")
+        if uncertainty_samples and flux_errors is None:
+            raise ValueError(
+                "flux_errors are required when uncertainty_samples is non-zero"
+            )
+        if flux_errors is not None and uncertainty_samples == 0:
+            raise ValueError(
+                "set uncertainty_samples to at least two when flux_errors are supplied"
+            )
 
         self.oneD = oneD
         self.itrnumlim = itrnumlim
@@ -259,6 +288,11 @@ class SpecDisent:
         # ObsSpecs = np.array(ObsSpecs, dtype=object)
         ObsSpecs = np.array(ObsSpecs)
         self.ObsSpecs = ObsSpecs
+        if uncertainty_samples:
+            flux_errors = self._validated_flux_errors(
+                flux_errors,
+                self.ObsSpecs[:, :, 1].shape,
+            )
         # print(ObsSpecs)
 
         S2Ns = np.array(S2Ns)    
@@ -364,6 +398,33 @@ class SpecDisent:
             B = (B-1)/lguess2 + 1. 
             A = (A-1)/lguess1 + 1.
 
+        self.disentangled_wavelength = np.asarray(wavegridall, dtype=float)
+        self.disentangled_fluxA = np.asarray(A, dtype=float)
+        self.disentangled_fluxB = np.asarray(B, dtype=float)
+        self.disentangled_fluxC = np.asarray(C, dtype=float)
+        self.reference_light_fraction_primary = float(lguess1)
+        self.reference_light_fraction_secondary = float(lguess2)
+        self.flux_errorA = None
+        self.flux_errorB = None
+        self.flux_errorC = None
+        self.uncertainty_sample_count = uncertainty_samples
+        self.uncertainty_seed = uncertainty_seed
+
+        if uncertainty_samples:
+            errors = self._estimate_flux_uncertainties(
+                flux_errors,
+                uncertainty_samples,
+                uncertainty_seed,
+                vrads1,
+                vrads2,
+                wavegridall,
+                lguess1,
+                lguess2,
+                lguess3 if Triple else None,
+                keep_samples=keep_uncertainty_samples,
+            )
+            self.flux_errorA, self.flux_errorB, self.flux_errorC = errors
+
 
         fig, ax = plt.subplots(figsize=(10, 6))
         plt.plot(wavegridall, A, label='dis', zorder=1)
@@ -371,10 +432,23 @@ class SpecDisent:
         if not NebOff:
             plt.plot(wavegridall, C, label='dis')
 
-        np.savetxt(self.working_path+'ADIS_lguess2_K1K2_[line]=' + str(np.round(lguess2,2)) + '_' + str(np.round(self.K1, 2)) + '_' +  str(np.round(self.K2, 2))+ '_'  + str(self.lines) + '.txt', np.c_[wavegridall, A])
-        np.savetxt(self.working_path+'BDIS_lguess2_K1K2_[line]=' + str(np.round(lguess2,2)) + '_' + str(np.round(self.K1, 2)) + '_' + str(np.round(self.K2, 2))+ '_'  + str(self.lines) + '.txt', np.c_[wavegridall, B])
+        outputA = np.c_[wavegridall, A]
+        outputB = np.c_[wavegridall, B]
+        output_header = 'wavelength_A normalised_flux'
+        if self.flux_errorA is not None:
+            outputA = np.c_[outputA, self.flux_errorA]
+            outputB = np.c_[outputB, self.flux_errorB]
+            output_header += ' marginal_flux_error_1sigma'
+        self.output_pathA = self.working_path+'ADIS_lguess2_K1K2_[line]=' + str(np.round(lguess2,2)) + '_' + str(np.round(self.K1, 2)) + '_' +  str(np.round(self.K2, 2))+ '_'  + str(self.lines) + '.txt'
+        self.output_pathB = self.working_path+'BDIS_lguess2_K1K2_[line]=' + str(np.round(lguess2,2)) + '_' + str(np.round(self.K1, 2)) + '_' + str(np.round(self.K2, 2))+ '_'  + str(self.lines) + '.txt'
+        np.savetxt(self.output_pathA, outputA, header=output_header)
+        np.savetxt(self.output_pathB, outputB, header=output_header)
         if not NebOff:
-            np.savetxt(self.working_path+'CDIS_lguess2_K1K2_[line]=' + str(np.round(lguess2,2)) + '_' + str(np.round(self.K1, 2)) + '_' + str(np.round(self.K2, 2))+ '_'  + str(self.lines) + '.txt', np.c_[wavegridall, C])
+            outputC = np.c_[wavegridall, C]
+            if self.flux_errorC is not None:
+                outputC = np.c_[outputC, self.flux_errorC]
+            self.output_pathC = self.working_path+'CDIS_lguess2_K1K2_[line]=' + str(np.round(lguess2,2)) + '_' + str(np.round(self.K1, 2)) + '_' + str(np.round(self.K2, 2))+ '_'  + str(self.lines) + '.txt'
+            np.savetxt(self.output_pathC, outputC, header=output_header)
         plt.title('Disentangled spectra')
         ymin, ymax = ax.get_ylim()
         if ymax > 1.5:
@@ -384,6 +458,118 @@ class SpecDisent:
         plt.savefig(self.working_path+self.StarName+'_disentangled_'+self.Rangestr+'_lguess1_'+str(lguess1)+'.pdf')
         # plt.show()
         plt.close()
+
+    @staticmethod
+    def _validated_flux_errors(flux_errors, observation_shape):
+        """Return independent input errors broadcast across epochs."""
+
+        _, number_of_pixels = observation_shape
+        errors = np.asarray(flux_errors, dtype=float)
+        if errors.ndim == 0:
+            errors = np.full(observation_shape, float(errors), dtype=float)
+        elif errors.ndim == 1 and errors.shape == (number_of_pixels,):
+            errors = np.broadcast_to(errors, observation_shape).copy()
+        elif errors.shape == observation_shape:
+            errors = errors.copy()
+        else:
+            raise ValueError(
+                "flux_errors must be a scalar, a one-dimensional array with "
+                f"{number_of_pixels} pixels, or an array with shape "
+                f"{observation_shape}"
+            )
+        if not np.all(np.isfinite(errors)) or np.any(errors <= 0):
+            raise ValueError("flux_errors must contain finite positive values")
+        return errors
+
+    def _estimate_flux_uncertainties(
+        self,
+        flux_errors,
+        number_of_samples,
+        seed,
+        vrads1,
+        vrads2,
+        waves,
+        lguess1,
+        lguess2,
+        lguess3=None,
+        *,
+        keep_samples=False,
+    ):
+        """Estimate fixed-reference output errors through repeated noise draws.
+
+        Only the input fluxes are perturbed. The wavelength grids, selected
+        orbit, epoch weights, preprocessing choices, and reference light ratio
+        are held fixed. Returned values are marginal one-sigma errors; the
+        retained ensembles are needed to estimate wavelength or cross-component
+        covariance.
+        """
+
+        observation_shape = self.ObsSpecs[:, :, 1].shape
+        errors = self._validated_flux_errors(flux_errors, observation_shape)
+        rng = np.random.default_rng(seed)
+        nominal_observations = self.ObsSpecs.copy()
+        plotting_state = {
+            attribute: (hasattr(self, attribute), getattr(self, attribute, False))
+            for attribute in ('PLOTCONV', 'PLOTITR')
+        }
+        samplesA = np.empty((number_of_samples, len(waves)), dtype=float)
+        samplesB = np.empty_like(samplesA)
+        samplesC = np.empty_like(samplesA)
+
+        try:
+            self.PLOTCONV = False
+            self.PLOTITR = False
+            for sample_index in range(number_of_samples):
+                self.ObsSpecs = nominal_observations.copy()
+                self.ObsSpecs[:, :, 1] += rng.normal(
+                    loc=0.0,
+                    scale=errors,
+                    size=observation_shape,
+                )
+                sampleA, sampleB, sampleC, _ = self.disentangle(
+                    np.zeros(len(waves)),
+                    vrads1,
+                    vrads2,
+                    waves,
+                    Resid=False,
+                    Reduce=False,
+                    ShowItr=False,
+                    Once=True,
+                    CalculateDiffs=False,
+                    verbose=False,
+                )
+                if self.Triple:
+                    samplesA[sample_index] = (
+                        (sampleA - 1.0) / (1.0 - lguess2 - lguess3) + 1.0
+                    )
+                    samplesB[sample_index] = (sampleB - 1.0) / lguess2 + 1.0
+                    samplesC[sample_index] = (sampleC - 1.0) / lguess3 + 1.0
+                else:
+                    samplesA[sample_index] = (sampleA - 1.0) / lguess1 + 1.0
+                    samplesB[sample_index] = (sampleB - 1.0) / lguess2 + 1.0
+                    samplesC[sample_index] = sampleC
+        finally:
+            self.ObsSpecs = nominal_observations
+            for attribute, (existed, value) in plotting_state.items():
+                if existed:
+                    setattr(self, attribute, value)
+                else:
+                    delattr(self, attribute)
+
+        if keep_samples:
+            self.flux_samplesA = samplesA
+            self.flux_samplesB = samplesB
+            self.flux_samplesC = samplesC
+        else:
+            for attribute in ('flux_samplesA', 'flux_samplesB', 'flux_samplesC'):
+                if hasattr(self, attribute):
+                    delattr(self, attribute)
+
+        return (
+            np.std(samplesA, axis=0, ddof=1),
+            np.std(samplesB, axis=0, ddof=1),
+            np.std(samplesC, axis=0, ddof=1),
+        )
 
 
 
@@ -395,7 +581,7 @@ class SpecDisent:
     # disentangle(Aini, vrads2, vrads1, waves)
     # Resid --> returns array of residual spectra between obs and dis1+dis2
     # Reduce --> Returns reduced chi2
-    def disentangle(self, B, vrads1, vrads2, waves, Resid=False, Reduce=False, ShowItr=False, Once=False, NebFac=1., InterKind='linear'):    
+    def disentangle(self, B, vrads1, vrads2, waves, Resid=False, Reduce=False, ShowItr=False, Once=False, NebFac=1., InterKind='linear', CalculateDiffs=True, verbose=True):
         global kcount, k1, k2, DoFs, kcount, Nchi2, K1now, K2now
         ScalingNeb=np.ones(len(waves))    
         C = waves*0.
@@ -404,14 +590,16 @@ class SpecDisent:
                 try:
                     K1now = self.K1s[k1]
                     K2now = self.K2s[k2]   
-                    print("Disentangeling..... K1, K2=", K1now, K2now)
+                    if verbose:
+                        print("Disentangeling..... K1, K2=", K1now, K2now)
                 except:
                     
                     pass
             else:
                 k1, k2 = 0, 0
         else:
-            print("Disentangeling.....")
+            if verbose:
+                print("Disentangeling.....")
         Facshift1 = np.sqrt( (1 + vrads1/self.clight) / (1 - vrads1/self.clight))
         Facshift2 = np.sqrt( (1 + vrads2/self.clight) / (1 - vrads2/self.clight))
         Facshift3 = np.sqrt( (1 + self.vrads3/self.clight) / (1 - self.vrads3/self.clight))    
@@ -506,7 +694,8 @@ class SpecDisent:
                     plt.plot(waves, B, label=itr)
                     plt.plot(waves, C, label=itr)
                     # plt.title('what is this?')
-        print("Finished after ", itr, " iterations")
+        if verbose:
+            print("Finished after ", itr, " iterations")
         if self.PLOTCONV or self.PLOTITR:
             plt.legend()
             plt.show()  
@@ -516,7 +705,24 @@ class SpecDisent:
         #plt.legend()
         #plt.show()
         #dasds               
-        return A+1., B+1., C+1., self.CalcDiffs(A, B, C, vrads1,  vrads2, waves, Resid=Resid, Reduce=Reduce, ShowItr=ShowItr, NebFac=NebFac)    
+        difference = (
+            self.CalcDiffs(
+                A,
+                B,
+                C,
+                vrads1,
+                vrads2,
+                waves,
+                Resid=Resid,
+                Reduce=Reduce,
+                ShowItr=ShowItr,
+                NebFac=NebFac,
+                verbose=verbose,
+            )
+            if CalculateDiffs
+            else np.nan
+        )
+        return A+1., B+1., C+1., difference
         
 
     # Assuming spectrum for secondary (Bini) and vrads1, gamma, and K1, explore K2s array for best-fitting K2
@@ -624,7 +830,7 @@ class SpecDisent:
         return K1, K2
 
     # Calculate difference 
-    def CalcDiffs(self, A, B, C, vrA, vrB, waves, Resid=False, Reduce=False, ShowItr=False, NebFac=1., linewidExt=3, legsize=13, locleg='lower left', alphaleg = 0.):
+    def CalcDiffs(self, A, B, C, vrA, vrB, waves, Resid=False, Reduce=False, ShowItr=False, NebFac=1., linewidExt=3, legsize=13, locleg='lower left', alphaleg = 0., verbose=True):
         global kcount, Nchi2, k1, k2, DoFs, K1now, K2now
         ScalingNeb = np.ones(len(waves))
         if Resid:
@@ -768,14 +974,15 @@ class SpecDisent:
                             # plt.show()
                             plt.close()      
 
-        print("kcount:", self.kcount)   
+        if verbose:
+            print("kcount:", self.kcount)
         if self.kcount==0:
             try:
                 DoFs += len(waves[WaveCalcCond]) * (len(self.ObsSpecs)-2)
             except:
                 pass
         self.kcount+=1
-        if not ShowItr:
+        if not ShowItr and verbose:
             if self.oneD:
                 try:
                     print("K2=" + str(self.K2s[self.kcount-1]) + ": red. chi2=", Sum/ (len(waves[WaveCalcCond])* len(self.ObsSpecs) - 1))

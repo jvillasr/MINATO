@@ -66,6 +66,10 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
   around spectra generated synthetically during execution [STARTED][2026-07-13]
 - Add weighted chi-square scoring and statistically valid profile-likelihood
   intervals to SPAN while preserving explicit unweighted model ranking [STARTED][]
+- Propagate synthetic epoch flux errors through the development-only
+  shift-and-add adaptation, regenerate the SPAN tutorial fixtures with
+  marginal component errors, and validate the remaining covariance
+  approximation [Done][2026-07-22]
 - Classify the shift-and-add adaptation as development-only external code, add upstream attribution, and exclude it from MINATO packages and releases [Done][2026-07-13]
 - Recover useful `Observing/` sources on `develop`, then redesign them as a tested `minato.observing` package before any release [Done][2026-07-12]
 - Create a small Sphinx/MyST-NB documentation site and evaluate Read the Docs builds after the release tutorial set is clean [STARTED][2026-07-12]

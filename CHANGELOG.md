@@ -1,5 +1,11 @@
 ## [Unreleased]
 ### Added
+* [2026-07-22] The development-only shift-and-add adaptation can propagate
+  independent epoch-level flux errors through fixed-orbit repeated-noise
+  disentangling, save marginal one-sigma component errors, and retain the
+  realisation ensemble for covariance analysis. The SPAN tutorial generator
+  now preserves synthetic epoch errors and writes SPAN-ready weighted inputs
+  on the recorded reference light-ratio scale.
 * [2026-07-16] SPAN accepts per-pixel one-sigma flux errors or inverse
   variances for both single-star and binary fits, calculates weighted
   chi-square under independent Gaussian errors, supports zero-weight pixel

@@ -31,13 +31,14 @@ scores each component grid once per light ratio and combines the scores, which
 keeps large binary-star grid searches fast and transparent. Its fit table
 remains in memory, and a combined profile-score corner plot presents the
 one-dimensional profiles and two-dimensional correlations without creating an
-output file. Because the tutorial inputs have no per-pixel uncertainties, the
-figure deliberately reports no formal intervals. Its diagonal panels retain
-SPAN's original rescaled polynomial profiles, interpolated values, and
-explicitly diagnostic asymmetric intervals. Nested lower-panel regions apply
-one shared set of pooled score thresholds throughout the figure. They show
-the relatively best parts of the coarse grid without presenting them as
-confidence regions.
+output file. Regenerated tutorial fixtures include marginal one-sigma errors
+from fixed-orbit repeated-noise disentangling and pass them to SPAN on the same
+reference light-ratio scale. SPAN then reports diagonal weighted
+profile-likelihood intervals. Legacy two-column fixtures remain readable and
+fall back to unweighted model ranking without formal intervals. Because
+disentangling correlates wavelengths and the two components, the marginal
+error columns are a diagonal approximation rather than a complete covariance
+model.
 
 For science spectra with independent pixel errors, `AtmFit` accepts positive
 one-sigma errors through `flux_errorA`/`flux_errorB`, or non-negative inverse
