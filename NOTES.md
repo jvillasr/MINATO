@@ -27,6 +27,12 @@ Scientific scope:
   also introduces wavelength covariance and A/B cross-covariance. Exact
   coverage therefore requires a future joint-covariance likelihood or
   validation from retained realisations.
+- Consequently, the current tutorial reports conditional diagonal-covariance
+  profile intervals, not fully calibrated physical-parameter uncertainties.
+  A defensible end-to-end route is to retain the repeated-noise component
+  pairs, fit every pair with SPAN including its light-ratio grid, and use the
+  resulting parameter distribution to validate or replace the diagonal
+  intervals. A covariance-aware SPAN likelihood is the alternative.
 - Regenerated the checked-in tutorial fixtures from the corrected local PoWR
   products. The normalised spectra came from
   `/nexus/posix0/MIA-astro-env/hxr/jvillasr/models/PoWR/griddl-gal-ob-vd3-line`;
@@ -54,6 +60,19 @@ Validation:
   errors are `0.0032634` for the primary and `0.02728225` for the secondary.
 - Python compilation, notebook JSON parsing, and repository whitespace checks
   passed.
+
+Deferred follow-up:
+- The 100-realisation tutorial generation took 656.6 seconds for ten spectra,
+  16,839 pixels, and 500 iterations on the current astro-node. The uncertainty
+  stage repeats the fixed-orbit final disentangling once per realisation, so
+  its cost is approximately proportional to `uncertainty_samples`; science
+  users requesting 100 samples currently pay roughly 100 times the final-pass
+  cost.
+- Before promoting this uncertainty path for routine science use, benchmark
+  warm starts from the nominal solution, convergence-based iteration limits,
+  batched or parallel realisations, and linear/sparse covariance propagation.
+  Preserve the current 500-iteration, 100-realisation result as the numerical
+  reference for accuracy and SPAN coverage tests.
 
 ## 2026-07-16 - Add statistical SPAN profile inference
 

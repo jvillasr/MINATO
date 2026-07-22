@@ -34,11 +34,12 @@ one-dimensional profiles and two-dimensional correlations without creating an
 output file. Regenerated tutorial fixtures include marginal one-sigma errors
 from fixed-orbit repeated-noise disentangling and pass them to SPAN on the same
 reference light-ratio scale. SPAN then reports diagonal weighted
-profile-likelihood intervals. Legacy two-column fixtures remain readable and
-fall back to unweighted model ranking without formal intervals. Because
-disentangling correlates wavelengths and the two components, the marginal
-error columns are a diagonal approximation rather than a complete covariance
-model.
+profile-likelihood intervals. These are conditional diagonal-covariance
+intervals, not fully calibrated physical-parameter uncertainties. Legacy
+two-column fixtures remain readable and fall back to unweighted model ranking
+without formal intervals. Because disentangling correlates wavelengths and
+the two components, fully calibrated coverage requires validation from retained
+repeated-noise SPAN fits or a covariance-aware likelihood.
 
 For science spectra with independent pixel errors, `AtmFit` accepts positive
 one-sigma errors through `flux_errorA`/`flux_errorB`, or non-negative inverse
