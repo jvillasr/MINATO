@@ -26,6 +26,10 @@ def blending_metadata(blending_kernel, blending_flux_fraction=None) -> dict[str,
     result = dict(metadata)
     result.setdefault("enabled", True)
     result.setdefault("kernel_type", type(blending_kernel).__name__)
+    if hasattr(blending_kernel, "sample_bias_signed"):
+        result.setdefault("sampling_protocol", "signed_velocity_separation")
+    else:
+        result.setdefault("sampling_protocol", "legacy_absolute_velocity_separation")
     if blending_flux_fraction is None:
         result.setdefault("flux_fraction_source", None)
     elif callable(blending_flux_fraction):
@@ -77,7 +81,8 @@ def resolve_blending_flux_fraction(
 def sample_blending_bias(
     blending_kernel,
     *,
-    abs_velocity_separation: np.ndarray,
+    velocity_separation: np.ndarray | None = None,
+    abs_velocity_separation: np.ndarray | None = None,
     secondary_flux_fraction,
     blend_unit: np.ndarray | None,
 ) -> np.ndarray:
@@ -85,41 +90,67 @@ def sample_blending_bias(
     Sample per-epoch RV blending bias from a user-supplied kernel.
 
     The kernel data/model is intentionally not part of MINATO. The supplied
-    object must either provide ``sample_bias(abs_delta_v, f_secondary, u)`` or
-    be directly callable with that same signature.
+    Signed-aware kernels should provide
+    ``sample_bias_signed(delta_v, f_secondary, u)``. Existing kernels that
+    provide ``sample_bias(abs_delta_v, f_secondary, u)`` or are directly
+    callable with that legacy signature remain supported.
     """
 
+    if velocity_separation is not None and abs_velocity_separation is not None:
+        raise ValueError(
+            "Provide velocity_separation or abs_velocity_separation, not both."
+        )
+    if velocity_separation is None and abs_velocity_separation is None:
+        raise ValueError(
+            "velocity_separation or abs_velocity_separation is required."
+        )
+
+    signed_separation_available = velocity_separation is not None
+    if signed_separation_available:
+        separation = np.asarray(velocity_separation, dtype=float)
+    else:
+        separation = np.asarray(abs_velocity_separation, dtype=float)
     if blending_kernel is None:
-        return np.zeros_like(np.asarray(abs_velocity_separation, dtype=float), dtype=float)
+        return np.zeros_like(separation, dtype=float)
     if blend_unit is None:
         raise ValueError(
             "A blending_kernel was supplied, but the binary random bank has no "
             "blend_unit draws. Rebuild the bank with build_mixture_crn_banks."
         )
 
-    abs_velocity_separation = np.asarray(abs_velocity_separation, dtype=float)
     blend_unit = np.asarray(blend_unit, dtype=float)
-    if blend_unit.shape != abs_velocity_separation.shape:
-        raise ValueError("blend_unit must have the same shape as abs_velocity_separation.")
+    if blend_unit.shape != separation.shape:
+        raise ValueError("blend_unit must have the same shape as velocity_separation.")
 
     sampler: Callable
-    if hasattr(blending_kernel, "sample_bias"):
+    if hasattr(blending_kernel, "sample_bias_signed"):
+        if not signed_separation_available:
+            raise ValueError(
+                "A signed blending kernel requires velocity_separation; "
+                "absolute separation alone is insufficient."
+            )
+        sampler = blending_kernel.sample_bias_signed
+        sampler_separation = separation
+    elif hasattr(blending_kernel, "sample_bias"):
         sampler = blending_kernel.sample_bias
+        sampler_separation = np.abs(separation)
     elif callable(blending_kernel):
         sampler = blending_kernel
+        sampler_separation = np.abs(separation)
     else:
         raise TypeError(
-            "blending_kernel must be callable or provide "
-            "sample_bias(abs_delta_v, f_secondary, u)."
+            "blending_kernel must provide sample_bias_signed(delta_v, "
+            "f_secondary, u), sample_bias(abs_delta_v, f_secondary, u), or "
+            "be callable with the legacy absolute-separation signature."
         )
 
     bias = np.asarray(
-        sampler(abs_velocity_separation, secondary_flux_fraction, blend_unit),
+        sampler(sampler_separation, secondary_flux_fraction, blend_unit),
         dtype=float,
     )
     if bias.shape == ():
-        bias = np.full_like(abs_velocity_separation, float(bias), dtype=float)
-    if bias.shape != abs_velocity_separation.shape:
+        bias = np.full_like(separation, float(bias), dtype=float)
+    if bias.shape != separation.shape:
         raise ValueError("blending_kernel returned a bias array with the wrong shape.")
     if not np.all(np.isfinite(bias)):
         raise ValueError("blending_kernel returned non-finite RV bias values.")
