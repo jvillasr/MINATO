@@ -18,6 +18,7 @@ from .blending import (
     resolve_blending_flux_fraction,
     sample_blending_bias,
 )
+from .histograms import complete_nonnegative_bins, histogram_nonnegative
 from .mcmc import (
     _env_truthy,
     _initial_walker_positions,
@@ -29,6 +30,7 @@ from .mixture_crn import (
     _normalise_bank_seeds,
     build_mixture_crn_banks,
 )
+from .orbits import orbital_semi_amplitudes_kms
 
 
 DEFAULT_PAIRWISE_DELTA_TIME_BINS = (0.0, 1.0, 7.0, 30.0, 100.0, 365.0, 1000.0, 3000.0, np.inf)
@@ -82,7 +84,7 @@ def _normalise_pairwise_config(config=None) -> PairwiseSummaryConfig:
 
     response_bins = None
     if config.response_bins is not None:
-        response_bins_array = np.asarray(config.response_bins, dtype=float)
+        response_bins_array = complete_nonnegative_bins(config.response_bins)
         if response_bins_array.ndim != 1 or response_bins_array.size < 2:
             raise ValueError("response_bins must be a one-dimensional sequence with at least two edges.")
         if not np.all(np.diff(response_bins_array) > 0):
@@ -100,9 +102,9 @@ def _normalise_pairwise_config(config=None) -> PairwiseSummaryConfig:
 
 def _default_response_bins(response: str) -> np.ndarray:
     if response == "max_pair_significance":
-        return np.concatenate([np.linspace(0.0, 20.0, 41), [np.inf]])
+        return complete_nonnegative_bins(np.linspace(0.0, 20.0, 41))
     if response == "max_abs_delta_rv":
-        return np.asarray(np.logspace(0.4, 3, 30), dtype=float)
+        return complete_nonnegative_bins()
     raise ValueError(f"Unsupported pairwise response {response!r}.")
 
 
@@ -237,10 +239,14 @@ def _histogram_pairwise_summary(summary: np.ndarray, bins: np.ndarray) -> tuple[
     counts = np.zeros(summary.shape[1], dtype=float)
     for bin_index in range(summary.shape[1]):
         values = summary[:, bin_index]
-        values = values[np.isfinite(values)]
+        values = values[~np.isnan(values)]
         counts[bin_index] = float(values.size)
         if values.size:
-            hist[bin_index], _ = np.histogram(values, bins=bins)
+            hist[bin_index], _ = histogram_nonnegative(
+                values,
+                bins,
+                name=f"pairwise response bin {bin_index}",
+            )
     return hist, counts
 
 
@@ -366,17 +372,17 @@ class PairwiseMixtureCRNLikelihood:
         m2 = m1 * q
         cos_i = -1.0 + 2.0 * bank.u_cos_i
         i_rad = np.arccos(np.clip(cos_i, -1.0, 1.0))
-        sin_i = np.sin(i_rad)
         omega_deg = 360.0 * bank.u_omega
         omega_deg[eccentricity == 0.0] = 90.0
         tp = bank.u_Tp * period
 
-        g_factor = 4.309e-3 * 3.0857e13
-        period_sec = period * 86400.0
-        denom = np.power(m1 + m2, 2.0 / 3.0)
-        factor = np.power(2.0 * np.pi * g_factor, 1.0 / 3.0) * np.power(period_sec, -1.0 / 3.0)
-        k1 = factor * (m2 * sin_i) / denom
-        k2 = factor * (m1 * sin_i) / denom
+        k1, k2 = orbital_semi_amplitudes_kms(
+            m1,
+            m2,
+            period,
+            i_rad,
+            eccentricity,
+        )
 
         return {
             "M1": m1,

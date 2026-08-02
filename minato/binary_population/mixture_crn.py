@@ -23,6 +23,11 @@ from .blending import (
     resolve_blending_flux_fraction,
     sample_blending_bias,
 )
+from .histograms import (
+    complete_nonnegative_bins,
+    histogram_nonnegative,
+    validate_nonnegative_finite,
+)
 from .mcmc import (
     DEFAULT_PARAMETER_BOUNDS,
     _env_truthy,
@@ -30,6 +35,7 @@ from .mcmc import (
     _normalise_parameter_bounds,
     _normalise_parameter_names,
 )
+from .orbits import orbital_semi_amplitudes_kms
 
 
 DEFAULT_BASELINE_BINS = np.array([0.0, 7.0, 30.0, 100.0, 365.0, np.inf])
@@ -330,12 +336,29 @@ def _edge_label(edges, index: int) -> str:
 
 def _histogram_by_condition(values, condition_indices, n_conditions, bins) -> np.ndarray:
     hist = np.zeros((int(n_conditions), len(bins) - 1), dtype=float)
-    values = np.asarray(values, dtype=float)
+    values = validate_nonnegative_finite(
+        values,
+        name="conditioned dRV_max",
+    )
     condition_indices = np.asarray(condition_indices, dtype=np.int32)
+    if values.shape != condition_indices.shape:
+        raise ValueError("conditioned values and condition indices must have the same shape")
+    invalid = (condition_indices < 0) | (condition_indices >= int(n_conditions))
+    if np.any(invalid):
+        raise ValueError(
+            "Every conditioned system must enter exactly one condition bin; "
+            f"found {int(np.count_nonzero(invalid))} unassigned system(s)"
+        )
     for condition_index in range(int(n_conditions)):
         mask = condition_indices == condition_index
         if np.any(mask):
-            hist[condition_index], _ = np.histogram(values[mask], bins=bins)
+            hist[condition_index], _ = histogram_nonnegative(
+                values[mask],
+                bins,
+                name=f"conditioned dRV_max bin {condition_index}",
+            )
+    if int(hist.sum()) != int(values.size):
+        raise RuntimeError("Conditioned dRV_max histogram did not conserve all systems")
     return hist
 
 
@@ -492,8 +515,11 @@ class MixtureCRNLikelihood:
             blend_unit=self.binary_bank.blend_unit,
         )
         self.bank_seed = bank_seed
-        self.bins = np.asarray(np.logspace(0.4, 3, 30) if bins is None else bins, dtype=float)
-        self.n_real, _ = np.histogram(self.dRV_real, bins=self.bins)
+        self.n_real, self.bins = histogram_nonnegative(
+            self.dRV_real,
+            bins,
+            name="dRV_real",
+        )
         self.blending_kernel = blending_kernel
         self.blending_flux_fraction = blending_flux_fraction
         self.blending_metadata = blending_metadata(
@@ -502,7 +528,11 @@ class MixtureCRNLikelihood:
         )
 
         self.single_drv = self._simulate_single_drv()
-        self.single_hist, _ = np.histogram(self.single_drv, bins=self.bins)
+        self.single_hist, _ = histogram_nonnegative(
+            self.single_drv,
+            self.bins,
+            name="single-bank dRV_max",
+        )
         self.single_probability = self.single_hist.astype(float) / float(self.single_bank.size)
 
     def _theta_to_params(self, theta):
@@ -541,17 +571,17 @@ class MixtureCRNLikelihood:
         m2 = m1 * q
         cos_i = -1.0 + 2.0 * bank.u_cos_i
         i_rad = np.arccos(np.clip(cos_i, -1.0, 1.0))
-        sin_i = np.sin(i_rad)
         omega_deg = 360.0 * bank.u_omega
         omega_deg[eccentricity == 0.0] = 90.0
         tp = bank.u_Tp * period
 
-        g_factor = 4.309e-3 * 3.0857e13
-        period_sec = period * 86400.0
-        denom = np.power(m1 + m2, 2.0 / 3.0)
-        factor = np.power(2.0 * np.pi * g_factor, 1.0 / 3.0) * np.power(period_sec, -1.0 / 3.0)
-        k1 = factor * (m2 * sin_i) / denom
-        k2 = factor * (m1 * sin_i) / denom
+        k1, k2 = orbital_semi_amplitudes_kms(
+            m1,
+            m2,
+            period,
+            i_rad,
+            eccentricity,
+        )
 
         return {
             "M1": m1,
@@ -681,7 +711,11 @@ class MixtureCRNLikelihood:
 
     def component_probabilities(self, params):
         binary_drv = self.simulate_binary_drv(params)
-        binary_hist, _ = np.histogram(binary_drv, bins=self.bins)
+        binary_hist, _ = histogram_nonnegative(
+            binary_drv,
+            self.bins,
+            name="binary-bank dRV_max",
+        )
         binary_probability = binary_hist.astype(float) / float(self.binary_bank.size)
         return self.single_probability, binary_probability
 
