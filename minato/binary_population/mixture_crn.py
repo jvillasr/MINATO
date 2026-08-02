@@ -113,8 +113,8 @@ class BankParallelAveragedLogProbPool:
     For an averaged likelihood with ``n_banks`` fixed random banks, a normal
     pool evaluates one walker at a time and each worker loops over all banks
     serially. This pool instead expands every emcee ``map`` call into
-    ``walker x bank`` tasks, then averages the returned bank probabilities in
-    the parent process before applying the same Poisson likelihood as
+    ``walker x bank`` tasks, then pools the returned bank probabilities using
+    their contributing support before applying the same Poisson likelihood as
     :class:`AveragedMixtureCRNLikelihood`.
     """
 
@@ -171,7 +171,9 @@ class BankParallelAveragedLogProbPool:
             ):
                 continue
             try:
-                binary_probability = np.mean(probabilities, axis=0)
+                binary_probability = self._log_prob.combine_binary_probabilities(
+                    probabilities
+                )
                 log_probabilities[theta_index] = (
                     self._log_prob.log_likelihood_from_binary_probability(
                         params,
@@ -368,6 +370,36 @@ def _normalise_condition_histograms(hist, counts) -> np.ndarray:
     has_support = counts > 0
     probability[has_support] /= counts[has_support, None]
     return probability
+
+
+def _pool_probability_tables(probabilities, support_counts, *, label) -> np.ndarray:
+    """Pool probability tables using their contributing system counts."""
+    probability_array = np.asarray(probabilities, dtype=float)
+    support_array = np.asarray(support_counts, dtype=float)
+    if probability_array.ndim < 2:
+        raise ValueError(f"{label} probabilities must include bank and histogram axes")
+    if support_array.shape != probability_array.shape[:-1]:
+        raise ValueError(
+            f"{label} support counts must match all probability axes except the last"
+        )
+    if np.any(~np.isfinite(probability_array)) or np.any(probability_array < 0.0):
+        raise ValueError(f"{label} probabilities must be finite and non-negative")
+    if np.any(~np.isfinite(support_array)) or np.any(support_array < 0.0):
+        raise ValueError(f"{label} support counts must be finite and non-negative")
+
+    total_support = np.sum(support_array, axis=0)
+    weighted_counts = np.sum(
+        probability_array * support_array[..., None],
+        axis=0,
+    )
+    pooled = np.zeros_like(weighted_counts, dtype=float)
+    np.divide(
+        weighted_counts,
+        total_support[..., None],
+        out=pooled,
+        where=total_support[..., None] > 0.0,
+    )
+    return pooled
 
 
 def _build_cadence_bank(rng, n_bank, template_mjds) -> CadenceRandomBank:
@@ -743,11 +775,11 @@ class AveragedMixtureCRNLikelihood:
     """
     Experimental multi-bank mixture-CRN likelihood.
 
-    With ``condition_by=None`` this averages global component probabilities
-    across one or more fixed random banks before applying one Poisson
-    likelihood. With ``condition_by="baseline_days"`` it scores separate
-    ``dRV_max`` histograms in survey-baseline bins and averages the per-bank
-    conditioned probabilities before scoring.
+    With ``condition_by=None`` this pools global component counts across one or
+    more fixed random banks before applying one Poisson likelihood. With
+    ``condition_by="baseline_days"`` it scores separate ``dRV_max`` histograms
+    in survey-baseline bins and pools their contributing support before
+    scoring.
     """
 
     def __init__(
@@ -835,9 +867,10 @@ class AveragedMixtureCRNLikelihood:
 
         if self.condition_by is None:
             self.n_real = np.asarray(self.reference.n_real, dtype=float)
-            self.single_probability = np.mean(
+            self.single_probability = _pool_probability_tables(
                 [likelihood.single_probability for likelihood in self.likelihoods],
-                axis=0,
+                [likelihood.single_bank.size for likelihood in self.likelihoods],
+                label="single-bank",
             )
             self.observed_counts = None
             self.observed_hist = None
@@ -924,19 +957,6 @@ class AveragedMixtureCRNLikelihood:
                 binary_condition_indices[binary_condition_indices >= 0],
                 minlength=self.n_conditions,
             ).astype(float)
-            if np.any((single_counts <= 0) & needed):
-                missing = [
-                    self.condition_labels[idx]
-                    for idx in np.flatnonzero((single_counts <= 0) & needed)
-                ]
-                raise ValueError(f"Single random bank has no systems in observed condition bin(s): {missing}")
-            if np.any((binary_counts <= 0) & needed):
-                missing = [
-                    self.condition_labels[idx]
-                    for idx in np.flatnonzero((binary_counts <= 0) & needed)
-                ]
-                raise ValueError(f"Binary random bank has no systems in observed condition bin(s): {missing}")
-
             single_hist = _histogram_by_condition(
                 likelihood.single_drv,
                 single_condition_indices,
@@ -958,9 +978,34 @@ class AveragedMixtureCRNLikelihood:
             )
 
         self.conditioned_bank_states = states
-        self.single_probability = np.mean(
-            [state.single_probability for state in states],
+        pooled_single_counts = np.sum(
+            [state.single_counts for state in states],
             axis=0,
+        )
+        pooled_binary_counts = np.sum(
+            [state.binary_counts for state in states],
+            axis=0,
+        )
+        if np.any((pooled_single_counts <= 0) & needed):
+            missing = [
+                self.condition_labels[idx]
+                for idx in np.flatnonzero((pooled_single_counts <= 0) & needed)
+            ]
+            raise ValueError(
+                f"Pooled single random banks have no systems in observed condition bin(s): {missing}"
+            )
+        if np.any((pooled_binary_counts <= 0) & needed):
+            missing = [
+                self.condition_labels[idx]
+                for idx in np.flatnonzero((pooled_binary_counts <= 0) & needed)
+            ]
+            raise ValueError(
+                f"Pooled binary random banks have no systems in observed condition bin(s): {missing}"
+            )
+        self.single_probability = _pool_probability_tables(
+            [state.single_probability for state in states],
+            [state.single_counts for state in states],
+            label="conditioned single-bank",
         )
         self.n_real = self.observed_hist
 
@@ -996,16 +1041,33 @@ class AveragedMixtureCRNLikelihood:
             self.bank_binary_probability(bank_index, params)
             for bank_index in range(self.n_banks)
         ]
-        return np.mean(probabilities, axis=0)
+        return self.combine_binary_probabilities(probabilities)
+
+    def combine_binary_probabilities(self, probabilities):
+        """Pool per-bank binary probabilities using contributing system counts."""
+        if self.condition_by is None:
+            support_counts = [
+                likelihood.binary_bank.size
+                for likelihood in self.likelihoods
+            ]
+        else:
+            support_counts = [
+                state.binary_counts
+                for state in self.conditioned_bank_states
+            ]
+        return _pool_probability_tables(
+            probabilities,
+            support_counts,
+            label="binary-bank",
+        )
 
     def component_probabilities(self, params):
         if self.condition_by is None:
-            binary_probability = np.mean(
+            binary_probability = self.combine_binary_probabilities(
                 [
                     self.bank_binary_probability(bank_index, params)
                     for bank_index in range(self.n_banks)
-                ],
-                axis=0,
+                ]
             )
         else:
             binary_probability = self._binary_conditioned_probability(params)
@@ -1191,9 +1253,9 @@ def run_averaged_mixture_crn_mcmc(
     Run emcee with the experimental averaged mixture-CRN likelihood.
 
     ``bank_seeds`` may contain one or more fixed-bank seeds. Model component
-    probabilities are averaged across banks before the Poisson likelihood is
-    evaluated. Pass ``condition_by="baseline_days"`` to use baseline-binned
-    ``dRV_max`` histograms.
+    probabilities are pooled using their contributing support before the
+    Poisson likelihood is evaluated. Pass ``condition_by="baseline_days"`` to
+    use baseline-binned ``dRV_max`` histograms.
     """
     parameter_names = _normalise_parameter_names(parameter_names)
     parameter_bounds = _normalise_parameter_bounds(

@@ -28,6 +28,7 @@ from .mcmc import (
 from .mixture_crn import (
     _make_emcee_pool,
     _normalise_bank_seeds,
+    _pool_probability_tables,
     build_mixture_crn_banks,
 )
 from .orbits import orbital_semi_amplitudes_kms
@@ -276,6 +277,7 @@ class PairwiseMixtureCRNLikelihood:
         config=None,
         blending_kernel=None,
         blending_flux_fraction=None,
+        require_observed_support=True,
     ):
         self.survey = survey
         self.population = survey.population
@@ -309,6 +311,7 @@ class PairwiseMixtureCRNLikelihood:
         self.bank_seed = bank_seed
         self.blending_kernel = blending_kernel
         self.blending_flux_fraction = blending_flux_fraction
+        self.require_observed_support = bool(require_observed_support)
         self.blending_metadata = blending_metadata(
             blending_kernel,
             blending_flux_fraction=blending_flux_fraction,
@@ -336,6 +339,8 @@ class PairwiseMixtureCRNLikelihood:
         )
 
     def _validate_component_support(self, support_counts: np.ndarray, label: str) -> None:
+        if not self.require_observed_support:
+            return
         missing = (self.observed_counts > 0) & (support_counts <= 0)
         if np.any(missing):
             missing_labels = [
@@ -477,7 +482,7 @@ class PairwiseMixtureCRNLikelihood:
             )
         return response
 
-    def component_probabilities(self, params):
+    def binary_component_probability(self, params):
         binary_summary = self.simulate_binary_pairwise_summary(params)
         binary_hist, binary_support_counts = _histogram_pairwise_summary(
             binary_summary,
@@ -488,6 +493,10 @@ class PairwiseMixtureCRNLikelihood:
             binary_hist,
             binary_support_counts,
         )
+        return binary_probability, binary_support_counts
+
+    def component_probabilities(self, params):
+        binary_probability, _ = self.binary_component_probability(params)
         return self.single_probability, binary_probability
 
     def expected_counts(self, params):
@@ -527,8 +536,8 @@ class AveragedMixtureCRNPairwiseLikelihood:
     """
     Multi-bank mixture-CRN likelihood for pairwise RV summary vectors.
 
-    Component probabilities are averaged across banks before the Poisson
-    likelihood is evaluated.
+    Component probabilities are pooled using their finite per-time-bin support
+    before the Poisson likelihood is evaluated.
     """
 
     def __init__(
@@ -573,6 +582,7 @@ class AveragedMixtureCRNPairwiseLikelihood:
                     config=self.config,
                     blending_kernel=blending_kernel,
                     blending_flux_fraction=blending_flux_fraction,
+                    require_observed_support=False,
                 )
                 for seed in self.bank_seeds
             ]
@@ -596,14 +606,28 @@ class AveragedMixtureCRNPairwiseLikelihood:
         self.fixed_parameters = dict(self.reference.fixed_parameters)
         self.blending_metadata = dict(self.reference.blending_metadata)
         self._validate_likelihoods()
-        self.single_probability = np.mean(
+        self.single_probability = _pool_probability_tables(
             [likelihood.single_probability for likelihood in self.likelihoods],
-            axis=0,
+            [likelihood.single_support_counts for likelihood in self.likelihoods],
+            label="pairwise single-bank",
         )
         self.single_support_counts = np.sum(
             [likelihood.single_support_counts for likelihood in self.likelihoods],
             axis=0,
         )
+        missing_single = (
+            (self.observed_counts > 0)
+            & (self.single_support_counts <= 0)
+        )
+        if np.any(missing_single):
+            missing_labels = [
+                self.delta_time_labels[idx]
+                for idx in np.flatnonzero(missing_single)
+            ]
+            raise ValueError(
+                "Pooled single random banks have no support in observed "
+                f"Delta-t bin(s): {missing_labels}"
+            )
 
     @property
     def n_banks(self) -> int:
@@ -630,12 +654,31 @@ class AveragedMixtureCRNPairwiseLikelihood:
         return self.reference._theta_to_params(theta)
 
     def component_probabilities(self, params):
-        binary_probability = np.mean(
-            [
-                likelihood.component_probabilities(params)[1]
-                for likelihood in self.likelihoods
-            ],
+        binary_results = [
+            likelihood.binary_component_probability(params)
+            for likelihood in self.likelihoods
+        ]
+        binary_support_counts = np.sum(
+            [support for _, support in binary_results],
             axis=0,
+        )
+        missing_binary = (
+            (self.observed_counts > 0)
+            & (binary_support_counts <= 0)
+        )
+        if np.any(missing_binary):
+            missing_labels = [
+                self.delta_time_labels[idx]
+                for idx in np.flatnonzero(missing_binary)
+            ]
+            raise ValueError(
+                "Pooled binary random banks have no support in observed "
+                f"Delta-t bin(s): {missing_labels}"
+            )
+        binary_probability = _pool_probability_tables(
+            [probability for probability, _ in binary_results],
+            [support for _, support in binary_results],
+            label="pairwise binary-bank",
         )
         return self.single_probability, binary_probability
 
