@@ -210,6 +210,10 @@
 * The SB1 and SB2 `ravel` tutorials now include an upfront note on setting `XLA_FLAGS` before importing `minato.ravel` on shared CPU servers.
 
 ### Fixed
+* [2026-08-02] Empirical RV-blending kernels can consume the signed
+  `RV_2,true - RV_1,true` separation through `sample_bias_signed`, preserving
+  correction direction before baseline, joint, and pairwise summaries.
+  Existing absolute-separation kernels remain backwards-compatible.
 * [2026-07-31] Mixture-CRN binary-bank evaluation now batches systems with
   equal epoch counts while preserving every system's exact cadence, RV
   uncertainties, noise draws, and optional blending draws. Regression tests

@@ -686,7 +686,7 @@ class MixtureCRNLikelihood:
         )
         return sample_blending_bias(
             self.blending_kernel,
-            abs_velocity_separation=np.abs(np.asarray(v2_true) - np.asarray(v1_true)),
+            velocity_separation=np.asarray(v2_true) - np.asarray(v1_true),
             secondary_flux_fraction=secondary_flux_fraction,
             blend_unit=blend_unit,
         )
@@ -738,7 +738,7 @@ class MixtureCRNLikelihood:
 
         return sample_blending_bias(
             self.blending_kernel,
-            abs_velocity_separation=np.abs(np.asarray(v2_true) - np.asarray(v1_true)),
+            velocity_separation=np.asarray(v2_true) - np.asarray(v1_true),
             secondary_flux_fraction=secondary_flux_fraction,
             blend_unit=group.blend_unit,
         )

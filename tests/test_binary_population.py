@@ -14,10 +14,12 @@ from minato.binary_population import (
     PairwiseMixtureCRNLikelihood,
     PairwiseSummaryConfig,
     compute_pairwise_summary,
+    run_averaged_joint_drvmax_dtmax_crn_mcmc,
     run_averaged_mixture_crn_mcmc,
     run_averaged_mixture_crn_pairwise_mcmc,
     run_mixture_crn_mcmc,
 )
+from minato.binary_population.blending import sample_blending_bias
 from minato.binary_population.joint_crn import _pool_joint_probability_tables
 from minato.binary_population.mixture_crn import (
     BankParallelAveragedLogProbPool,
@@ -119,6 +121,32 @@ def slice_random_banks(single_bank, binary_bank, indices):
     )
 
 
+def make_tiny_observed_summaries(survey, *, seed=20260802, n_systems=8):
+    """Generate aligned dRV, defining-epoch separation and baseline arrays."""
+    sample = survey.simulate_mock_observations(
+        N=n_systems,
+        f_bin=0.5,
+        summary_only=False,
+        seed=seed,
+    )
+    drv = sample["dRV_max"].to_numpy(dtype=float)
+    dt = np.asarray(
+        [
+            abs(
+                np.asarray(row.mjd_array, dtype=float)[np.argmax(row.rv_array)]
+                - np.asarray(row.mjd_array, dtype=float)[np.argmin(row.rv_array)]
+            )
+            for row in sample.itertuples()
+        ],
+        dtype=float,
+    )
+    baselines = np.asarray(
+        [np.ptp(np.asarray(values, dtype=float)) for values in sample["mjd_array"]],
+        dtype=float,
+    )
+    return drv, dt, baselines
+
+
 class FluxAwareTestBlendKernel:
     metadata = {"name": "flux-aware-test-kernel", "n_rows": 3}
 
@@ -126,6 +154,16 @@ class FluxAwareTestBlendKernel:
         if f_secondary is None:
             raise ValueError("test kernel requires f_secondary")
         return 100.0 * np.asarray(u) + 0.01 * float(f_secondary) * np.asarray(abs_delta_v)
+
+
+class SignedFractionalTestBlendKernel:
+    metadata = {"name": "signed-fractional-test-kernel", "beta": 0.05}
+
+    def sample_bias_signed(self, delta_v, f_secondary, u):
+        return self.metadata["beta"] * np.asarray(delta_v)
+
+    def sample_bias(self, abs_delta_v, f_secondary, u):
+        raise AssertionError("signed protocol must take precedence")
 
 
 class BinaryPopulationInferenceTests(unittest.TestCase):
@@ -1414,6 +1452,275 @@ class BinaryPopulationInferenceTests(unittest.TestCase):
         )
 
         self.assertEqual(sampler.get_chain().shape, (2, 10, 4))
+        self.assertTrue(np.all(np.isfinite(sampler.get_log_prob())))
+
+    def test_blending_dispatcher_preserves_legacy_absolute_keyword(self):
+        separation = np.array([2.0, 4.0])
+        unit = np.array([0.1, 0.2])
+        kernel = FluxAwareTestBlendKernel()
+
+        bias = sample_blending_bias(
+            kernel,
+            abs_velocity_separation=separation,
+            secondary_flux_fraction=0.25,
+            blend_unit=unit,
+        )
+
+        np.testing.assert_allclose(
+            bias,
+            kernel.sample_bias(separation, 0.25, unit),
+        )
+
+    def test_signed_blending_kernel_rejects_absolute_only_dispatch(self):
+        with self.assertRaisesRegex(ValueError, "signed blending kernel"):
+            sample_blending_bias(
+                SignedFractionalTestBlendKernel(),
+                abs_velocity_separation=np.array([2.0]),
+                secondary_flux_fraction=0.25,
+                blend_unit=np.array([0.1]),
+            )
+
+    def test_signed_blending_kernel_suppresses_drvmax_before_summary(self):
+        pop, survey = make_single_template_survey()
+        blend_unit = (np.array([0.0, 0.25, 0.75]),)
+        single_bank, binary_bank = make_one_system_banks(blend_unit=blend_unit)
+        kernel = SignedFractionalTestBlendKernel()
+        like = MixtureCRNLikelihood(
+            survey,
+            np.array([1.0]),
+            single_bank=single_bank,
+            binary_bank=binary_bank,
+            parameter_names=("f_bin", "pi", "kappa", "eta"),
+            bins=np.array([0.0, np.inf]),
+            blending_kernel=kernel,
+            blending_flux_fraction=0.25,
+        )
+        params = {"f_bin": 1.0, "pi": 0.1, "kappa": 0.0, "eta": -0.4}
+
+        arrays = like._binary_intrinsic_arrays(params)
+        v1_true, v2_true = pop.rvcurve(
+            like.template_mjds[0],
+            arrays["P"][0],
+            arrays["Tp"][0],
+            arrays["e"][0],
+            arrays["omega_deg"][0],
+            0.0,
+            arrays["K1"][0],
+            arrays["K2"][0],
+            SB2=True,
+        )
+        separation = v2_true - v1_true
+        expected_bias = kernel.metadata["beta"] * separation
+        expected_drv = np.ptp(v1_true + expected_bias)
+
+        np.testing.assert_allclose(like.simulate_binary_drv(params), [expected_drv])
+        np.testing.assert_array_equal(
+            np.sign(expected_bias[separation != 0.0]),
+            np.sign(separation[separation != 0.0]),
+        )
+        self.assertLess(expected_drv, np.ptp(v1_true))
+        self.assertEqual(
+            like.blending_metadata["sampling_protocol"],
+            "signed_velocity_separation",
+        )
+
+    def test_signed_blending_kernel_suppresses_pairwise_summary(self):
+        pop, survey = make_single_template_survey()
+        blend_unit = (np.array([0.0, 0.25, 0.75]),)
+        single_bank, binary_bank = make_one_system_banks(blend_unit=blend_unit)
+        kernel = SignedFractionalTestBlendKernel()
+        config = PairwiseSummaryConfig(
+            delta_time_bins=(0.0, np.inf),
+            response="max_abs_delta_rv",
+            response_bins=(0.0, 10.0, 100.0, np.inf),
+        )
+        like = PairwiseMixtureCRNLikelihood(
+            survey,
+            np.array([[1.0]]),
+            single_bank=single_bank,
+            binary_bank=binary_bank,
+            parameter_names=("f_bin", "pi", "kappa", "eta"),
+            config=config,
+            blending_kernel=kernel,
+            blending_flux_fraction=0.25,
+        )
+        params = {"f_bin": 1.0, "pi": 0.1, "kappa": 0.0, "eta": -0.4}
+
+        arrays = like._binary_intrinsic_arrays(params)
+        v1_true, v2_true = pop.rvcurve(
+            like.template_mjds[0],
+            arrays["P"][0],
+            arrays["Tp"][0],
+            arrays["e"][0],
+            arrays["omega_deg"][0],
+            0.0,
+            arrays["K1"][0],
+            arrays["K2"][0],
+            SB2=True,
+        )
+        expected_response = np.ptp(
+            v1_true + kernel.metadata["beta"] * (v2_true - v1_true)
+        )
+
+        np.testing.assert_allclose(
+            like.simulate_binary_pairwise_summary(params),
+            [[expected_response]],
+        )
+        self.assertLess(expected_response, np.ptp(v1_true))
+
+    def test_signed_blending_kernel_precedes_joint_drvmax_dtmax_summary(self):
+        pop, survey = make_single_template_survey()
+        blend_unit = (np.array([0.0, 0.25, 0.75]),)
+        single_bank, binary_bank = make_one_system_banks(blend_unit=blend_unit)
+        kernel = SignedFractionalTestBlendKernel()
+        like = JointDrvmaxDtmaxCRNLikelihood(
+            survey,
+            np.array([1.0]),
+            np.array([2.0]),
+            single_bank=single_bank,
+            binary_bank=binary_bank,
+            parameter_names=("f_bin", "pi", "kappa", "eta"),
+            drv_bins=np.array([0.0, np.inf]),
+            dt_bins=np.array([0.0, np.inf]),
+            blending_kernel=kernel,
+            blending_flux_fraction=0.25,
+        )
+        params = {"f_bin": 1.0, "pi": 0.1, "kappa": 0.0, "eta": -0.4}
+
+        arrays = like._binary_intrinsic_arrays(params)
+        t_array = np.asarray(like.template_mjds[0], dtype=float)
+        v1_true, v2_true = pop.rvcurve(
+            t_array,
+            arrays["P"][0],
+            arrays["Tp"][0],
+            arrays["e"][0],
+            arrays["omega_deg"][0],
+            0.0,
+            arrays["K1"][0],
+            arrays["K2"][0],
+            SB2=True,
+        )
+        rv_corrected = v1_true + kernel.metadata["beta"] * (v2_true - v1_true)
+        max_index = int(np.argmax(rv_corrected))
+        min_index = int(np.argmin(rv_corrected))
+
+        actual_drv, actual_dt = like.simulate_binary_drv_and_dt_at_max(params)
+        np.testing.assert_allclose(
+            actual_drv,
+            [rv_corrected[max_index] - rv_corrected[min_index]],
+        )
+        np.testing.assert_allclose(
+            actual_dt,
+            [abs(t_array[max_index] - t_array[min_index])],
+        )
+
+    def test_tiny_generated_no_blending_sample_scores_baseline_and_joint(self):
+        _, survey = make_toy_survey()
+        observed_drv, observed_dt, observed_baselines = make_tiny_observed_summaries(
+            survey
+        )
+        common = {
+            "survey": survey,
+            "dRV_real": observed_drv,
+            "n_single_bank": 64,
+            "n_binary_bank": 64,
+            "bank_seeds": (20260802,),
+            "parameter_names": ("f_bin", "pi"),
+            "condition_by": "baseline_days",
+            "baseline_bins": np.array([0.0, 50.0, np.inf]),
+            "observed_baseline_days": observed_baselines,
+        }
+        baseline = AveragedMixtureCRNLikelihood(
+            bins=np.array([0.0, np.inf]),
+            **common,
+        )
+        joint = AveragedJointDrvmaxDtmaxCRNLikelihood(
+            dt_at_dRVmax_real=observed_dt,
+            drv_bins=np.array([0.0, np.inf]),
+            dt_bins=np.array([0.0, np.inf]),
+            **common,
+        )
+        params = {"f_bin": 0.5, "pi": 0.0, "kappa": 0.0, "eta": -0.5}
+        baseline_single, baseline_binary = baseline.component_probabilities(params)
+        joint_single, joint_binary = joint.component_probabilities(params)
+
+        np.testing.assert_allclose(joint_single.sum(axis=2), baseline_single)
+        np.testing.assert_allclose(joint_binary.sum(axis=2), baseline_binary)
+        self.assertTrue(np.isfinite(baseline.log_likelihood(params)))
+        self.assertTrue(np.isfinite(joint.log_likelihood(params)))
+        self.assertFalse(baseline.reference.blending_metadata["enabled"])
+        self.assertFalse(joint.reference.blending_metadata["enabled"])
+
+    def test_tiny_signed_blending_joint_runner_end_to_end(self):
+        pop, survey = make_toy_survey()
+        observed_drv, observed_dt, observed_baselines = make_tiny_observed_summaries(
+            survey,
+            seed=20260803,
+        )
+        np.random.seed(20260803)
+        sampler = run_averaged_joint_drvmax_dtmax_crn_mcmc(
+            pop,
+            survey,
+            observed_drv,
+            observed_dt,
+            observed_baseline_days=observed_baselines,
+            condition_by="baseline_days",
+            baseline_bins=np.array([0.0, 50.0, np.inf]),
+            drv_bins=np.array([0.0, np.inf]),
+            dt_bins=np.array([0.0, np.inf]),
+            n_single_bank=64,
+            n_binary_bank=64,
+            bank_seeds=(20260803,),
+            nwalkers=8,
+            nsteps=2,
+            nthreads=1,
+            pool_kind="none",
+            progress=False,
+            parameter_names=("f_bin", "pi"),
+            initial_position={"f_bin": 0.5, "pi": 0.0},
+            initial_scatter={"f_bin": 0.03, "pi": 0.05},
+            blending_kernel=SignedFractionalTestBlendKernel(),
+            blending_flux_fraction=0.25,
+        )
+
+        self.assertEqual(sampler.get_chain().shape, (2, 8, 2))
+        self.assertTrue(np.all(np.isfinite(sampler.get_log_prob())))
+        self.assertEqual(
+            sampler.joint_drvmax_dtmax_crn_likelihood.blending_metadata[
+                "sampling_protocol"
+            ],
+            "signed_velocity_separation",
+        )
+
+    @unittest.skipUnless(
+        "fork" in mp.get_all_start_methods(),
+        "joint bank_static_process smoke uses fork",
+    )
+    def test_run_averaged_joint_drvmax_dtmax_crn_mcmc_bank_static_smoke(self):
+        pop, survey = make_toy_survey()
+        np.random.seed(20260804)
+        sampler = run_averaged_joint_drvmax_dtmax_crn_mcmc(
+            pop,
+            survey,
+            np.array([5.0, 12.0, 25.0, 40.0]),
+            np.array([5.0, 20.0, 30.0, 100.0]),
+            n_single_bank=64,
+            n_binary_bank=64,
+            bank_seeds=(41, 42),
+            nwalkers=8,
+            nsteps=2,
+            nthreads=2,
+            pool_kind="bank_static_process",
+            start_method="fork",
+            progress=False,
+            parameter_names=("f_bin", "pi"),
+            initial_position={"f_bin": 0.6, "pi": 0.0},
+            initial_scatter={"f_bin": 0.03, "pi": 0.05},
+            drv_bins=np.array([0.0, 10.0, 20.0, 50.0, np.inf]),
+            dt_bins=np.array([0.0, 10.0, 50.0, np.inf]),
+        )
+
+        self.assertEqual(sampler.get_chain().shape, (2, 8, 2))
         self.assertTrue(np.all(np.isfinite(sampler.get_log_prob())))
 
 
