@@ -1,5 +1,33 @@
 # MINATO Notes
 
+## 2026-08-02 - Reconcile binary-population likelihood corrections
+
+Implementation:
+- Preserved the previously uncommitted binary-population work as three focused
+  commits: `ebf9546` (eccentric RV amplitudes and complete non-negative
+  histogram support), `38a6588` (support-weighted CRN bank pooling), and
+  `79c46f1` (exact-cadence joint `dRV_max`/`dt_at_dRVmax` likelihood).
+- Exact cadence batching groups systems only by epoch count while retaining
+  every system's original MJDs, RV uncertainties, noise draw, and optional
+  blending draw. Count pooling uses global or per-condition contributing
+  support, so unequal banks reproduce concatenated populations.
+- The joint likelihood remains experimental. It supports global and
+  baseline-conditioned scoring and exposes the averaged runner through
+  `minato.binary_population`.
+
+Validation:
+- `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest tests.test_orbits tests.test_histograms tests.test_binary_population -v`
+  passed all 55 focused tests. These include independent SI orbit checks,
+  histogram row conservation, unequal global/conditioned/pairwise bank
+  pooling, joint time marginals, split-versus-unsplit population equivalence,
+  and exact equal-epoch batching equivalence.
+- `PYTHONDONTWRITEBYTECODE=1 MINATO_QUIET=1 .venv/bin/python -m unittest discover -s tests -v`
+  passed 124 tests with one expected opt-in RAVEL smoke test skipped. The run
+  emitted the existing single-device JAX and `fork()`
+  warnings. Matplotlib used an OS-managed temporary cache because the home
+  configuration directory was not writable; no test artefact remained in the
+  repository.
+
 ## 2026-07-22 - Propagate shift-and-add flux errors into SPAN
 
 Implementation:

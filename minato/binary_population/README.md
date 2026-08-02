@@ -125,9 +125,11 @@ positive log-period interval.
 
 For larger observed samples, prefer the averaged mixture/common-random-number
 likelihood over the older stochastic `run_mcmc` path. It builds fixed random
-banks once, averages model probabilities across banks, and then scores the
-Poisson likelihood. The current validated reference for cadence-aware work is
-baseline-binned `dRV_max`.
+banks once, pools component counts using their contributing support, and then
+scores one Poisson likelihood. This is equivalent to concatenating the fixed
+systems into one larger bank; for equal effective bank sizes it reduces to
+averaging model probabilities. The current validated reference for
+cadence-aware work is baseline-binned `dRV_max`.
 
 ```python
 import numpy as np
@@ -183,6 +185,42 @@ multi-parameter evaluations need the extra `walker x bank` parallelism. Keep
 bank sizes, bank counts, walker counts, and process counts modest for tutorial
 runs, then scale them on CPU nodes after a small deterministic smoke test. MPI
 is not currently exposed by the public runner API.
+
+## Experimental joint dRV/time mixture-CRN likelihood
+
+`run_averaged_joint_drvmax_dtmax_crn_mcmc` retains the epoch separation of the
+minimum and maximum measured RV as a second histogram axis. Pass
+`condition_by="baseline_days"` to score
+`P(dRV_max, dt_at_dRV_max | baseline_bin, theta)` rather than the global joint
+distribution. Every observed and simulated system must enter exactly one
+baseline, `dRV_max`, and time-separation bin; the non-negative `dRV_max` and
+time axes are completed with zero and positive-infinity edges when needed.
+
+```python
+from minato.binary_population import run_averaged_joint_drvmax_dtmax_crn_mcmc
+
+sampler = run_averaged_joint_drvmax_dtmax_crn_mcmc(
+    pop,
+    survey,
+    dRV_real,
+    dt_at_dRVmax_real,
+    observed_baseline_days=observed_baseline_days,
+    condition_by="baseline_days",
+    baseline_bins=(0, 7, 150, np.inf),
+    dt_bins=(0, 1, 7, 30, 100, 365, 1000, 3000, np.inf),
+    bank_seeds=(20260621, 20260622, 20260623, 20260624),
+    parameter_names=("f_bin", "pi"),
+    pool_kind="bank_static_process",
+    nthreads=48,
+)
+```
+
+Banks are combined by pooling their contributing counts, not by averaging
+separate log-likelihoods. Marginalising the joint probabilities over the time
+axis therefore reproduces the baseline-conditioned `dRV_max` component
+probabilities for the same fixed systems. Treat this API as experimental
+until its recovery accuracy and runtime have been compared with the validated
+baseline-only likelihood for the intended sample.
 
 ## Experimental pairwise mixture-CRN likelihood
 

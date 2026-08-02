@@ -48,8 +48,9 @@ The following controlled checks have been completed in the
 - one-bank averaged evaluation agrees with the corresponding single-bank
   evaluation;
 - baseline-conditioned probabilities are reproducible and finite;
-- four-bank model probabilities are averaged before likelihood scoring, not
-  after taking logarithms;
+- fixed-bank component counts are pooled using their contributing support
+  before likelihood scoring, not after taking logarithms; this reduces to the
+  earlier probability mean only for equal effective bank sizes;
 - the public MINATO averaged likelihood exactly reproduces all `1271` points
   of the original paper-side `4 x 100000` baseline-conditioned grid;
 - a finer `17 x 25` method-comparison grid with four `100000+100000` banks

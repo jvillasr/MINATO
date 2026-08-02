@@ -38,6 +38,11 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 - Run a full validation pass (smoke tests + a representative SB1 + SB2 run) [STARTED][2026-07-12]
 - Add reduced synthetic probabilistic SB1/SB2 release smoke tests to CI [Done][2026-07-12]
 - Verify `binary_population` MCMC batching behaves as expected (correct normalization) and improves wall-time performance [][]
+- Correct and analytically test eccentric RV semi-amplitudes, and require
+  complete low/high support in non-negative RV-summary histograms [Done][2026-07-23]
+- Make multi-bank likelihoods exactly equivalent to one concatenated
+  population for unequal global, conditioned and pairwise support, with
+  deterministic and empty-cell regression tests [Done][2026-07-24]
 - PRIORITY: Make `binary_population` inference scalable on large CPUs (process/MPI pool, summary-only simulation, reproducible seeding) and test on laptop + MPIA astro-nodes (small/large scale; 1-parameter `f_bin` and multi-parameter runs) in a dedicated branch [STARTED][2026-06-16]
 - Add and validate an experimental mixture/common-random-number likelihood for high-`N_obs` binary-population inference [Done][2026-07-08]
 - Optimise empirical-blending mixture-CRN binary-bank evaluation by grouping
@@ -45,6 +50,10 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
   outputs [Done][2026-07-11]
 - Add an experimental star-balanced pairwise mixture-CRN likelihood with a
   `dRV_max` collapse regression test [Done][2026-07-09]
+- Add and validate the baseline-conditioned joint
+  `P(dRV_max, dt_at_dRV_max | baseline_bin, theta)` mixture-CRN likelihood,
+  including count-weighted bank pooling and conservation tests
+  [Done][2026-07-29]
 - Follow the larger binary-population inference branch plan in `BINARY_POPULATION_INFERENCE_PLAN.md`, including multi-bank averaging and time/cadence-conditioned likelihoods [Done][2026-07-08]
 - Validate the pairwise mixture-CRN likelihood against the baseline-binned
   `dRV_max` reference at production scale [Done][2026-07-10]
