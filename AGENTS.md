@@ -19,6 +19,18 @@ When suggesting commands, prefer to *propose* what to run; do not assume you can
 - Do NOT do “drive-by” refactors or global style rewrites.
 - Do NOT introduce new heavy dependencies unless I explicitly ask.
 
+## Working-tree and commit discipline
+- Before starting a task, inspect `git status --short`. If pre-existing
+  uncommitted changes are present, stop after a read-only audit, report their
+  scope, and ask the user how to proceed. Do not modify, stage, stash, discard,
+  or include those changes in a commit without explicit user direction.
+- Do not leave completed work uncommitted without saying so. When a task is
+  complete and validated, report the exact scope and always offer to create a
+  focused commit. If committing is deferred, state clearly which completed
+  changes remain uncommitted.
+- Before committing, show the intended file and hunk scope and exclude
+  unrelated changes.
+
 ## Coding expectations
 - Prefer clear, readable Python over cleverness.
 - Preserve public APIs unless I request a breaking change.
