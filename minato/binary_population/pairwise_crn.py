@@ -18,6 +18,7 @@ from .blending import (
     resolve_blending_flux_fraction,
     sample_blending_bias,
 )
+from .histograms import complete_nonnegative_bins, histogram_nonnegative
 from .mcmc import (
     _env_truthy,
     _initial_walker_positions,
@@ -27,8 +28,10 @@ from .mcmc import (
 from .mixture_crn import (
     _make_emcee_pool,
     _normalise_bank_seeds,
+    _pool_probability_tables,
     build_mixture_crn_banks,
 )
+from .orbits import orbital_semi_amplitudes_kms
 
 
 DEFAULT_PAIRWISE_DELTA_TIME_BINS = (0.0, 1.0, 7.0, 30.0, 100.0, 365.0, 1000.0, 3000.0, np.inf)
@@ -82,7 +85,7 @@ def _normalise_pairwise_config(config=None) -> PairwiseSummaryConfig:
 
     response_bins = None
     if config.response_bins is not None:
-        response_bins_array = np.asarray(config.response_bins, dtype=float)
+        response_bins_array = complete_nonnegative_bins(config.response_bins)
         if response_bins_array.ndim != 1 or response_bins_array.size < 2:
             raise ValueError("response_bins must be a one-dimensional sequence with at least two edges.")
         if not np.all(np.diff(response_bins_array) > 0):
@@ -100,9 +103,9 @@ def _normalise_pairwise_config(config=None) -> PairwiseSummaryConfig:
 
 def _default_response_bins(response: str) -> np.ndarray:
     if response == "max_pair_significance":
-        return np.concatenate([np.linspace(0.0, 20.0, 41), [np.inf]])
+        return complete_nonnegative_bins(np.linspace(0.0, 20.0, 41))
     if response == "max_abs_delta_rv":
-        return np.asarray(np.logspace(0.4, 3, 30), dtype=float)
+        return complete_nonnegative_bins()
     raise ValueError(f"Unsupported pairwise response {response!r}.")
 
 
@@ -237,10 +240,14 @@ def _histogram_pairwise_summary(summary: np.ndarray, bins: np.ndarray) -> tuple[
     counts = np.zeros(summary.shape[1], dtype=float)
     for bin_index in range(summary.shape[1]):
         values = summary[:, bin_index]
-        values = values[np.isfinite(values)]
+        values = values[~np.isnan(values)]
         counts[bin_index] = float(values.size)
         if values.size:
-            hist[bin_index], _ = np.histogram(values, bins=bins)
+            hist[bin_index], _ = histogram_nonnegative(
+                values,
+                bins,
+                name=f"pairwise response bin {bin_index}",
+            )
     return hist, counts
 
 
@@ -270,6 +277,7 @@ class PairwiseMixtureCRNLikelihood:
         config=None,
         blending_kernel=None,
         blending_flux_fraction=None,
+        require_observed_support=True,
     ):
         self.survey = survey
         self.population = survey.population
@@ -303,6 +311,7 @@ class PairwiseMixtureCRNLikelihood:
         self.bank_seed = bank_seed
         self.blending_kernel = blending_kernel
         self.blending_flux_fraction = blending_flux_fraction
+        self.require_observed_support = bool(require_observed_support)
         self.blending_metadata = blending_metadata(
             blending_kernel,
             blending_flux_fraction=blending_flux_fraction,
@@ -330,6 +339,8 @@ class PairwiseMixtureCRNLikelihood:
         )
 
     def _validate_component_support(self, support_counts: np.ndarray, label: str) -> None:
+        if not self.require_observed_support:
+            return
         missing = (self.observed_counts > 0) & (support_counts <= 0)
         if np.any(missing):
             missing_labels = [
@@ -366,17 +377,17 @@ class PairwiseMixtureCRNLikelihood:
         m2 = m1 * q
         cos_i = -1.0 + 2.0 * bank.u_cos_i
         i_rad = np.arccos(np.clip(cos_i, -1.0, 1.0))
-        sin_i = np.sin(i_rad)
         omega_deg = 360.0 * bank.u_omega
         omega_deg[eccentricity == 0.0] = 90.0
         tp = bank.u_Tp * period
 
-        g_factor = 4.309e-3 * 3.0857e13
-        period_sec = period * 86400.0
-        denom = np.power(m1 + m2, 2.0 / 3.0)
-        factor = np.power(2.0 * np.pi * g_factor, 1.0 / 3.0) * np.power(period_sec, -1.0 / 3.0)
-        k1 = factor * (m2 * sin_i) / denom
-        k2 = factor * (m1 * sin_i) / denom
+        k1, k2 = orbital_semi_amplitudes_kms(
+            m1,
+            m2,
+            period,
+            i_rad,
+            eccentricity,
+        )
 
         return {
             "M1": m1,
@@ -471,7 +482,7 @@ class PairwiseMixtureCRNLikelihood:
             )
         return response
 
-    def component_probabilities(self, params):
+    def binary_component_probability(self, params):
         binary_summary = self.simulate_binary_pairwise_summary(params)
         binary_hist, binary_support_counts = _histogram_pairwise_summary(
             binary_summary,
@@ -482,6 +493,10 @@ class PairwiseMixtureCRNLikelihood:
             binary_hist,
             binary_support_counts,
         )
+        return binary_probability, binary_support_counts
+
+    def component_probabilities(self, params):
+        binary_probability, _ = self.binary_component_probability(params)
         return self.single_probability, binary_probability
 
     def expected_counts(self, params):
@@ -521,8 +536,8 @@ class AveragedMixtureCRNPairwiseLikelihood:
     """
     Multi-bank mixture-CRN likelihood for pairwise RV summary vectors.
 
-    Component probabilities are averaged across banks before the Poisson
-    likelihood is evaluated.
+    Component probabilities are pooled using their finite per-time-bin support
+    before the Poisson likelihood is evaluated.
     """
 
     def __init__(
@@ -567,6 +582,7 @@ class AveragedMixtureCRNPairwiseLikelihood:
                     config=self.config,
                     blending_kernel=blending_kernel,
                     blending_flux_fraction=blending_flux_fraction,
+                    require_observed_support=False,
                 )
                 for seed in self.bank_seeds
             ]
@@ -590,14 +606,28 @@ class AveragedMixtureCRNPairwiseLikelihood:
         self.fixed_parameters = dict(self.reference.fixed_parameters)
         self.blending_metadata = dict(self.reference.blending_metadata)
         self._validate_likelihoods()
-        self.single_probability = np.mean(
+        self.single_probability = _pool_probability_tables(
             [likelihood.single_probability for likelihood in self.likelihoods],
-            axis=0,
+            [likelihood.single_support_counts for likelihood in self.likelihoods],
+            label="pairwise single-bank",
         )
         self.single_support_counts = np.sum(
             [likelihood.single_support_counts for likelihood in self.likelihoods],
             axis=0,
         )
+        missing_single = (
+            (self.observed_counts > 0)
+            & (self.single_support_counts <= 0)
+        )
+        if np.any(missing_single):
+            missing_labels = [
+                self.delta_time_labels[idx]
+                for idx in np.flatnonzero(missing_single)
+            ]
+            raise ValueError(
+                "Pooled single random banks have no support in observed "
+                f"Delta-t bin(s): {missing_labels}"
+            )
 
     @property
     def n_banks(self) -> int:
@@ -624,12 +654,31 @@ class AveragedMixtureCRNPairwiseLikelihood:
         return self.reference._theta_to_params(theta)
 
     def component_probabilities(self, params):
-        binary_probability = np.mean(
-            [
-                likelihood.component_probabilities(params)[1]
-                for likelihood in self.likelihoods
-            ],
+        binary_results = [
+            likelihood.binary_component_probability(params)
+            for likelihood in self.likelihoods
+        ]
+        binary_support_counts = np.sum(
+            [support for _, support in binary_results],
             axis=0,
+        )
+        missing_binary = (
+            (self.observed_counts > 0)
+            & (binary_support_counts <= 0)
+        )
+        if np.any(missing_binary):
+            missing_labels = [
+                self.delta_time_labels[idx]
+                for idx in np.flatnonzero(missing_binary)
+            ]
+            raise ValueError(
+                "Pooled binary random banks have no support in observed "
+                f"Delta-t bin(s): {missing_labels}"
+            )
+        binary_probability = _pool_probability_tables(
+            [probability for probability, _ in binary_results],
+            [support for _, support in binary_results],
+            label="pairwise binary-bank",
         )
         return self.single_probability, binary_probability
 

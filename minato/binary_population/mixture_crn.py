@@ -23,6 +23,11 @@ from .blending import (
     resolve_blending_flux_fraction,
     sample_blending_bias,
 )
+from .histograms import (
+    complete_nonnegative_bins,
+    histogram_nonnegative,
+    validate_nonnegative_finite,
+)
 from .mcmc import (
     DEFAULT_PARAMETER_BOUNDS,
     _env_truthy,
@@ -30,6 +35,7 @@ from .mcmc import (
     _normalise_parameter_bounds,
     _normalise_parameter_names,
 )
+from .orbits import orbital_semi_amplitudes_kms
 
 
 DEFAULT_BASELINE_BINS = np.array([0.0, 7.0, 30.0, 100.0, 365.0, np.inf])
@@ -107,8 +113,8 @@ class BankParallelAveragedLogProbPool:
     For an averaged likelihood with ``n_banks`` fixed random banks, a normal
     pool evaluates one walker at a time and each worker loops over all banks
     serially. This pool instead expands every emcee ``map`` call into
-    ``walker x bank`` tasks, then averages the returned bank probabilities in
-    the parent process before applying the same Poisson likelihood as
+    ``walker x bank`` tasks, then pools the returned bank probabilities using
+    their contributing support before applying the same Poisson likelihood as
     :class:`AveragedMixtureCRNLikelihood`.
     """
 
@@ -165,7 +171,9 @@ class BankParallelAveragedLogProbPool:
             ):
                 continue
             try:
-                binary_probability = np.mean(probabilities, axis=0)
+                binary_probability = self._log_prob.combine_binary_probabilities(
+                    probabilities
+                )
                 log_probabilities[theta_index] = (
                     self._log_prob.log_likelihood_from_binary_probability(
                         params,
@@ -254,10 +262,12 @@ class BinaryRandomBank:
 
 @dataclass(frozen=True)
 class CadenceGroup:
-    """Bank rows sharing one cadence template, with aligned epoch draws."""
+    """Bank rows sharing one epoch count, with exact per-system cadences."""
 
-    template_index: int
+    epoch_count: int
     system_indices: np.ndarray
+    mjds: np.ndarray
+    rv_errors: np.ndarray
     noise_unit: np.ndarray
     blend_unit: np.ndarray | None = None
 
@@ -330,12 +340,29 @@ def _edge_label(edges, index: int) -> str:
 
 def _histogram_by_condition(values, condition_indices, n_conditions, bins) -> np.ndarray:
     hist = np.zeros((int(n_conditions), len(bins) - 1), dtype=float)
-    values = np.asarray(values, dtype=float)
+    values = validate_nonnegative_finite(
+        values,
+        name="conditioned dRV_max",
+    )
     condition_indices = np.asarray(condition_indices, dtype=np.int32)
+    if values.shape != condition_indices.shape:
+        raise ValueError("conditioned values and condition indices must have the same shape")
+    invalid = (condition_indices < 0) | (condition_indices >= int(n_conditions))
+    if np.any(invalid):
+        raise ValueError(
+            "Every conditioned system must enter exactly one condition bin; "
+            f"found {int(np.count_nonzero(invalid))} unassigned system(s)"
+        )
     for condition_index in range(int(n_conditions)):
         mask = condition_indices == condition_index
         if np.any(mask):
-            hist[condition_index], _ = np.histogram(values[mask], bins=bins)
+            hist[condition_index], _ = histogram_nonnegative(
+                values[mask],
+                bins,
+                name=f"conditioned dRV_max bin {condition_index}",
+            )
+    if int(hist.sum()) != int(values.size):
+        raise RuntimeError("Conditioned dRV_max histogram did not conserve all systems")
     return hist
 
 
@@ -345,6 +372,36 @@ def _normalise_condition_histograms(hist, counts) -> np.ndarray:
     has_support = counts > 0
     probability[has_support] /= counts[has_support, None]
     return probability
+
+
+def _pool_probability_tables(probabilities, support_counts, *, label) -> np.ndarray:
+    """Pool probability tables using their contributing system counts."""
+    probability_array = np.asarray(probabilities, dtype=float)
+    support_array = np.asarray(support_counts, dtype=float)
+    if probability_array.ndim < 2:
+        raise ValueError(f"{label} probabilities must include bank and histogram axes")
+    if support_array.shape != probability_array.shape[:-1]:
+        raise ValueError(
+            f"{label} support counts must match all probability axes except the last"
+        )
+    if np.any(~np.isfinite(probability_array)) or np.any(probability_array < 0.0):
+        raise ValueError(f"{label} probabilities must be finite and non-negative")
+    if np.any(~np.isfinite(support_array)) or np.any(support_array < 0.0):
+        raise ValueError(f"{label} support counts must be finite and non-negative")
+
+    total_support = np.sum(support_array, axis=0)
+    weighted_counts = np.sum(
+        probability_array * support_array[..., None],
+        axis=0,
+    )
+    pooled = np.zeros_like(weighted_counts, dtype=float)
+    np.divide(
+        weighted_counts,
+        total_support[..., None],
+        out=pooled,
+        where=total_support[..., None] > 0.0,
+    )
+    return pooled
 
 
 def _build_cadence_bank(rng, n_bank, template_mjds) -> CadenceRandomBank:
@@ -361,12 +418,36 @@ def _build_cadence_bank(rng, n_bank, template_mjds) -> CadenceRandomBank:
 
 def _build_cadence_groups(
     cadence: CadenceRandomBank,
+    template_mjds,
+    template_rv_errors,
     blend_unit: tuple[np.ndarray, ...] | None = None,
 ) -> list[CadenceGroup]:
+    """Batch bank rows by epoch count while retaining every exact template.
+
+    ``BinaryPopulation.rvcurve`` accepts a different time array in each
+    matrix column. Grouping by epoch count therefore removes the Python-level
+    loop over unique templates without pooling or approximating their MJDs,
+    RV uncertainties, noise draws, or optional blending draws.
+    """
+
     groups: list[CadenceGroup] = []
     template_indices = np.asarray(cadence.template_indices, dtype=np.int32)
-    for template_index in np.unique(template_indices):
-        system_indices = np.flatnonzero(template_indices == template_index).astype(np.int64)
+    template_epoch_counts = np.asarray(
+        [np.asarray(values).size for values in template_mjds],
+        dtype=np.int32,
+    )
+    system_epoch_counts = template_epoch_counts[template_indices]
+    for epoch_count in np.unique(system_epoch_counts):
+        system_indices = np.flatnonzero(
+            system_epoch_counts == epoch_count
+        ).astype(np.int64)
+        group_template_indices = template_indices[system_indices]
+        mjds = np.column_stack(
+            [template_mjds[int(index)] for index in group_template_indices]
+        )
+        rv_errors = np.column_stack(
+            [template_rv_errors[int(index)] for index in group_template_indices]
+        )
         noise_unit = np.column_stack(
             [cadence.noise_unit[int(index)] for index in system_indices]
         )
@@ -377,8 +458,10 @@ def _build_cadence_groups(
             )
         groups.append(
             CadenceGroup(
-                template_index=int(template_index),
+                epoch_count=int(epoch_count),
                 system_indices=system_indices,
+                mjds=np.asarray(mjds, dtype=float),
+                rv_errors=np.asarray(rv_errors, dtype=float),
                 noise_unit=np.asarray(noise_unit, dtype=float),
                 blend_unit=(
                     None
@@ -489,11 +572,16 @@ class MixtureCRNLikelihood:
         self.binary_bank = binary_bank
         self.binary_cadence_groups = _build_cadence_groups(
             self.binary_bank.cadence,
+            self.template_mjds,
+            self.template_rv_errors,
             blend_unit=self.binary_bank.blend_unit,
         )
         self.bank_seed = bank_seed
-        self.bins = np.asarray(np.logspace(0.4, 3, 30) if bins is None else bins, dtype=float)
-        self.n_real, _ = np.histogram(self.dRV_real, bins=self.bins)
+        self.n_real, self.bins = histogram_nonnegative(
+            self.dRV_real,
+            bins,
+            name="dRV_real",
+        )
         self.blending_kernel = blending_kernel
         self.blending_flux_fraction = blending_flux_fraction
         self.blending_metadata = blending_metadata(
@@ -502,7 +590,11 @@ class MixtureCRNLikelihood:
         )
 
         self.single_drv = self._simulate_single_drv()
-        self.single_hist, _ = np.histogram(self.single_drv, bins=self.bins)
+        self.single_hist, _ = histogram_nonnegative(
+            self.single_drv,
+            self.bins,
+            name="single-bank dRV_max",
+        )
         self.single_probability = self.single_hist.astype(float) / float(self.single_bank.size)
 
     def _theta_to_params(self, theta):
@@ -525,6 +617,21 @@ class MixtureCRNLikelihood:
             d_rv[idx] = float(np.nanmax(rv_obs) - np.nanmin(rv_obs))
         return d_rv
 
+    def _simulate_single_drv_and_dt_at_max(self):
+        """Simulate ``dRV_max`` and the separation of its defining epochs."""
+        d_rv = np.empty(self.single_bank.size, dtype=float)
+        dt_at_max = np.empty(self.single_bank.size, dtype=float)
+        for idx, template_idx in enumerate(self.single_bank.cadence.template_indices):
+            template_idx = int(template_idx)
+            t_array = np.asarray(self.template_mjds[template_idx], dtype=float)
+            rv_errors = np.asarray(self.template_rv_errors[template_idx], dtype=float)
+            rv_obs = self.single_bank.cadence.noise_unit[idx] * rv_errors
+            max_idx = int(np.nanargmax(rv_obs))
+            min_idx = int(np.nanargmin(rv_obs))
+            d_rv[idx] = float(rv_obs[max_idx] - rv_obs[min_idx])
+            dt_at_max[idx] = float(abs(t_array[max_idx] - t_array[min_idx]))
+        return d_rv, dt_at_max
+
     def _binary_intrinsic_arrays(self, params):
         pop = self.population
         bank = self.binary_bank
@@ -541,17 +648,17 @@ class MixtureCRNLikelihood:
         m2 = m1 * q
         cos_i = -1.0 + 2.0 * bank.u_cos_i
         i_rad = np.arccos(np.clip(cos_i, -1.0, 1.0))
-        sin_i = np.sin(i_rad)
         omega_deg = 360.0 * bank.u_omega
         omega_deg[eccentricity == 0.0] = 90.0
         tp = bank.u_Tp * period
 
-        g_factor = 4.309e-3 * 3.0857e13
-        period_sec = period * 86400.0
-        denom = np.power(m1 + m2, 2.0 / 3.0)
-        factor = np.power(2.0 * np.pi * g_factor, 1.0 / 3.0) * np.power(period_sec, -1.0 / 3.0)
-        k1 = factor * (m2 * sin_i) / denom
-        k2 = factor * (m1 * sin_i) / denom
+        k1, k2 = orbital_semi_amplitudes_kms(
+            m1,
+            m2,
+            period,
+            i_rad,
+            eccentricity,
+        )
 
         return {
             "M1": m1,
@@ -636,15 +743,13 @@ class MixtureCRNLikelihood:
             blend_unit=group.blend_unit,
         )
 
-    def simulate_binary_drv(self, params):
+    def _iter_binary_group_observations(self, params):
         arrays = self._binary_intrinsic_arrays(params)
-        d_rv = np.empty(self.binary_bank.size, dtype=float)
         pop = self.population
         for group in self.binary_cadence_groups:
             indices = group.system_indices
-            t_array = np.asarray(self.template_mjds[group.template_index], dtype=float)
-            t_grid = t_array[:, None]
-            rv_errors = np.asarray(self.template_rv_errors[group.template_index], dtype=float)
+            t_grid = group.mjds
+            rv_errors = group.rv_errors
             if self.blending_kernel is None:
                 v1_true = pop.rvcurve(
                     t_grid,
@@ -675,13 +780,36 @@ class MixtureCRNLikelihood:
                     v1_true,
                     v2_true,
                 )
-            rv_obs = v1_true + group.noise_unit * rv_errors[:, None]
+            rv_obs = v1_true + group.noise_unit * rv_errors
+            yield indices, t_grid, rv_obs
+
+    def simulate_binary_drv(self, params):
+        d_rv = np.empty(self.binary_bank.size, dtype=float)
+        for indices, _, rv_obs in self._iter_binary_group_observations(params):
             d_rv[indices] = np.nanmax(rv_obs, axis=0) - np.nanmin(rv_obs, axis=0)
         return d_rv
 
+    def simulate_binary_drv_and_dt_at_max(self, params):
+        """Simulate ``dRV_max`` and the separation of its defining epochs."""
+        d_rv = np.empty(self.binary_bank.size, dtype=float)
+        dt_at_max = np.empty(self.binary_bank.size, dtype=float)
+        for indices, t_grid, rv_obs in self._iter_binary_group_observations(params):
+            columns = np.arange(indices.size)
+            max_indices = np.nanargmax(rv_obs, axis=0)
+            min_indices = np.nanargmin(rv_obs, axis=0)
+            d_rv[indices] = rv_obs[max_indices, columns] - rv_obs[min_indices, columns]
+            dt_at_max[indices] = np.abs(
+                t_grid[max_indices, columns] - t_grid[min_indices, columns]
+            )
+        return d_rv, dt_at_max
+
     def component_probabilities(self, params):
         binary_drv = self.simulate_binary_drv(params)
-        binary_hist, _ = np.histogram(binary_drv, bins=self.bins)
+        binary_hist, _ = histogram_nonnegative(
+            binary_drv,
+            self.bins,
+            name="binary-bank dRV_max",
+        )
         binary_probability = binary_hist.astype(float) / float(self.binary_bank.size)
         return self.single_probability, binary_probability
 
@@ -709,11 +837,11 @@ class AveragedMixtureCRNLikelihood:
     """
     Experimental multi-bank mixture-CRN likelihood.
 
-    With ``condition_by=None`` this averages global component probabilities
-    across one or more fixed random banks before applying one Poisson
-    likelihood. With ``condition_by="baseline_days"`` it scores separate
-    ``dRV_max`` histograms in survey-baseline bins and averages the per-bank
-    conditioned probabilities before scoring.
+    With ``condition_by=None`` this pools global component counts across one or
+    more fixed random banks before applying one Poisson likelihood. With
+    ``condition_by="baseline_days"`` it scores separate ``dRV_max`` histograms
+    in survey-baseline bins and pools their contributing support before
+    scoring.
     """
 
     def __init__(
@@ -801,9 +929,10 @@ class AveragedMixtureCRNLikelihood:
 
         if self.condition_by is None:
             self.n_real = np.asarray(self.reference.n_real, dtype=float)
-            self.single_probability = np.mean(
+            self.single_probability = _pool_probability_tables(
                 [likelihood.single_probability for likelihood in self.likelihoods],
-                axis=0,
+                [likelihood.single_bank.size for likelihood in self.likelihoods],
+                label="single-bank",
             )
             self.observed_counts = None
             self.observed_hist = None
@@ -890,19 +1019,6 @@ class AveragedMixtureCRNLikelihood:
                 binary_condition_indices[binary_condition_indices >= 0],
                 minlength=self.n_conditions,
             ).astype(float)
-            if np.any((single_counts <= 0) & needed):
-                missing = [
-                    self.condition_labels[idx]
-                    for idx in np.flatnonzero((single_counts <= 0) & needed)
-                ]
-                raise ValueError(f"Single random bank has no systems in observed condition bin(s): {missing}")
-            if np.any((binary_counts <= 0) & needed):
-                missing = [
-                    self.condition_labels[idx]
-                    for idx in np.flatnonzero((binary_counts <= 0) & needed)
-                ]
-                raise ValueError(f"Binary random bank has no systems in observed condition bin(s): {missing}")
-
             single_hist = _histogram_by_condition(
                 likelihood.single_drv,
                 single_condition_indices,
@@ -924,9 +1040,34 @@ class AveragedMixtureCRNLikelihood:
             )
 
         self.conditioned_bank_states = states
-        self.single_probability = np.mean(
-            [state.single_probability for state in states],
+        pooled_single_counts = np.sum(
+            [state.single_counts for state in states],
             axis=0,
+        )
+        pooled_binary_counts = np.sum(
+            [state.binary_counts for state in states],
+            axis=0,
+        )
+        if np.any((pooled_single_counts <= 0) & needed):
+            missing = [
+                self.condition_labels[idx]
+                for idx in np.flatnonzero((pooled_single_counts <= 0) & needed)
+            ]
+            raise ValueError(
+                f"Pooled single random banks have no systems in observed condition bin(s): {missing}"
+            )
+        if np.any((pooled_binary_counts <= 0) & needed):
+            missing = [
+                self.condition_labels[idx]
+                for idx in np.flatnonzero((pooled_binary_counts <= 0) & needed)
+            ]
+            raise ValueError(
+                f"Pooled binary random banks have no systems in observed condition bin(s): {missing}"
+            )
+        self.single_probability = _pool_probability_tables(
+            [state.single_probability for state in states],
+            [state.single_counts for state in states],
+            label="conditioned single-bank",
         )
         self.n_real = self.observed_hist
 
@@ -962,16 +1103,33 @@ class AveragedMixtureCRNLikelihood:
             self.bank_binary_probability(bank_index, params)
             for bank_index in range(self.n_banks)
         ]
-        return np.mean(probabilities, axis=0)
+        return self.combine_binary_probabilities(probabilities)
+
+    def combine_binary_probabilities(self, probabilities):
+        """Pool per-bank binary probabilities using contributing system counts."""
+        if self.condition_by is None:
+            support_counts = [
+                likelihood.binary_bank.size
+                for likelihood in self.likelihoods
+            ]
+        else:
+            support_counts = [
+                state.binary_counts
+                for state in self.conditioned_bank_states
+            ]
+        return _pool_probability_tables(
+            probabilities,
+            support_counts,
+            label="binary-bank",
+        )
 
     def component_probabilities(self, params):
         if self.condition_by is None:
-            binary_probability = np.mean(
+            binary_probability = self.combine_binary_probabilities(
                 [
                     self.bank_binary_probability(bank_index, params)
                     for bank_index in range(self.n_banks)
-                ],
-                axis=0,
+                ]
             )
         else:
             binary_probability = self._binary_conditioned_probability(params)
@@ -1157,9 +1315,9 @@ def run_averaged_mixture_crn_mcmc(
     Run emcee with the experimental averaged mixture-CRN likelihood.
 
     ``bank_seeds`` may contain one or more fixed-bank seeds. Model component
-    probabilities are averaged across banks before the Poisson likelihood is
-    evaluated. Pass ``condition_by="baseline_days"`` to use baseline-binned
-    ``dRV_max`` histograms.
+    probabilities are pooled using their contributing support before the
+    Poisson likelihood is evaluated. Pass ``condition_by="baseline_days"`` to
+    use baseline-binned ``dRV_max`` histograms.
     """
     parameter_names = _normalise_parameter_names(parameter_names)
     parameter_bounds = _normalise_parameter_bounds(

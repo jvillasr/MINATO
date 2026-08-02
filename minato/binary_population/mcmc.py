@@ -7,6 +7,12 @@ import numpy as np
 from multiprocessing.pool import ThreadPool
 import multiprocessing as mp
 
+from .histograms import (
+    complete_nonnegative_bins,
+    histogram_nonnegative,
+    validate_nonnegative_finite,
+)
+
 
 SUPPORTED_PARAMETER_NAMES = ("f_bin", "pi", "kappa", "eta")
 DEFAULT_PARAMETER_BOUNDS = {
@@ -192,8 +198,11 @@ class LogProb:
             self.parameter_names,
             parameter_bounds=parameter_bounds,
         )
-        self.bins = np.logspace(0.4, 3, 30)
-        self.n_real, _ = np.histogram(self.dRV_real, bins=self.bins)
+        self.n_real, self.bins = histogram_nonnegative(
+            self.dRV_real,
+            self.sim_kwargs.get("bins"),
+            name="dRV_real",
+        )
         self.fixed_sim_kwargs = {
             **self.sim_kwargs,
             "N_sim_total": self.N_sim,
@@ -254,7 +263,7 @@ def compute_log_likelihood_batch(theta_params, survey, dRV_real, current_batch, 
     # Likelihood bookkeeping (not survey simulator arguments).
     n_real = np.asarray(sim_kwargs.pop("n_real"), dtype=float)
     N_obs = int(sim_kwargs.pop("N_obs", len(dRV_real)))
-    bins = np.asarray(sim_kwargs.pop("bins", np.logspace(0.4, 3, 30)), dtype=float)
+    bins = complete_nonnegative_bins(sim_kwargs.pop("bins", None))
 
     use_fast_summary = (
         bool(sim_kwargs.get("summary_only", False))
@@ -277,7 +286,11 @@ def compute_log_likelihood_batch(theta_params, survey, dRV_real, current_batch, 
         )
         dRV_mock = mock_res_df["dRV_max"].values
 
-    n_mock, _ = np.histogram(dRV_mock, bins=bins)
+    n_mock, _ = histogram_nonnegative(
+        dRV_mock,
+        bins,
+        name="simulated dRV_max",
+    )
     n_mock = n_mock.astype(float)
 
     scale = N_obs / float(N_sim_total)
@@ -306,6 +319,7 @@ def log_likelihood(
         sim_kwargs = {}
     names = _normalise_parameter_names(parameter_names)
     theta_params = _theta_to_parameter_dict(theta, names)
+    dRV_real = validate_nonnegative_finite(dRV_real, name="dRV_real")
     n_batches = int(np.ceil(N_sim / batch_size))
     logL_total = 0.0
 
@@ -313,8 +327,11 @@ def log_likelihood(
     sim_kwargs = {**sim_kwargs}
     sim_kwargs.setdefault("summary_only", True)
     if "n_real" not in sim_kwargs or "bins" not in sim_kwargs:
-        bins = np.logspace(0.4, 3, 30)
-        n_real, _ = np.histogram(dRV_real, bins=bins)
+        n_real, bins = histogram_nonnegative(
+            dRV_real,
+            sim_kwargs.get("bins"),
+            name="dRV_real",
+        )
         sim_kwargs = {
             **sim_kwargs,
             "N_sim_total": N_sim,
@@ -323,6 +340,11 @@ def log_likelihood(
             "bins": bins,
         }
     else:
+        sim_kwargs["bins"] = complete_nonnegative_bins(sim_kwargs["bins"])
+        if len(np.asarray(sim_kwargs["n_real"])) != len(sim_kwargs["bins"]) - 1:
+            raise ValueError("n_real must contain one count per completed histogram bin")
+        if int(np.sum(sim_kwargs["n_real"])) != int(dRV_real.size):
+            raise ValueError("n_real must conserve every dRV_real row")
         sim_kwargs.setdefault("N_sim_total", N_sim)
         sim_kwargs.setdefault("N_obs", len(dRV_real))
     for i in range(n_batches):

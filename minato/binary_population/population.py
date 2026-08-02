@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from .orbits import solve_kepler
+from .orbits import orbital_semi_amplitudes_kms, solve_kepler
 
 
 class BinaryPopulation:
@@ -605,15 +605,13 @@ class BinaryPopulation:
 
         Tp_array = np.random.random(size=M1_array.shape) * P_array
 
-        G = 4.309e-3 * 3.0857e13  # combined factor
-        P_sec_array = P_array * 86400.0
-
-        denom = (M1_array + M2_array) ** (2 / 3)
-        sin_i = np.sin(i_array)
-        factor = (2 * np.pi * G) ** (1 / 3) * (P_sec_array ** (-1 / 3))
-
-        K1_array = factor * (M2_array * sin_i) / denom
-        K2_array = factor * (M1_array * sin_i) / denom
+        K1_array, K2_array = orbital_semi_amplitudes_kms(
+            M1_array,
+            M2_array,
+            P_array,
+            i_array,
+            e_array,
+        )
 
         return {
             "P": P_array,

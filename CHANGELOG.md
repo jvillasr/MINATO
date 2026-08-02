@@ -1,5 +1,13 @@
 ## [Unreleased]
 ### Added
+* [2026-07-29] Added a count-pooled joint mixture-CRN likelihood for
+  `P(dRV_max, dt_at_dRV_max | baseline_bin, theta)`. The public averaged
+  runner supports global or baseline-conditioned scoring, complete
+  non-negative histogram support, unequal bank sizes, empty individual-bank
+  condition cells, and `bank_static_process` execution. Regression tests
+  verify row conservation, deterministic evaluation, the corrected orbital
+  amplitude, the `dRV_max` time marginal, and exact equivalence between one
+  population and the same systems split into unequal blocks.
 * [2026-07-22] The development-only shift-and-add adaptation can propagate
   independent epoch-level flux errors through fixed-orbit repeated-noise
   disentangling, save marginal one-sigma component errors, and retain the
@@ -202,6 +210,23 @@
 * The SB1 and SB2 `ravel` tutorials now include an upfront note on setting `XLA_FLAGS` before importing `minato.ravel` on shared CPU servers.
 
 ### Fixed
+* [2026-07-31] Mixture-CRN binary-bank evaluation now batches systems with
+  equal epoch counts while preserving every system's exact cadence, RV
+  uncertainties, noise draws, and optional blending draws. Regression tests
+  verify exact agreement with the per-template reference calculation.
+* [2026-07-24] Multi-bank binary-population likelihoods now pool component
+  counts using their actual global or per-condition support before evaluating
+  one Poisson likelihood. This is exactly equivalent to concatenating unequal
+  banks, permits an individual empty condition when the pooled banks retain
+  support, and keeps serial and bank-parallel evaluation identical.
+* [2026-07-24] Non-negative RV-summary histograms now reject negative and
+  non-finite values instead of silently dropping them, and require exact
+  observed and simulated row conservation.
+* [2026-07-23] Binary-population RV semi-amplitudes now include the standard
+  eccentric factor `1/sqrt(1-e**2)` through one shared, analytically tested
+  orbit helper. Default `dRV_max` and pairwise histograms now include explicit
+  `[0, 10**0.4)` and `[1000, infinity)` tail bins so every finite non-negative
+  observation and simulation contributes to the likelihood.
 * [2026-07-15] Rebuilt SPAN's two-dimensional profile-correlation plot for
   current result tables, including `chi2_tot` selection, irregular atmosphere
   grids, explicit joint best-model markers, portable rendering, and no

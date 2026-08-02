@@ -6,8 +6,10 @@ import pandas as pd
 
 from minato.binary_population import BinaryPopulation, BinarySurveySimulator, run_mcmc
 from minato.binary_population import (
+    AveragedJointDrvmaxDtmaxCRNLikelihood,
     AveragedMixtureCRNLikelihood,
     AveragedMixtureCRNPairwiseLikelihood,
+    JointDrvmaxDtmaxCRNLikelihood,
     MixtureCRNLikelihood,
     PairwiseMixtureCRNLikelihood,
     PairwiseSummaryConfig,
@@ -16,13 +18,16 @@ from minato.binary_population import (
     run_averaged_mixture_crn_pairwise_mcmc,
     run_mixture_crn_mcmc,
 )
+from minato.binary_population.joint_crn import _pool_joint_probability_tables
 from minato.binary_population.mixture_crn import (
     BankParallelAveragedLogProbPool,
     BinaryRandomBank,
     CadenceRandomBank,
     SingleRandomBank,
+    _pool_probability_tables,
     build_mixture_crn_banks,
 )
+from minato.binary_population.orbits import orbital_semi_amplitudes_kms
 
 
 def make_toy_survey():
@@ -85,6 +90,35 @@ def make_one_system_banks(blend_unit=None):
     return single_bank, binary_bank
 
 
+def slice_random_banks(single_bank, binary_bank, indices):
+    indices = np.asarray(indices, dtype=np.int64)
+
+    def sliced_cadence(cadence):
+        return CadenceRandomBank(
+            template_indices=np.asarray(cadence.template_indices)[indices],
+            noise_unit=tuple(cadence.noise_unit[int(index)] for index in indices),
+        )
+
+    return (
+        SingleRandomBank(cadence=sliced_cadence(single_bank.cadence)),
+        BinaryRandomBank(
+            u_m1=np.asarray(binary_bank.u_m1)[indices],
+            u_logP=np.asarray(binary_bank.u_logP)[indices],
+            u_q=np.asarray(binary_bank.u_q)[indices],
+            u_e=np.asarray(binary_bank.u_e)[indices],
+            u_cos_i=np.asarray(binary_bank.u_cos_i)[indices],
+            u_omega=np.asarray(binary_bank.u_omega)[indices],
+            u_Tp=np.asarray(binary_bank.u_Tp)[indices],
+            cadence=sliced_cadence(binary_bank.cadence),
+            blend_unit=(
+                None
+                if binary_bank.blend_unit is None
+                else tuple(binary_bank.blend_unit[int(index)] for index in indices)
+            ),
+        ),
+    )
+
+
 class FluxAwareTestBlendKernel:
     metadata = {"name": "flux-aware-test-kernel", "n_rows": 3}
 
@@ -95,6 +129,361 @@ class FluxAwareTestBlendKernel:
 
 
 class BinaryPopulationInferenceTests(unittest.TestCase):
+    def test_joint_path_uses_corrected_orbital_amplitudes(self):
+        pop, survey = make_single_template_survey()
+        pop.use_roche_guard = False
+        single_bank, binary_bank = make_one_system_banks()
+        binary_bank = BinaryRandomBank(
+            **{
+                **binary_bank.__dict__,
+                "u_e": np.array([0.8]),
+            }
+        )
+        like = JointDrvmaxDtmaxCRNLikelihood(
+            survey,
+            np.array([1.0]),
+            np.array([2.0]),
+            single_bank=single_bank,
+            binary_bank=binary_bank,
+            parameter_names=("f_bin", "pi", "kappa", "eta"),
+            drv_bins=np.array([0.0, np.inf]),
+            dt_bins=np.array([0.0, np.inf]),
+        )
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.2, "eta": -0.4}
+        arrays = like._binary_intrinsic_arrays(params)
+        inclination = np.arccos(-1.0 + 2.0 * binary_bank.u_cos_i)
+        expected_k1, expected_k2 = orbital_semi_amplitudes_kms(
+            arrays["M1"], arrays["M2"], arrays["P"], inclination, arrays["e"]
+        )
+
+        self.assertGreater(float(arrays["e"][0]), 0.0)
+        np.testing.assert_allclose(arrays["K1"], expected_k1)
+        np.testing.assert_allclose(arrays["K2"], expected_k2)
+
+    def test_joint_one_time_bin_matches_drv_likelihood(self):
+        _, survey = make_toy_survey()
+        observed_drv = np.array([0.0, 5.0, 25.0, 1.0e6])
+        observed_dt = np.array([0.0, 20.0, 100.0, 1.0e6])
+        single_bank, binary_bank = build_mixture_crn_banks(survey, 128, 128, seed=610)
+        common = {
+            "survey": survey,
+            "dRV_real": observed_drv,
+            "single_bank": single_bank,
+            "binary_bank": binary_bank,
+            "parameter_names": ("f_bin", "pi"),
+        }
+        drv_like = MixtureCRNLikelihood(
+            bins=np.array([0.0, 10.0, 100.0, np.inf]),
+            **common,
+        )
+        joint_like = JointDrvmaxDtmaxCRNLikelihood(
+            dt_at_dRVmax_real=observed_dt,
+            drv_bins=np.array([0.0, 10.0, 100.0, np.inf]),
+            dt_bins=np.array([0.0, np.inf]),
+            **common,
+        )
+        theta = np.array([0.6, 0.1])
+
+        self.assertEqual(joint_like(theta), drv_like(theta))
+        self.assertEqual(int(joint_like.observed_hist.sum()), observed_drv.size)
+        self.assertEqual(int(joint_like.single_hist.sum()), single_bank.size)
+
+    def test_baseline_conditioned_joint_one_time_bin_matches_drv_likelihood(self):
+        _, survey = make_toy_survey()
+        observed_drv = np.array([5.0, 12.0, 25.0, 40.0])
+        observed_dt = np.array([20.0, 90.0, 100.0, 20.0])
+        observed_baselines = np.array([30.0, 100.0, 120.0, 30.0])
+        common = {
+            "survey": survey,
+            "dRV_real": observed_drv,
+            "n_single_bank": 128,
+            "n_binary_bank": 128,
+            "bank_seeds": (611, 612),
+            "parameter_names": ("f_bin", "pi"),
+            "condition_by": "baseline_days",
+            "baseline_bins": np.array([0.0, 50.0, 150.0, np.inf]),
+            "observed_baseline_days": observed_baselines,
+        }
+        drv_like = AveragedMixtureCRNLikelihood(
+            bins=np.array([0.0, 10.0, 30.0, np.inf]),
+            **common,
+        )
+        joint_like = AveragedJointDrvmaxDtmaxCRNLikelihood(
+            dt_at_dRVmax_real=observed_dt,
+            drv_bins=np.array([0.0, 10.0, 30.0, np.inf]),
+            dt_bins=np.array([0.0, np.inf]),
+            **common,
+        )
+        theta = np.array([0.6, 0.1])
+
+        self.assertEqual(joint_like(theta), drv_like(theta))
+        np.testing.assert_array_equal(
+            joint_like.observed_hist.sum(axis=(1, 2)),
+            joint_like.observed_counts,
+        )
+
+    def test_joint_histograms_conserve_low_and_high_rows(self):
+        _, survey = make_toy_survey()
+        like = AveragedJointDrvmaxDtmaxCRNLikelihood(
+            survey,
+            np.array([0.0, 5.0, 1.0e9]),
+            np.array([0.0, 5.0, 1.0e9]),
+            n_single_bank=64,
+            n_binary_bank=64,
+            bank_seeds=(613, 614),
+            parameter_names=("f_bin", "pi"),
+            drv_bins=np.array([1.0, 10.0]),
+            dt_bins=np.array([1.0, 10.0]),
+            condition_by="baseline_days",
+            baseline_bins=np.array([0.0, 50.0, np.inf]),
+            observed_baseline_days=np.array([0.0, 30.0, 1.0e9]),
+        )
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.0, "eta": -0.5}
+        single, binary = like.component_probabilities(params)
+        needed = like.observed_counts > 0
+
+        self.assertEqual(int(like.observed_hist.sum()), 3)
+        np.testing.assert_allclose(single[needed].sum(axis=(1, 2)), 1.0)
+        np.testing.assert_allclose(binary[needed].sum(axis=(1, 2)), 1.0)
+
+    def test_joint_pooling_handles_unequal_banks_and_empty_condition_cells(self):
+        _, survey = make_toy_survey()
+        observed_drv = np.array([5.0, 12.0, 25.0, 40.0])
+        observed_dt = np.array([20.0, 90.0, 100.0, 20.0])
+        observed_baselines = np.array([30.0, 100.0, 120.0, 30.0])
+        likelihoods = [
+            JointDrvmaxDtmaxCRNLikelihood(
+                survey,
+                observed_drv,
+                observed_dt,
+                n_single_bank=size,
+                n_binary_bank=size,
+                bank_seed=seed,
+                parameter_names=("f_bin", "pi"),
+                drv_bins=np.array([0.0, 10.0, 30.0, np.inf]),
+                dt_bins=np.array([0.0, 50.0, np.inf]),
+                condition_by="baseline_days",
+                baseline_bins=np.array([0.0, 50.0, 150.0, np.inf]),
+                observed_baseline_days=observed_baselines,
+            )
+            for size, seed in ((1, 615), (128, 616))
+        ]
+        like = AveragedJointDrvmaxDtmaxCRNLikelihood(
+            survey,
+            observed_drv,
+            observed_dt,
+            likelihoods=likelihoods,
+            parameter_names=("f_bin", "pi"),
+            condition_by="baseline_days",
+        )
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.0, "eta": -0.5}
+        bank_probabilities = [
+            like.bank_binary_probability(index, params)
+            for index in range(like.n_banks)
+        ]
+        expected = _pool_joint_probability_tables(
+            bank_probabilities,
+            [likelihood.binary_support_counts for likelihood in likelihoods],
+            label="test",
+        )
+
+        np.testing.assert_allclose(like.component_probabilities(params)[1], expected)
+        self.assertTrue(
+            any(np.any(likelihood.binary_support_counts == 0) for likelihood in likelihoods)
+        )
+        theta = np.array([0.6, 0.1])
+        self.assertEqual(like(theta), like(theta))
+
+    def test_joint_time_marginal_matches_baseline_conditioned_drv_likelihood(self):
+        _, survey = make_toy_survey()
+        observed_drv = np.array([5.0, 12.0, 25.0, 40.0])
+        observed_dt = np.array([20.0, 90.0, 100.0, 20.0])
+        observed_baselines = np.array([30.0, 100.0, 120.0, 30.0])
+        common = {
+            "survey": survey,
+            "dRV_real": observed_drv,
+            "n_single_bank": 128,
+            "n_binary_bank": 128,
+            "bank_seeds": (620, 621),
+            "parameter_names": ("f_bin", "pi"),
+            "condition_by": "baseline_days",
+            "baseline_bins": np.array([0.0, 50.0, 150.0, np.inf]),
+            "observed_baseline_days": observed_baselines,
+        }
+        drv_like = AveragedMixtureCRNLikelihood(
+            bins=np.array([0.0, 10.0, 30.0, np.inf]),
+            **common,
+        )
+        joint_like = AveragedJointDrvmaxDtmaxCRNLikelihood(
+            dt_at_dRVmax_real=observed_dt,
+            drv_bins=np.array([0.0, 10.0, 30.0, np.inf]),
+            dt_bins=np.array([0.0, 10.0, 50.0, np.inf]),
+            **common,
+        )
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.0, "eta": -0.5}
+        drv_single, drv_binary = drv_like.component_probabilities(params)
+        joint_single, joint_binary = joint_like.component_probabilities(params)
+
+        np.testing.assert_allclose(joint_single.sum(axis=2), drv_single)
+        np.testing.assert_allclose(joint_binary.sum(axis=2), drv_binary)
+        np.testing.assert_array_equal(
+            joint_like.observed_hist.sum(axis=2),
+            drv_like.observed_hist,
+        )
+
+    def test_split_joint_population_matches_unsplit_identical_systems(self):
+        _, survey = make_toy_survey()
+        observed_drv = np.array([5.0, 12.0, 25.0, 40.0])
+        observed_dt = np.array([20.0, 90.0, 100.0, 20.0])
+        single_bank, binary_bank = build_mixture_crn_banks(survey, 128, 128, seed=622)
+        common = {
+            "survey": survey,
+            "dRV_real": observed_drv,
+            "dt_at_dRVmax_real": observed_dt,
+            "parameter_names": ("f_bin", "pi"),
+            "drv_bins": np.array([0.0, 10.0, 30.0, np.inf]),
+            "dt_bins": np.array([0.0, 10.0, 50.0, np.inf]),
+        }
+        unsplit = JointDrvmaxDtmaxCRNLikelihood(
+            single_bank=single_bank,
+            binary_bank=binary_bank,
+            **common,
+        )
+        pieces = []
+        for indices in (np.arange(31), np.arange(31, 128)):
+            piece_single, piece_binary = slice_random_banks(
+                single_bank,
+                binary_bank,
+                indices,
+            )
+            pieces.append(
+                JointDrvmaxDtmaxCRNLikelihood(
+                    single_bank=piece_single,
+                    binary_bank=piece_binary,
+                    **common,
+                )
+            )
+        split = AveragedJointDrvmaxDtmaxCRNLikelihood(
+            survey,
+            observed_drv,
+            observed_dt,
+            likelihoods=pieces,
+            parameter_names=("f_bin", "pi"),
+        )
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.0, "eta": -0.5}
+        unsplit_components = unsplit.component_probabilities(params)
+        split_components = split.component_probabilities(params)
+
+        np.testing.assert_array_equal(split_components[0], unsplit_components[0])
+        np.testing.assert_array_equal(split_components[1], unsplit_components[1])
+        self.assertEqual(split.log_likelihood(params), unsplit.log_likelihood(params))
+
+    def test_ordinary_crn_and_pairwise_paths_share_corrected_amplitudes(self):
+        pop, survey = make_single_template_survey()
+        pop.use_roche_guard = False
+        cadence = CadenceRandomBank(
+            template_indices=np.array([0], dtype=np.int32),
+            noise_unit=(np.zeros(3),),
+        )
+        single_bank = SingleRandomBank(cadence=cadence)
+        binary_bank = BinaryRandomBank(
+            u_m1=np.array([0.65]),
+            u_logP=np.array([0.55]),
+            u_q=np.array([0.70]),
+            u_e=np.array([0.80]),
+            u_cos_i=np.array([0.50]),
+            u_omega=np.array([0.30]),
+            u_Tp=np.array([0.20]),
+            cadence=cadence,
+        )
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.2, "eta": -0.4}
+        drv_like = MixtureCRNLikelihood(
+            survey,
+            np.array([1.0]),
+            single_bank=single_bank,
+            binary_bank=binary_bank,
+            parameter_names=("f_bin", "pi", "kappa", "eta"),
+            bins=np.array([0.0, 1.0e6]),
+        )
+        pairwise_like = PairwiseMixtureCRNLikelihood(
+            survey,
+            np.array([[1.0]]),
+            single_bank=single_bank,
+            binary_bank=binary_bank,
+            parameter_names=("f_bin", "pi", "kappa", "eta"),
+            config=PairwiseSummaryConfig(
+                delta_time_bins=(0.0, np.inf),
+                response="max_abs_delta_rv",
+                response_bins=(0.0, 1.0e6),
+            ),
+        )
+
+        drv_arrays = drv_like._binary_intrinsic_arrays(params)
+        pairwise_arrays = pairwise_like._binary_intrinsic_arrays(params)
+        expected_k1, expected_k2 = orbital_semi_amplitudes_kms(
+            drv_arrays["M1"],
+            drv_arrays["M2"],
+            drv_arrays["P"],
+            np.full(1, np.pi / 2.0),
+            drv_arrays["e"],
+        )
+        ordinary = pop.sample_orbital_extras_vectorized(
+            drv_arrays["M1"],
+            np.log10(drv_arrays["P"]),
+            drv_arrays["q"],
+            drv_arrays["e"],
+            inc_mode="edge_on",
+        )
+
+        self.assertGreater(float(drv_arrays["e"][0]), 0.0)
+        np.testing.assert_allclose(drv_arrays["K1"], expected_k1)
+        np.testing.assert_allclose(drv_arrays["K2"], expected_k2)
+        np.testing.assert_allclose(pairwise_arrays["K1"], expected_k1)
+        np.testing.assert_allclose(pairwise_arrays["K2"], expected_k2)
+        np.testing.assert_allclose(ordinary["K1"], expected_k1)
+        np.testing.assert_allclose(ordinary["K2"], expected_k2)
+
+    def test_probability_pooling_uses_support_counts(self):
+        probabilities = np.array([[0.5, 0.5], [0.0, 1.0]])
+
+        equal = _pool_probability_tables(
+            probabilities,
+            [4, 4],
+            label="test",
+        )
+        unequal = _pool_probability_tables(
+            probabilities,
+            [2, 6],
+            label="test",
+        )
+
+        np.testing.assert_allclose(equal, [0.25, 0.75])
+        np.testing.assert_allclose(unequal, [0.125, 0.875])
+        np.testing.assert_allclose(
+            _pool_probability_tables(
+                np.array([[0.2, 0.8], [0.2, 0.8]]),
+                [1, 9],
+                label="test",
+            ),
+            [0.2, 0.8],
+        )
+
+    def test_probability_pooling_handles_condition_specific_empty_support(self):
+        probabilities = np.array(
+            [
+                [[0.25, 0.75], [0.0, 0.0]],
+                [[0.50, 0.50], [0.10, 0.90]],
+            ]
+        )
+        support = np.array([[4, 0], [12, 5]])
+
+        first = _pool_probability_tables(probabilities, support, label="test")
+        second = _pool_probability_tables(probabilities, support, label="test")
+
+        np.testing.assert_allclose(first[0], [0.4375, 0.5625])
+        np.testing.assert_allclose(first[1], [0.10, 0.90])
+        np.testing.assert_array_equal(first, second)
+
     def test_fast_drv_summary_returns_finite_values(self):
         _, survey = make_toy_survey()
         np.random.seed(123)
@@ -172,6 +561,123 @@ class BinaryPopulationInferenceTests(unittest.TestCase):
         theta = np.array([0.6, 0.1])
         self.assertEqual(like(theta), like(theta))
 
+    def test_equal_epoch_batching_matches_per_template_reference(self):
+        _, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        like = MixtureCRNLikelihood(
+            survey,
+            observed,
+            n_single_bank=512,
+            n_binary_bank=512,
+            bank_seed=127,
+            parameter_names=("f_bin", "pi"),
+        )
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.0, "eta": -0.5}
+
+        arrays = like._binary_intrinsic_arrays(params)
+        reference_drv = np.empty(like.binary_bank.size, dtype=float)
+        reference_dt = np.empty(like.binary_bank.size, dtype=float)
+        template_indices = np.asarray(
+            like.binary_bank.cadence.template_indices,
+            dtype=np.int32,
+        )
+        for template_index in np.unique(template_indices):
+            indices = np.flatnonzero(template_indices == template_index)
+            t_array = np.asarray(like.template_mjds[template_index], dtype=float)
+            rv_errors = np.asarray(
+                like.template_rv_errors[template_index],
+                dtype=float,
+            )
+            noise = np.column_stack(
+                [
+                    like.binary_bank.cadence.noise_unit[int(index)]
+                    for index in indices
+                ]
+            )
+            rv_obs = like.population.rvcurve(
+                t_array[:, None],
+                arrays["P"][indices],
+                arrays["Tp"][indices],
+                arrays["e"][indices],
+                arrays["omega_deg"][indices],
+                0.0,
+                arrays["K1"][indices],
+                0.0,
+                SB2=False,
+            )
+            rv_obs = rv_obs + noise * rv_errors[:, None]
+            columns = np.arange(indices.size)
+            maximum = np.nanargmax(rv_obs, axis=0)
+            minimum = np.nanargmin(rv_obs, axis=0)
+            reference_drv[indices] = (
+                rv_obs[maximum, columns] - rv_obs[minimum, columns]
+            )
+            reference_dt[indices] = np.abs(
+                t_array[maximum] - t_array[minimum]
+            )
+
+        batched_drv = like.simulate_binary_drv(params)
+        actual_drv, actual_dt = like.simulate_binary_drv_and_dt_at_max(params)
+        assigned_epoch_counts = np.asarray(
+            [
+                len(like.template_mjds[int(template_index)])
+                for template_index in template_indices
+            ],
+            dtype=int,
+        )
+
+        self.assertEqual(
+            len(like.binary_cadence_groups),
+            np.unique(assigned_epoch_counts).size,
+        )
+        np.testing.assert_allclose(
+            batched_drv,
+            reference_drv,
+            rtol=0.0,
+            atol=1e-10,
+        )
+        np.testing.assert_allclose(
+            actual_drv,
+            reference_drv,
+            rtol=0.0,
+            atol=1e-10,
+        )
+        np.testing.assert_array_equal(actual_dt, reference_dt)
+
+    def test_mixture_crn_histograms_account_for_low_and_high_tails(self):
+        _, survey = make_toy_survey()
+        observed = np.array([0.0, 0.5, 2.0, 12.0, 1500.0])
+        like = MixtureCRNLikelihood(
+            survey,
+            observed,
+            n_single_bank=64,
+            n_binary_bank=64,
+            bank_seed=124,
+            parameter_names=("f_bin", "pi"),
+        )
+
+        self.assertEqual(like.bins[0], 0.0)
+        self.assertTrue(np.isposinf(like.bins[-1]))
+        self.assertEqual(int(like.n_real.sum()), len(observed))
+        self.assertEqual(int(like.single_hist.sum()), like.single_bank.size)
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.0, "eta": -0.5}
+        _, binary_probability = like.component_probabilities(params)
+        np.testing.assert_allclose(binary_probability.sum(), 1.0)
+
+    def test_mixture_crn_rejects_invalid_observed_drv_values(self):
+        _, survey = make_toy_survey()
+        for invalid in (-1.0, np.nan, np.inf, -np.inf):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ValueError, "finite non-negative"):
+                    MixtureCRNLikelihood(
+                        survey,
+                        np.array([1.0, invalid]),
+                        n_single_bank=8,
+                        n_binary_bank=8,
+                        bank_seed=125,
+                        parameter_names=("f_bin", "pi"),
+                    )
+
     def test_mixture_crn_fbin_is_linear_mixture_weight(self):
         _, survey = make_toy_survey()
         observed = np.array([5.0, 12.0, 25.0, 40.0])
@@ -242,6 +748,49 @@ class BinaryPopulationInferenceTests(unittest.TestCase):
         theta = np.array([0.55, 0.1])
         self.assertEqual(averaged(theta), single(theta))
 
+    def test_unequal_global_banks_match_count_weighted_pooling(self):
+        _, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        likelihoods = [
+            MixtureCRNLikelihood(
+                survey,
+                observed,
+                n_single_bank=size,
+                n_binary_bank=size,
+                bank_seed=seed,
+                parameter_names=("f_bin", "pi"),
+            )
+            for size, seed in ((32, 401), (96, 402))
+        ]
+        averaged = AveragedMixtureCRNLikelihood(
+            survey,
+            observed,
+            likelihoods=likelihoods,
+            parameter_names=("f_bin", "pi"),
+        )
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.0, "eta": -0.5}
+
+        expected_single = np.average(
+            [likelihood.single_probability for likelihood in likelihoods],
+            axis=0,
+            weights=[likelihood.single_bank.size for likelihood in likelihoods],
+        )
+        bank_binary = [
+            likelihood.component_probabilities(params)[1]
+            for likelihood in likelihoods
+        ]
+        expected_binary = np.average(
+            bank_binary,
+            axis=0,
+            weights=[likelihood.binary_bank.size for likelihood in likelihoods],
+        )
+        actual_single, actual_binary = averaged.component_probabilities(params)
+
+        np.testing.assert_allclose(actual_single, expected_single)
+        np.testing.assert_allclose(actual_binary, expected_binary)
+        np.testing.assert_allclose(actual_single.sum(), 1.0)
+        np.testing.assert_allclose(actual_binary.sum(), 1.0)
+
     def test_baseline_conditioned_likelihood_is_deterministic(self):
         _, survey = make_toy_survey()
         observed = np.array([5.0, 12.0, 25.0, 40.0])
@@ -292,6 +841,55 @@ class BinaryPopulationInferenceTests(unittest.TestCase):
         self.assertEqual(summary[0]["observed_count"], 2)
         self.assertEqual(summary[1]["observed_count"], 2)
         self.assertEqual(summary[2]["observed_count"], 0)
+
+    def test_conditioned_pooling_uses_per_cell_support_and_allows_empty_bank_cells(self):
+        _, survey = make_toy_survey()
+        observed = np.array([5.0, 12.0, 25.0, 40.0])
+        observed_baselines = np.array([30.0, 100.0, 120.0, 30.0])
+        likelihoods = [
+            MixtureCRNLikelihood(
+                survey,
+                observed,
+                n_single_bank=size,
+                n_binary_bank=size,
+                bank_seed=seed,
+                parameter_names=("f_bin", "pi"),
+                bins=np.array([0.0, 10.0, 30.0, np.inf]),
+            )
+            for size, seed in ((1, 501), (128, 502))
+        ]
+        averaged = AveragedMixtureCRNLikelihood(
+            survey,
+            observed,
+            likelihoods=likelihoods,
+            parameter_names=("f_bin", "pi"),
+            condition_by="baseline_days",
+            baseline_bins=np.array([0.0, 50.0, 150.0, np.inf]),
+            observed_baseline_days=observed_baselines,
+        )
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.0, "eta": -0.5}
+        bank_binary = [
+            averaged.bank_binary_probability(index, params)
+            for index in range(averaged.n_banks)
+        ]
+        expected_binary = _pool_probability_tables(
+            bank_binary,
+            [state.binary_counts for state in averaged.conditioned_bank_states],
+            label="test",
+        )
+
+        _, actual_binary = averaged.component_probabilities(params)
+        np.testing.assert_allclose(actual_binary, expected_binary)
+        needed = averaged.observed_counts > 0
+        np.testing.assert_allclose(averaged.single_probability[needed].sum(axis=1), 1.0)
+        np.testing.assert_allclose(actual_binary[needed].sum(axis=1), 1.0)
+        self.assertTrue(
+            any(
+                np.any(state.single_counts[needed] == 0)
+                or np.any(state.binary_counts[needed] == 0)
+                for state in averaged.conditioned_bank_states
+            )
+        )
 
     def test_four_bank_baseline_conditioned_likelihood_is_finite(self):
         _, survey = make_toy_survey()
@@ -652,6 +1250,50 @@ class BinaryPopulationInferenceTests(unittest.TestCase):
 
         theta = np.array([0.55, 0.1])
         self.assertEqual(averaged(theta), single(theta))
+
+    def test_unequal_pairwise_banks_match_count_weighted_pooling(self):
+        _, survey = make_toy_survey()
+        observed = np.array([[5.0], [12.0], [25.0], [40.0]])
+        config = PairwiseSummaryConfig(
+            delta_time_bins=(0.0, np.inf),
+            response="max_abs_delta_rv",
+            response_bins=(0.0, 10.0, 20.0, 50.0, np.inf),
+        )
+        likelihoods = [
+            PairwiseMixtureCRNLikelihood(
+                survey,
+                observed,
+                n_single_bank=size,
+                n_binary_bank=size,
+                bank_seed=seed,
+                parameter_names=("f_bin", "pi"),
+                config=config,
+                require_observed_support=False,
+            )
+            for size, seed in ((24, 601), (72, 602))
+        ]
+        averaged = AveragedMixtureCRNPairwiseLikelihood(
+            survey,
+            observed,
+            likelihoods=likelihoods,
+            parameter_names=("f_bin", "pi"),
+            config=config,
+        )
+        params = {"f_bin": 0.6, "pi": 0.1, "kappa": 0.0, "eta": -0.5}
+        binary_results = [
+            likelihood.binary_component_probability(params)
+            for likelihood in likelihoods
+        ]
+        expected_binary = _pool_probability_tables(
+            [probability for probability, _ in binary_results],
+            [support for _, support in binary_results],
+            label="test",
+        )
+
+        actual_single, actual_binary = averaged.component_probabilities(params)
+        np.testing.assert_allclose(actual_single.sum(axis=1), 1.0)
+        np.testing.assert_allclose(actual_binary, expected_binary)
+        np.testing.assert_allclose(actual_binary.sum(axis=1), 1.0)
 
     def test_run_averaged_mixture_crn_mcmc_smoke_shape(self):
         pop, survey = make_toy_survey()
