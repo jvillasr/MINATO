@@ -268,23 +268,28 @@ The CRN likelihoods can consume a caller-supplied empirical RV-bias sampler for
 binary epochs. MINATO does not ship or define any study-specific kernel data;
 the caller owns the calibration table, filtering, binning, and out-of-range
 fallback policy. During the likelihood evaluation MINATO computes
-`abs(RV_2,true - RV_1,true)`, calls the supplied sampler, adds the returned
-`Delta RV_blend` to the simulated primary epoch RV, and only then computes
-`dRV_max` or pairwise summaries.
+the signed `RV_2,true - RV_1,true` separation, calls the supplied sampler, adds
+the returned `Delta RV_blend` to the simulated primary epoch RV, and only then
+computes `dRV_max`, its defining-epoch separation, or pairwise summaries.
 
-The sampler must either be callable or provide
-`sample_bias(abs_delta_v, f_secondary, u)`, where `u` is the fixed CRN
-unit-uniform draw for each epoch. If the sampler needs an effective secondary
-flux fraction, pass `blending_flux_fraction` as a scalar or as a callable that
+Signed kernels should provide
+`sample_bias_signed(delta_v, f_secondary, u)`, where `u` is the fixed CRN
+unit-uniform draw for each epoch. This supports kernels conditioned on
+`abs(delta_v)` while preserving the current orbital direction when applying
+the sampled correction. Existing callable kernels and objects providing
+`sample_bias(abs_delta_v, f_secondary, u)` remain supported and continue to
+receive absolute separation. If the sampler needs an effective secondary flux
+fraction, pass `blending_flux_fraction` as a scalar or as a callable that
 accepts `intrinsic_arrays`, `system_index`, and `n_epochs`.
 
 ```python
 class MyBlendingKernel:
     metadata = {"source": "my validated calibration table"}
 
-    def sample_bias(self, abs_delta_v, f_secondary, u):
-        # Project-owned lookup/sampling logic goes here.
-        ...
+    def sample_bias_signed(self, delta_v, f_secondary, u):
+        # Project-owned lookup samples beta from abs(delta_v) and f_secondary.
+        beta = ...
+        return beta * delta_v
 
 
 def effective_secondary_flux_fraction(*, intrinsic_arrays, system_index, n_epochs):

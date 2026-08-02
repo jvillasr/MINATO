@@ -48,6 +48,8 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 - Optimise empirical-blending mixture-CRN binary-bank evaluation by grouping
   systems with shared cadence templates while preserving fixed-bank numerical
   outputs [Done][2026-07-11]
+- Preserve signed component separation in empirical-blending CRN kernels while
+  retaining the legacy absolute-separation protocol [Done][2026-08-02]
 - Add an experimental star-balanced pairwise mixture-CRN likelihood with a
   `dRV_max` collapse regression test [Done][2026-07-09]
 - Add and validate the baseline-conditioned joint

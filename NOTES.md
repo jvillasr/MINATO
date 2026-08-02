@@ -1,5 +1,48 @@
 # MINATO Notes
 
+## 2026-08-02 - Integrate signed CRN blending and reconcile old work
+
+Implementation:
+- Manually ported the signed-separation protocol from `c84b51d` onto the newer
+  orbit, histogram, pooling, exact-cadence, and joint-likelihood code. Kernels
+  providing `sample_bias_signed` receive `RV_2,true - RV_1,true`; callable and
+  `sample_bias` kernels continue to receive the absolute separation.
+- Added provenance for the active sampling protocol and applied the signed
+  correction before baseline `dRV_max`, joint `dRV_max`/`dt_at_dRVmax`, and
+  pairwise summaries.
+- Ported genuinely missing mechanics coverage from `b15760c` without
+  cherry-picking its superseded joint implementation: signed joint ordering,
+  joint bank-static execution, and joint-runner end-to-end coverage.
+
+Read-only reconciliation:
+- The old signed-blending worktree's modified `CHANGELOG.md`, `ROADMAP.md`,
+  `mcmc.py`, `mixture_crn.py`, `pairwise_crn.py`, `population.py`, and
+  `test_binary_population.py`, plus its untracked histogram/orbit modules and
+  tests, are all superseded by the focused newer-branch commits and stronger
+  validation now on `develop`. No old-worktree file was altered or removed.
+- The June stash's `.gitignore`, changelog, roadmap, public exports, MCMC,
+  population, survey, early mixture-CRN module, and binary-population tests are
+  all present in expanded committed forms. Its untracked `minato/spdis.py` is
+  superseded by the tracked `minato/contrib/spdis.py`, which also contains the
+  later flux-uncertainty implementation. No stash item was applied or dropped.
+- No unrelated old-worktree or stash change requires porting. The older
+  `b15760c` joint source and general documentation are superseded; its direct
+  one-time-bin marginal check is covered by the current stronger global and
+  baseline-conditioned equivalence tests.
+
+Validation:
+- `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest tests.test_binary_population -v`
+  passed all 49 tests, including legacy/no-blending behaviour, signed direction
+  and amplitude suppression, generated baseline/joint scoring, a signed joint
+  runner, and bank-static joint execution.
+- `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest tests.test_orbits tests.test_histograms tests.test_binary_population -v`
+  passed all 63 focused orbit, histogram, pooling, cadence, joint, legacy, and
+  signed-blending regressions.
+- `PYTHONDONTWRITEBYTECODE=1 MINATO_QUIET=1 .venv/bin/python -m unittest discover -s tests -v`
+  passed 132 tests with one expected opt-in RAVEL smoke test skipped. It
+  emitted the existing single-device JAX, `fork()`, and Matplotlib temporary
+  cache warnings; no test artefact remained in the repository.
+
 ## 2026-08-02 - Reconcile binary-population likelihood corrections
 
 Implementation:
