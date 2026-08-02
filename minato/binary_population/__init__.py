@@ -7,6 +7,12 @@ from .mixture_crn import (
     run_averaged_mixture_crn_mcmc,
     run_mixture_crn_mcmc,
 )
+from .joint_crn import (
+    AveragedJointDrvmaxDtmaxCRNLikelihood,
+    DEFAULT_DT_AT_DRVMAX_BINS,
+    JointDrvmaxDtmaxCRNLikelihood,
+    run_averaged_joint_drvmax_dtmax_crn_mcmc,
+)
 from .pairwise_crn import (
     AveragedMixtureCRNPairwiseLikelihood,
     PairwiseMixtureCRNLikelihood,
@@ -26,11 +32,15 @@ __all__ = [
     "BinarySurveySimulator",
     "run_mcmc",
     "run_averaged_mixture_crn_mcmc",
+    "run_averaged_joint_drvmax_dtmax_crn_mcmc",
     "run_averaged_mixture_crn_pairwise_mcmc",
     "run_mixture_crn_mcmc",
     "AveragedMixtureCRNLikelihood",
+    "AveragedJointDrvmaxDtmaxCRNLikelihood",
     "AveragedMixtureCRNPairwiseLikelihood",
     "MixtureCRNLikelihood",
+    "JointDrvmaxDtmaxCRNLikelihood",
+    "DEFAULT_DT_AT_DRVMAX_BINS",
     "PairwiseMixtureCRNLikelihood",
     "PairwiseSummaryConfig",
     "compute_pairwise_response",

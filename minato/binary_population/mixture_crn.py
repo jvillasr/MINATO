@@ -262,10 +262,12 @@ class BinaryRandomBank:
 
 @dataclass(frozen=True)
 class CadenceGroup:
-    """Bank rows sharing one cadence template, with aligned epoch draws."""
+    """Bank rows sharing one epoch count, with exact per-system cadences."""
 
-    template_index: int
+    epoch_count: int
     system_indices: np.ndarray
+    mjds: np.ndarray
+    rv_errors: np.ndarray
     noise_unit: np.ndarray
     blend_unit: np.ndarray | None = None
 
@@ -416,12 +418,36 @@ def _build_cadence_bank(rng, n_bank, template_mjds) -> CadenceRandomBank:
 
 def _build_cadence_groups(
     cadence: CadenceRandomBank,
+    template_mjds,
+    template_rv_errors,
     blend_unit: tuple[np.ndarray, ...] | None = None,
 ) -> list[CadenceGroup]:
+    """Batch bank rows by epoch count while retaining every exact template.
+
+    ``BinaryPopulation.rvcurve`` accepts a different time array in each
+    matrix column. Grouping by epoch count therefore removes the Python-level
+    loop over unique templates without pooling or approximating their MJDs,
+    RV uncertainties, noise draws, or optional blending draws.
+    """
+
     groups: list[CadenceGroup] = []
     template_indices = np.asarray(cadence.template_indices, dtype=np.int32)
-    for template_index in np.unique(template_indices):
-        system_indices = np.flatnonzero(template_indices == template_index).astype(np.int64)
+    template_epoch_counts = np.asarray(
+        [np.asarray(values).size for values in template_mjds],
+        dtype=np.int32,
+    )
+    system_epoch_counts = template_epoch_counts[template_indices]
+    for epoch_count in np.unique(system_epoch_counts):
+        system_indices = np.flatnonzero(
+            system_epoch_counts == epoch_count
+        ).astype(np.int64)
+        group_template_indices = template_indices[system_indices]
+        mjds = np.column_stack(
+            [template_mjds[int(index)] for index in group_template_indices]
+        )
+        rv_errors = np.column_stack(
+            [template_rv_errors[int(index)] for index in group_template_indices]
+        )
         noise_unit = np.column_stack(
             [cadence.noise_unit[int(index)] for index in system_indices]
         )
@@ -432,8 +458,10 @@ def _build_cadence_groups(
             )
         groups.append(
             CadenceGroup(
-                template_index=int(template_index),
+                epoch_count=int(epoch_count),
                 system_indices=system_indices,
+                mjds=np.asarray(mjds, dtype=float),
+                rv_errors=np.asarray(rv_errors, dtype=float),
                 noise_unit=np.asarray(noise_unit, dtype=float),
                 blend_unit=(
                     None
@@ -544,6 +572,8 @@ class MixtureCRNLikelihood:
         self.binary_bank = binary_bank
         self.binary_cadence_groups = _build_cadence_groups(
             self.binary_bank.cadence,
+            self.template_mjds,
+            self.template_rv_errors,
             blend_unit=self.binary_bank.blend_unit,
         )
         self.bank_seed = bank_seed
@@ -586,6 +616,21 @@ class MixtureCRNLikelihood:
             rv_obs = self.single_bank.cadence.noise_unit[idx] * rv_errors
             d_rv[idx] = float(np.nanmax(rv_obs) - np.nanmin(rv_obs))
         return d_rv
+
+    def _simulate_single_drv_and_dt_at_max(self):
+        """Simulate ``dRV_max`` and the separation of its defining epochs."""
+        d_rv = np.empty(self.single_bank.size, dtype=float)
+        dt_at_max = np.empty(self.single_bank.size, dtype=float)
+        for idx, template_idx in enumerate(self.single_bank.cadence.template_indices):
+            template_idx = int(template_idx)
+            t_array = np.asarray(self.template_mjds[template_idx], dtype=float)
+            rv_errors = np.asarray(self.template_rv_errors[template_idx], dtype=float)
+            rv_obs = self.single_bank.cadence.noise_unit[idx] * rv_errors
+            max_idx = int(np.nanargmax(rv_obs))
+            min_idx = int(np.nanargmin(rv_obs))
+            d_rv[idx] = float(rv_obs[max_idx] - rv_obs[min_idx])
+            dt_at_max[idx] = float(abs(t_array[max_idx] - t_array[min_idx]))
+        return d_rv, dt_at_max
 
     def _binary_intrinsic_arrays(self, params):
         pop = self.population
@@ -698,15 +743,13 @@ class MixtureCRNLikelihood:
             blend_unit=group.blend_unit,
         )
 
-    def simulate_binary_drv(self, params):
+    def _iter_binary_group_observations(self, params):
         arrays = self._binary_intrinsic_arrays(params)
-        d_rv = np.empty(self.binary_bank.size, dtype=float)
         pop = self.population
         for group in self.binary_cadence_groups:
             indices = group.system_indices
-            t_array = np.asarray(self.template_mjds[group.template_index], dtype=float)
-            t_grid = t_array[:, None]
-            rv_errors = np.asarray(self.template_rv_errors[group.template_index], dtype=float)
+            t_grid = group.mjds
+            rv_errors = group.rv_errors
             if self.blending_kernel is None:
                 v1_true = pop.rvcurve(
                     t_grid,
@@ -737,9 +780,28 @@ class MixtureCRNLikelihood:
                     v1_true,
                     v2_true,
                 )
-            rv_obs = v1_true + group.noise_unit * rv_errors[:, None]
+            rv_obs = v1_true + group.noise_unit * rv_errors
+            yield indices, t_grid, rv_obs
+
+    def simulate_binary_drv(self, params):
+        d_rv = np.empty(self.binary_bank.size, dtype=float)
+        for indices, _, rv_obs in self._iter_binary_group_observations(params):
             d_rv[indices] = np.nanmax(rv_obs, axis=0) - np.nanmin(rv_obs, axis=0)
         return d_rv
+
+    def simulate_binary_drv_and_dt_at_max(self, params):
+        """Simulate ``dRV_max`` and the separation of its defining epochs."""
+        d_rv = np.empty(self.binary_bank.size, dtype=float)
+        dt_at_max = np.empty(self.binary_bank.size, dtype=float)
+        for indices, t_grid, rv_obs in self._iter_binary_group_observations(params):
+            columns = np.arange(indices.size)
+            max_indices = np.nanargmax(rv_obs, axis=0)
+            min_indices = np.nanargmin(rv_obs, axis=0)
+            d_rv[indices] = rv_obs[max_indices, columns] - rv_obs[min_indices, columns]
+            dt_at_max[indices] = np.abs(
+                t_grid[max_indices, columns] - t_grid[min_indices, columns]
+            )
+        return d_rv, dt_at_max
 
     def component_probabilities(self, params):
         binary_drv = self.simulate_binary_drv(params)
