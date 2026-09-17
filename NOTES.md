@@ -1,5 +1,36 @@
 # MINATO Notes
 
+## 2026-09-17 - Correct Roche-lobe component assignments
+
+- Confirmed a clean working tree at `870bde6` and, with user approval, pushed
+  the nine existing commits from remote `0350620` to `origin/develop` before
+  editing. This Roche-lobe change is separate from those earlier commits.
+- Independently checked the Eggleton convention against equation (12) of
+  https://www.aanda.org/articles/aa/full_html/2012/01/aa17880-11/aa17880-11.html:
+  the ratio is the lobe-owning star's mass divided by its companion's mass.
+  A standalone scalar calculation with the existing constants gave lobe
+  fractions `0.4400042375326082` (M1) and `0.3207881203346875` (M2), and
+  periods `3.0381893931227433` days before / `1.8912849637808773` days after
+  correction for the requested 20/10 solar-mass, 8/5 solar-radius example.
+- Swapped only the lobe assignments and clarified both helper docstrings.
+  Audited tracked uses: the Eggleton helper has only these two calls;
+  population generation, mixture/joint and pairwise paths use the common
+  guard with `M2=M1*q`. No further convention correction was needed.
+- Added five regression tests, covering the example, equal masses, component
+  exchange, eccentricities 0/0.2/0.6/0.95, margins 0/0.1/0.3, either component
+  limiting the separation, and preservation of already-safe periods. Kepler's
+  law is independently inverted in SI to check both periastron constraints
+  and that the minimum saturates one of them.
+- Before the fix, the five-test class reported seven failing assertions
+  including subtests: the example disagreed, and the secondary-limited case
+  violated its lobe constraint. After the fix,
+  `PYTHONDONTWRITEBYTECODE=1 MINATO_QUIET=1 .venv/bin/python -m unittest tests.test_orbits tests.test_histograms tests.test_binary_population -q`
+  passed all 68 tests. Existing multiprocessing `fork()` deprecation warnings
+  were emitted. No temporary paths or datasets were created.
+- The public API, RV amplitudes, mass-ratio clipping, eccentricity floor and
+  other sampling policies remain unchanged. Updated the module README and
+  Unreleased changelog; user approved completion, commit and push on 2026-09-17.
+
 ## 2026-08-02 - Integrate signed CRN blending and reconcile old work
 
 Implementation:

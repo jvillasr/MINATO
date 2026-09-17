@@ -32,6 +32,79 @@ from minato.binary_population.mixture_crn import (
 from minato.binary_population.orbits import orbital_semi_amplitudes_kms
 
 
+class TestRocheGuard(unittest.TestCase):
+    def setUp(self):
+        self.pop = BinaryPopulation()
+        self.pop.roche_margin_frac = 0.1
+
+    @staticmethod
+    def lobe_fraction(mass, companion_mass):
+        # Independent form of Eggleton's expression: q = M_star/M_companion.
+        x = np.cbrt(np.asarray(mass) / np.asarray(companion_mass))
+        return 0.49 / (0.6 + np.log1p(x) / x**2)
+
+    def assert_periastron_constraints(self, period, m1, m2, r1, r2, e):
+        # Invert Kepler's law in SI, retaining the guard's solar constants.
+        a = np.cbrt(6.67430e-11 * (np.asarray(m1) + m2) * 1.989e30
+                    * (np.asarray(period) * 86400 / (2 * np.pi))**2) / 6.957e8
+        periastron = a * (1 - np.asarray(e))
+        fill1 = (1 + self.pop.roche_margin_frac) * np.asarray(r1) / (
+            periastron * self.lobe_fraction(m1, m2))
+        fill2 = (1 + self.pop.roche_margin_frac) * np.asarray(r2) / (
+            periastron * self.lobe_fraction(m2, m1))
+        self.assertTrue(np.all(fill1 <= 1 + 2e-14))
+        self.assertTrue(np.all(fill2 <= 1 + 2e-14))
+        return np.maximum(fill1, fill2)
+
+    def test_unequal_mass_reproduction(self):
+        period = self.pop._roche_safe_Pmin_days(20, 10, 8, 5, 0)
+        self.assertAlmostEqual(float(period), 1.8912849637808773, places=12)
+        filling = self.assert_periastron_constraints(period, 20, 10, 8, 5, 0)
+        np.testing.assert_allclose(filling, 1, rtol=2e-14)
+
+    def test_equal_masses(self):
+        r1, r2 = np.array([8., 5.]), np.array([5., 8.])
+        fraction = 0.49 / (0.6 + np.log(2))
+        separation = 1.1 * 8 / fraction * 6.957e8
+        expected = 2 * np.pi * np.sqrt(separation**3 / (6.67430e-11 * 40 * 1.989e30)) / 86400
+        period = self.pop._roche_safe_Pmin_days(20, 20, r1, r2, 0)
+        np.testing.assert_allclose(period, expected, rtol=2e-14)
+        self.assert_periastron_constraints(period, 20, 20, r1, r2, 0)
+
+    def test_component_exchange(self):
+        m1, m2 = np.array([20., 8., 12.]), np.array([10., 16., 12.])
+        r1, r2 = np.array([8., 3., 4.]), np.array([5., 9., 7.])
+        e = np.array([0., 0.4, 0.8])
+        period = self.pop._roche_safe_Pmin_days(m1, m2, r1, r2, e)
+        swapped = self.pop._roche_safe_Pmin_days(m2, m1, r2, r1, e)
+        np.testing.assert_allclose(period, swapped, rtol=2e-14)
+        self.assert_periastron_constraints(period, m1, m2, r1, r2, e)
+
+    def test_eccentricity_and_margin(self):
+        e = np.array([0., 0.2, 0.6, 0.95])
+        for margin in (0., 0.1, 0.3):
+            for r1, r2 in ((8., 5.), (3., 9.)):
+                with self.subTest(margin=margin, radii=(r1, r2)):
+                    self.pop.roche_margin_frac = margin
+                    period = self.pop._roche_safe_Pmin_days(20, 10, r1, r2, e)
+                    circular = self.pop._roche_safe_Pmin_days(20, 10, r1, r2, 0)
+                    np.testing.assert_allclose(period, circular / (1 - e)**1.5, rtol=2e-14)
+                    filling = self.assert_periastron_constraints(period, 20, 10, r1, r2, e)
+                    np.testing.assert_allclose(filling, 1, rtol=2e-14)
+
+    def test_period_clamp_preserves_safe_periods(self):
+        m1, q, e = np.array([20., 10., 16.]), np.array([0.5, 2., 0.75]), np.array([0., 0.5, 0.8])
+        m2 = m1 * q
+        r1, r2 = self.pop._estimate_radius(m1), self.pop._estimate_radius(m2)
+        minimum = self.pop._roche_safe_Pmin_days(m1, m2, r1, r2, e)
+        drawn = minimum * np.array([0.5, 1., 2.])
+        guarded, count = self.pop._enforce_roche_guard_on_P(m1, q, e, drawn)
+        self.assertEqual(count, 1)
+        np.testing.assert_allclose(guarded, minimum * [1., 1., 2.], rtol=2e-14)
+        np.testing.assert_array_equal(guarded[1:], drawn[1:])
+        self.assert_periastron_constraints(guarded, m1, m2, r1, r2, e)
+
+
 def make_toy_survey():
     pop = BinaryPopulation()
     pop.roche_guard_report = False

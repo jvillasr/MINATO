@@ -325,6 +325,24 @@ non-pickleable local callables.
   `walker x bank` likelihood tasks when fitting several population parameters
   with multiple fixed CRN banks.
 
+### Roche-lobe period guard
+
+The population mass ratio is `q = M2/M1`. Eggleton's lobe fraction takes
+`M_star/M_companion`, so component 1 uses `1/q` and component 2 uses `q`.
+The guard applies these fractions at periastron and requires
+`RL_i >= (1 + roche_margin_frac) * R_i` for both components. This retains the
+existing periastron approximation for eccentric systems. For fixed masses
+and radii, the minimum period scales as `(1-e)^(-3/2)` within the existing
+eccentricity floor.
+
+For `M1=20`, `M2=10` (solar masses), `R1=8`, `R2=5` (solar radii), `e=0`
+and `roche_margin_frac=0.1`, the corrected minimum is `1.891284964` days;
+the reversed component assignment gave `3.038189393` days. Equal-mass
+results are unchanged. Depending on which radius limits the separation,
+the correction can increase or decrease the minimum for unequal masses.
+Population generation and the mixture/joint and pairwise likelihoods share
+this guard; existing saved populations are not modified.
+
 ## Notes
 
 - The old `binary_simulator` name is deprecated; keep using `minato.binary_population` going forward.

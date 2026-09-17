@@ -121,14 +121,15 @@ class BinaryPopulation:
     # -------------------- Roche limit guard --------------------
     @staticmethod
     def _eggleton_rl_over_a(q):
-        """Roche-lobe radius over separation for the primary (M2/M1=q)."""
+        """Return RL/separation for q = M_star/M_companion (Eggleton)."""
         q23 = np.power(q, 2.0 / 3.0)
         return 0.49 * q23 / (0.6 * q23 + np.log(1.0 + np.power(q, 1.0 / 3.0)))
 
     def _roche_safe_Pmin_days(self, M1, M2, R1, R2, e):
         """
-        Vectorized: minimum orbital period (days) so both stars underfill RLs
-        at periastron by (1+roche_margin_frac).
+        Vectorised minimum period (days) satisfying
+        RL_i(periastron) >= (1 + roche_margin_frac) * R_i for both stars.
+        Uses Eggleton's lobe fractions at the periastron separation.
         M in Msun, R in Rsun, e array-like.
         """
         G = 6.67430e-8
@@ -143,8 +144,8 @@ class BinaryPopulation:
         e = np.asarray(e, float)
         q = np.clip(M2 / M1, 1e-6, 1e6)
 
-        rl1 = self._eggleton_rl_over_a(q)        # RL1/a
-        rl2 = self._eggleton_rl_over_a(1.0 / q)  # RL2/a
+        rl1 = self._eggleton_rl_over_a(1.0 / q)  # M1/M2: RL1/separation
+        rl2 = self._eggleton_rl_over_a(q)        # M2/M1: RL2/separation
 
         a_peri_req = np.maximum(R1 / rl1, R2 / rl2) * (1.0 + self.roche_margin_frac)  # in Rsun
         a = a_peri_req / np.maximum(1.0 - e, 1e-6)                                    # semi-major axis (Rsun)

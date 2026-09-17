@@ -40,6 +40,8 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 - Verify `binary_population` MCMC batching behaves as expected (correct normalization) and improves wall-time performance [][]
 - Correct and analytically test eccentric RV semi-amplitudes, and require
   complete low/high support in non-negative RV-summary histograms [Done][2026-07-23]
+- Correct Roche-lobe component assignments and validate equal/unequal masses,
+  component exchange, eccentricity and periastron margins [Done][2026-09-17]
 - Make multi-bank likelihoods exactly equivalent to one concatenated
   population for unequal global, conditioned and pairwise support, with
   deterministic and empty-cell regression tests [Done][2026-07-24]

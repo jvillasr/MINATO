@@ -210,6 +210,9 @@
 * The SB1 and SB2 `ravel` tutorials now include an upfront note on setting `XLA_FLAGS` before importing `minato.ravel` on shared CPU servers.
 
 ### Fixed
+* [2026-09-17] Corrected the component mass ratios in the Roche-lobe period
+  guard. Unequal-mass binaries now use the appropriate lobe for each star,
+  enforcing the configured margin at periastron; equal-mass results are unchanged.
 * [2026-08-02] Empirical RV-blending kernels can consume the signed
   `RV_2,true - RV_1,true` separation through `sample_bias_signed`, preserving
   correction direction before baseline, joint, and pairwise summaries.
