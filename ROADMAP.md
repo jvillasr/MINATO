@@ -42,6 +42,8 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
   complete low/high support in non-negative RV-summary histograms [Done][2026-07-23]
 - Correct Roche-lobe component assignments and validate equal/unequal masses,
   component exchange, eccentricity and periastron margins [Done][2026-09-17]
+- Document how to reuse isochrone radii for both stars in the Roche-lobe check
+  during orbit generation and inference [Done][2026-11-05]
 - Make multi-bank likelihoods exactly equivalent to one concatenated
   population for unequal global, conditioned and pairwise support, with
   deterministic and empty-cell regression tests [Done][2026-07-24]

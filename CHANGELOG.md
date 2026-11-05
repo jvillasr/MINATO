@@ -99,6 +99,9 @@
 * Added missing dependencies for `ravel` (`corner`, `exojax`) to `minato_env.yml` and `pyproject.toml`.
 
 ### Changed
+* [2026-11-05] The binary population guide shows how to reuse the stellar model
+  radii from synthetic spectrum scaling in the Roche-lobe check for orbit
+  generation and inference.
 * [2026-07-16] SPAN profile plots now use the unscaled difference from the
   global chi-square minimum, shared one- and two-parameter likelihood-ratio
   thresholds, shape-preserving profile interpolation, and reduced chi-square

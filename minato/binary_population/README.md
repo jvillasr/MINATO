@@ -343,6 +343,59 @@ the correction can increase or decrease the minimum for unequal masses.
 Population generation and the mixture/joint and pairwise likelihoods share
 this guard; existing saved populations are not modified.
 
+By default, MINATO estimates each component's radius from its mass using
+`R/R_sun = (M/M_sun)**0.64`. If you already use an isochrone (a stellar model
+table at a given age) to scale synthetic spectra, use the same lookup for the
+Roche check with `BinaryPopulation.attach_iso_radius`.
+
+The lookup takes a single stellar mass in solar masses and a log age
+(`log10(age in years)`). It returns `(teff, logg, radius)` for effective
+temperature, log surface gravity and radius in solar radii. The guard uses the
+third value and calls the lookup separately for the primary and secondary. A
+scalar `age_source` gives both stars the same fixed age. Make sure the table
+covers that age and the mass range of both components. With the default limits,
+the table needs to cover 0.08 to 20 solar masses.
+
+This example uses a fixed log age of `6.8` (about 6.3 million years) and runs a
+short fit using the observed survey cadence.
+
+```python
+import numpy as np
+import pandas as pd
+from minato.binary_population import BinaryPopulation, BinarySurveySimulator, run_mcmc
+from minato.synthetic import IsochroneBank
+
+# Use the same isochrone bank as for spectrum scaling.
+bank = IsochroneBank("path/to/isochrones")
+
+
+def lookup_stellar_parameters(mass, log_age):
+    point = bank.interpolate(mass=mass, log_age=log_age)
+    return point.teff, point.logg, point.radius
+
+
+pop = BinaryPopulation()
+pop.attach_iso_radius(lookup_stellar_parameters, age_source=6.8)
+
+orbits = pop.generate_intrinsic_sample_vectorized(N=100, f_bin=1.0)
+
+survey = BinarySurveySimulator(pop)
+coverage_df = pd.read_csv("path/to/coverage.csv")  # Columns ID, MJD and mean_rv_er
+survey.load_data(coverage_df)
+dRV_real = np.loadtxt("path/to/dRV_max_values.txt", ndmin=1)
+sampler = run_mcmc(
+    pop,
+    survey,
+    dRV_real=dRV_real,
+    N_sim=256,
+    nsteps=30,
+    pool_kind="none",
+)
+```
+
+Reuse the configured `pop` in the survey and the inference call so the orbits
+drawn during the fit use the same radii and Roche check as `orbits`.
+
 ## Notes
 
 - The old `binary_simulator` name is deprecated; keep using `minato.binary_population` going forward.
