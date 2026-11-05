@@ -50,3 +50,11 @@ __all__ = [
     "log_likelihood",
     "log_posterior",
 ]
+
+# Experimental, opt-in joint survey-response inference.
+from .joint_outcomes import (
+    OutcomeAxis, OutcomeBank, JointSurveyOutcomeLikelihood,
+    integrate_mass_ratio_response, mass_ratio_efficiency,
+)
+__all__ += ["OutcomeAxis", "OutcomeBank", "JointSurveyOutcomeLikelihood",
+            "integrate_mass_ratio_response", "mass_ratio_efficiency"]

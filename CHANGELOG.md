@@ -1,5 +1,6 @@
 ## [Unreleased]
 ### Added
+* [2026-09-18] Added an experimental, opt-in joint survey-outcome likelihood for RV statistics, blind period-search results and optional mass-ratio measurements, with explicit missing outcomes, pre-guard importance weights and analytic assumed q-selection/error integration with a configurable low-q recovery cutoff. Existing inference defaults are unchanged; scientific convergence and selection validation remain required.
 * [2026-07-29] Added a count-pooled joint mixture-CRN likelihood for
   `P(dRV_max, dt_at_dRV_max | baseline_bin, theta)`. The public averaged
   runner supports global or baseline-conditioned scoring, complete

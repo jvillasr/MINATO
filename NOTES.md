@@ -1468,3 +1468,40 @@ Measurement plan:
 - Do one cold run and one immediate hot run; compare hot runs for throughput
 - Once the best chain/device setup is identified on the smoke subset, rerun on all 10 binaries
 - If the production line list is longer than the tutorial 9-line bundle, do one follow-up spot check with that longer list before fixing defaults
+
+
+### 2026-09-18 — experimental joint survey-response branch
+
+Created `feature/joint-rv-period-inference` from clean develop a1f0a5c.
+Added `joint_outcomes.py`, opt-in exports, documentation and ten numerical tests.
+Existing 54 binary-population tests pass. New tests check dependence (redundant
+periods add no likelihood), normalisation, missing/unsupported outcomes,
+importance weights and exact q-response marginalisation without inflated ESS.
+No default/API behaviour changed. Work remains uncommitted pending review.
+
+NGC 346 caller builds four independent balanced banks: 14,400 binaries and
+14,400 singles total, archive+20 distinct nights, accepted primary-RV-plus-noise
+errors/masks, native MINATO population with direct period power law, eta=-0.4,
+and proxy Roche guard. Blind MINATO/AS5 periods use FAP <0.1%. Observed control
+uses physical-radius guard, so this forecast is not a model-identical test.
+Independent native-model holdout and split-bank checks are in the proposal
+project under `simulations/p118_cadence/joint_outcome_inference`.
+
+Initial random q-response marks exposed empty response cells; the current
+implementation integrates the authorised q ramp (0 at q=.3, maxima .25/.5/1)
+and Gaussian sigma_q=.05 exactly. Observed hypothetical q measurements retain
+one nested random selection draw. No true-period correctness gate is applied.
+First joint forecast uses coarse RV/time/period/q bins, hence compare against
+its own baseline, not the previous finer SDSS likelihood. Full coverage and
+bin/grid convergence remain required before a publication claim.
+
+Experimental joint-response update (2026-09-18): `integrate_mass_ratio_response` accepts `minimum_q` (default 0.3 unchanged), allowing the authorised NGC 346 q=0.1 recovery-ramp sensitivity test. Fine Gaussian q bins retain both infinite tails and preserve missing probabilities and source weights.
+Validation: 11 focused joint-outcome tests pass, including low-q selection weights, fine-bin normalisation and unchanged default response. No commit created; the existing experimental branch remains uncommitted.
+
+### 2026-11-05 - experimental feature preservation
+
+The initial joint-outcome implementation is approved for a feature-branch
+commit as experimental, with scientific validation and API review still open.
+Using the NGC 346 proposal's Pixi Python with `-B -m unittest discover -s tests`,
+the `test_joint_outcomes.py` suite passed 11 tests and the
+`test_binary_population.py` suite passed 54 tests.

@@ -347,3 +347,36 @@ this guard; existing saved populations are not modified.
 
 - The old `binary_simulator` name is deprecated; keep using `minato.binary_population` going forward.
 - Dependencies: NumPy, pandas, kepler, emcee. In the project’s conda environment you can run examples with `mamba run -n minato python your_script.py`.
+
+
+## Experimental joint survey outcomes
+
+`JointSurveyOutcomeLikelihood` in `joint_outcomes.py` accepts forward-measured
+`OutcomeBank` rows and `OutcomeAxis` bins. RV amplitude, timing, blind measured
+period and optional measured mass ratio form one joint categorical outcome per
+star. NaN periods/q occupy explicit missing-outcome bins. Do not multiply a
+period likelihood by an RV-summary likelihood from the same measurements.
+
+The binary response bank carries raw (pre-Roche-mapping) log10 period, intrinsic
+q and the normalised joint proposal log density. Self-normalised importance
+weights support direct log-period and q power laws in pi/kappa; all other latent
+distributions, quality masks and selection rules must be fixed. Include aliases,
+non-detections and false alarms from the same blind pipeline as the data; never
+select measured periods by knowing whether they match injected truth.
+
+`integrate_mass_ratio_response` analytically integrates a linear q-selection
+ramp and Gaussian measurement error into missing/q-bin probabilities. The ramp
+is a sensitivity-test assumption, not a calibrated SB2 selection model. Keep
+both Gaussian tails in the q-bin bounds. Splitting outcomes retains the original
+bank source identity for effective-sample-size diagnostics.
+
+No implicit probability floor is applied: unsupported observed cells yield
+minus infinity. Validate support, independent-bank stability, parameter grids,
+binning and repeated independent synthetic recoveries before scientific use.
+Dropping axes exactly marginalises the same bank. The returned value is a
+likelihood; specify priors in the calling inference workflow. Existing CRN
+likelihoods and default behaviour are unchanged.
+
+Validation: `python -m unittest discover -s tests -p test_joint_outcomes.py`.
+
+Experimental joint-response update (2026-09-18): `integrate_mass_ratio_response` accepts `minimum_q` (default 0.3 unchanged), allowing the authorised NGC 346 q=0.1 recovery-ramp sensitivity test. Fine Gaussian q bins retain both infinite tails and preserve missing probabilities and source weights.

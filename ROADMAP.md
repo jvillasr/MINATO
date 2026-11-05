@@ -102,3 +102,10 @@ Example: `- Add smoke-test script [Done][2025-12-15]`
 - Add a `binary_population` survey-coverage generator that can create simulated `ID`/`MJD`/`mean_rv_er` cadence tables from a high-level survey design, so users do not need to hand-build coverage inputs before calling `BinarySurveySimulator.load_data(...)` [][]
 - SED fitting module (from README planned features) [][]
 - Automated spectral classification tooling (from README planned features) [][]
+
+
+### Joint RV/period/q inference (experimental)
+- Implement one-outcome-per-system response banks with explicit missing periods/q and pre-guard importance weights [STARTED][2026-09-18]
+  - Initial implementation and numerical/regression tests complete; branch `feature/joint-rv-period-inference`.
+  - Acceptance: review API, repeated synthetic coverage, bank/bin/grid convergence and recoverability assumptions before promotion.
+  - NGC 346 first forecast and checks are kept in the proposal project, not the library repository.
